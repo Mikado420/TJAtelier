@@ -975,7 +975,9 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .list .course-item { box-shadow: inset 4px 0 0 var(--cc, var(--accent)); }
 .list .course-item.current { box-shadow: inset 4px 0 0 var(--cc, var(--accent)), inset 0 0 0 1.5px var(--cc, var(--accent)); }
 .cd-easy { --cc: var(--c-easy); } .cd-normal { --cc: var(--c-normal); } .cd-hard { --cc: var(--c-hard); } .cd-oni { --cc: var(--c-oni); } .cd-edit { --cc: var(--c-edit); }
-.hdx-acts { position: relative; margin-top: auto; padding-top: 8px; display: grid; grid-template-columns: 1fr 1.7fr; gap: 8px; }
+.hdx-acts { position: relative; margin-top: auto; padding-top: 8px; display: grid; grid-template-columns: 0.8fr 1fr 1.6fr; gap: 6px; }
+.hdx-an { background: var(--btn) !important; color: #fff; font-size: 13px !important; }
+.hdx-an svg { width: 16px; height: 16px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; }
 .hdx-acts button, .hdx-empty button { --bh: clamp(40px, 12vh, 50px); height: var(--bh); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 15px; font-weight: 900; --sk: calc(var(--bh) * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
 .hdx-edit { background: var(--deep) !important; color: #fff; }
 .hdx-play { background: #fff !important; color: #000 !important; }
@@ -1314,3 +1316,23 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .pause-menu .pmode button:first-child { border-radius: 10px 0 0 10px; }
 .pause-menu .pmode button:last-child { border-radius: 0 10px 10px 0; }
 .pause-menu .pmode button.on { background: var(--accent); color: #fff; }
+/* ---------- 譜面分析 ---------- */
+.an-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.an-tabs button { padding: 7px 12px; font-size: 13px; font-weight: 800; border-radius: 0; background: var(--btn); color: #fff; --sk: calc(32px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); opacity: 0.7; }
+.an-tabs button.on { opacity: 1; box-shadow: inset 0 -3px 0 #fff; }
+.an-tabs .hd-easy { background: var(--c-easy); }
+.an-tabs .hd-normal { background: var(--c-normal); }
+.an-tabs .hd-hard { background: var(--c-hard); }
+.an-tabs .hd-oni { background: var(--c-oni); }
+.an-tabs .hd-edit { background: var(--c-edit); }
+.an-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 4px 0; }
+.an-list dt { color: var(--sub); font-size: 13px; font-weight: 700; padding-top: 1px; }
+.an-list dd { margin: 0; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.an-list dd small { color: var(--sub); font-size: 12px; font-weight: 500; }
+.an-graph svg { display: block; width: 100%; height: 120px; background: var(--deep); }
+.an-area { fill: rgba(77, 159, 190, 0.25); }
+.an-line { fill: none; stroke: var(--accent-hi); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.an-avg { stroke: #fff; stroke-opacity: 0.6; stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.an-axis { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--sub); margin-top: 3px; }
+.an-sim { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; background: var(--inp); font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.an-sim b { color: var(--accent-hi); }

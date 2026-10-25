@@ -18,6 +18,7 @@ import { DIVISORS, Editor, type Tool } from './editor/editor';
 import { EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow } from './editor/view';
 import { loadFiles, type AudioFile } from './io/load';
 import { encodeSJIS } from './chart/sjis';
+import { analyzeCourse, simulateRolls, type Analysis } from './chart/analyze';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart, loadHitSound, saveHitSound } from './io/storage';
@@ -62,6 +63,8 @@ const settings = {
   passiveTouch: false,
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
+  /** 譜面分析: 連打・風船のシミュレーションの秒速（打/秒） */
+  rollRate: 15,
   /** タッチ用の中央のドンの帯の幅 */
   donWidth: 0.6,
   /** TJA のテキストを太字で表示する */
@@ -454,6 +457,7 @@ const ICON: Record<string, string> = {
   zip: '<path d="M6 3h9l3 3v15H6z"/><path d="M11 3v2h2v2h-2v2h2v2h-2v2"/>',
   copy: '<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>',
   metro: '<path d="M9 3h6l4 18H5z"/><path d="M12 16 18 6"/><path d="M7.5 15h9"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
 };
 type Tile = { label: string; icon?: string; on?: boolean; primary?: boolean; keep?: boolean; wide?: boolean; run: () => void } | { head: string };
 type MenuTab = 'edit' | 'file' | 'play';
@@ -466,6 +470,7 @@ function menuTiles(tab: MenuTab): Tile[] {
       { label: '曲の情報', icon: 'info', run: () => openSheet('info') },
       { label: 'TJA', icon: 'tja', run: () => openSheet('events') },
       { label: 'BPM 測定', icon: 'tempo', run: () => startTempo() },
+      { label: '譜面分析', icon: 'chart', run: () => openAnalysis() },
     ];
   }
   if (tab === 'file') {
@@ -665,6 +670,115 @@ $('selBar').addEventListener('click', (e) => {
   if (b && !b.disabled) selAction(b.dataset.sel!);
 });
 
+// ---------- 譜面分析 ----------
+
+/** 分析する譜面（エディタの今の譜面か、曲選択で選んだ曲）と難易度、曲の長さ（秒） */
+let analysisOf: { chart: EChart; course: number; length: number } | null = null;
+
+function openAnalysis() {
+  analysisOf = { chart: ed.chart, course: ed.courseIndex, length: audio.buffer ? audio.musicDuration : 0 };
+  openSheet('analysis');
+}
+
+const COURSE_JA: Record<string, string> = { Easy: 'かんたん', Normal: 'ふつう', Hard: 'むずかしい', Oni: 'おに', Edit: 'おに（裏）' };
+/** 1:52.340 のような時間 */
+const fmtSec3 = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, '0')}`;
+const fmtNum = (n: number) => n.toLocaleString('ja-JP');
+/** BPM の表示（小数は 3 桁まで） */
+const fmtBpm = (b: number) => String(Number(b.toFixed(3)));
+
+function renderAnalysisSheet(body: HTMLElement) {
+  const A = analysisOf!;
+  const chart = A.chart;
+  const ci = Math.max(0, Math.min(A.course, chart.courses.length - 1));
+  const course = chart.courses[ci];
+  $('sheetTitle').textContent = '譜面分析';
+  if (!course) { body.innerHTML = '<p class="note">難易度がありません</p>'; return; }
+  const a = analyzeCourse(chart, course);
+  const tabs = chart.courses.map((c, i) => `<button data-an-course="${i}" class="an-tab hd-${esc(c.name.toLowerCase())} ${i === ci ? 'on' : ''}">${esc(COURSE_JA[c.name] ?? c.name)} ★${c.level}</button>`).join('');
+  const pct = (n: number) => (a.notes ? ((n / a.notes) * 100).toFixed(1) : '0.0');
+  const donAll = a.don + a.bigDon;
+  const kaAll = a.ka + a.bigKa;
+  const bpm = a.bpmMin === a.bpmMax ? fmtBpm(a.bpmMin) : `${fmtBpm(a.bpmMin)}~${fmtBpm(a.bpmMax)}(${fmtBpm(a.bpmMain)})`;
+  const sum = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
+  const rollText = a.rolls.length
+    ? `${a.rolls.length} 本　${a.rolls.map((r) => r.sec.toFixed(3)).join('+')}=${sum(a.rolls.map((r) => r.sec)).toFixed(3)} 秒`
+    : 'なし';
+  const balloonText = a.balloons.length
+    ? `${a.balloons.length} 本　${a.balloons.map((b) => b.hits).join('+')}=${sum(a.balloons.map((b) => b.hits))} 打`
+    : 'なし';
+  const sub = chart.subtitle.replace(/^--/, '');
+  const rows: [string, string][] = [
+    ['タイトル', esc(chart.title || '（無題）') + (sub ? `<br><small>${esc(sub)}</small>` : '')],
+    ['難易度', `${esc(COURSE_JA[course.name] ?? course.name)} ★${course.level}`],
+    ['総ノーツ数', fmtNum(a.notes)],
+    ['天井スコア', `${fmtNum(a.ceiling)}${a.hasRoll ? ' + 連打' : ''}`],
+    ['BPM', bpm],
+    ['ドン : カッ', `${pct(donAll)}% : ${pct(kaAll)}%<br><small>ドン ${donAll}（大 ${a.bigDon}）・カッ ${kaAll}（大 ${a.bigKa}）</small>`],
+    ['平均密度', `${a.density.toFixed(2)} 打/秒`],
+    ['演奏時間', fmtSec3(a.playTime) + (A.length > 0 ? `<br><small>曲の長さ ${fmtSec3(A.length)}</small>` : '')],
+    ['連打', rollText],
+    ['風船', balloonText],
+  ];
+  const rate = settings.rollRate;
+  body.innerHTML = `
+    <div class="an-tabs">${tabs}</div>
+    <dl class="an-list">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    <h3>密度の推移</h3>
+    ${densitySvg(a)}
+    ${a.rolls.length || a.balloons.length ? `
+    <h3>連打・風船のシミュレーション</h3>
+    <label class="field"><span>秒速（打/秒）</span><input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${rate}"></label>
+    <div class="an-sim" id="anSim"></div>` : ''}`;
+  const paintSim = () => {
+    const el = document.getElementById('anSim');
+    if (!el) return;
+    const r = settings.rollRate;
+    const s = simulateRolls(a, r);
+    const lines: string[] = [];
+    if (a.rolls.length) lines.push(`連打 ${s.roll.join('+')}=<b>${s.rollHits}</b> 打`);
+    if (a.balloons.length) lines.push(`風船 ${s.balloon.join('+')}=<b>${s.balloonHits}</b> 打（割れる ${s.popped}/${a.balloons.length}）`);
+    lines.push(`合計 <b>${fmtNum(s.total)}</b> 打`);
+    lines.push(`スコア（全良） <b>${fmtNum(a.ceiling - s.balloonLoss + s.rollScore)}</b>`);
+    el.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+  };
+  paintSim();
+  body.querySelector<HTMLInputElement>('#anRate')?.addEventListener('input', (e) => {
+    const v = Number((e.target as HTMLInputElement).value);
+    if (!(v > 0)) return;
+    settings.rollRate = v;
+    saveSettings();
+    paintSim();
+  });
+  body.querySelectorAll<HTMLButtonElement>('[data-an-course]').forEach((b) => b.addEventListener('click', () => {
+    A.course = Number(b.dataset.anCourse);
+    renderAnalysisSheet(body);
+  }));
+}
+
+/** 密度の推移の折れ線（横 = 演奏の最初からの秒、縦 = 打/秒）。平均密度は点線 */
+function densitySvg(a: Analysis) {
+  const c = a.curve;
+  if (c.length < 2) return '<p class="note">音符が少ないため表示できません</p>';
+  const W = 600;
+  const H = 120;
+  const maxT = c[c.length - 1].t || 1;
+  const peak = c.reduce((m, p) => (p.v > m.v ? p : m), c[0]);
+  const top = Math.max(1, Math.ceil(peak.v));
+  const x = (t: number) => (t / maxT) * W;
+  const y = (v: number) => H - (v / top) * (H - 8);
+  const pts = c.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  const area = `0,${H} ${pts} ${W},${H}`;
+  return `<div class="an-graph">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="密度の推移">
+      <polygon points="${area}" class="an-area"/>
+      <polyline points="${pts}" class="an-line"/>
+      <line x1="0" x2="${W}" y1="${y(a.density).toFixed(1)}" y2="${y(a.density).toFixed(1)}" class="an-avg"/>
+    </svg>
+    <div class="an-axis"><span>0:00</span><span>最大 ${peak.v.toFixed(1)} 打/秒（${fmtSec3(peak.t).replace(/\.\d+$/, '')} 付近）・点線は平均</span><span>${fmtSec3(maxT).replace(/\.\d+$/, '')}</span></div>
+  </div>`;
+}
+
 /** グラデのつなぎ目（始点・終点）をタップしたときの選択肢 */
 let gradPick: { tick: number; before?: Grad; after?: Grad } | null = null;
 
@@ -781,7 +895,7 @@ window.addEventListener('keydown', (e) => {
 
 // ---------- シート ----------
 
-type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick';
+type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis';
 let sheet: SheetKind | null = null;
 
 function openSheet(kind: SheetKind) {
@@ -834,7 +948,7 @@ function refreshSheet() {
   if ($('sheetBody').contains(document.activeElement) && (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) return;
   // TJA のテキストは書き換え中かもしれないので、譜面が変わっても勝手に描き直さない
   if (sheet === 'events' && document.getElementById('tjaText')) return;
-  if (sheet === 'grad' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick') return;
+  if (sheet === 'grad' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick' || sheet === 'analysis') return;
   if (sheet === 'evlist') { renderSheet(); return; }
   renderSheet();
 }
@@ -944,6 +1058,8 @@ function renderSheet() {
     renderGradSheet(body);
   } else if (sheet === 'gpick' && gradPick) {
     renderGradPickSheet(body);
+  } else if (sheet === 'analysis' && analysisOf) {
+    renderAnalysisSheet(body);
   } else if (sheet === 'events') {
     // TJA のテキスト（譜面全体）。書き換えて「反映」すると譜面に反映する
     $('sheetTitle').textContent = 'TJA';
@@ -1636,6 +1752,13 @@ const home = new Home({
   importFiles: () => pickFiles('any'),
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
+  analyze: (id) => void (async () => {
+    const d = await loadSongData(id);
+    if (!d) { toast('譜面を読み込めませんでした'); return; }
+    const e = (await listSongs()).find((x) => x.id === id);
+    analysisOf = { chart: d.chart, course: d.courseIndex, length: e?.length ?? 0 };
+    openSheet('analysis');
+  })(),
   toast,
 });
 
