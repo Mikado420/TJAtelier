@@ -7,7 +7,7 @@ import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/no
 
 export interface TimelineData {
   course: Course;
-  /** 1 拍ごとの密度（時刻は曲の再生位置） */
+  /** 小節ごとの密度（時刻は曲の再生位置） */
   curve: { t0: number; t1: number; v: number }[];
   /** 平均密度 */
   density: number;
@@ -131,7 +131,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.fillRect(0, Math.round(yOf(v)), w, 1);
     }
     if (d.curve.length) {
-      // 1 拍ごとの点（拍の真ん中）を、行き過ぎない滑らかな線（単調な 3 次曲線）でつなぐ
+      // 小節ごとの点（小節の真ん中）を、行き過ぎない滑らかな線（単調な 3 次曲線）でつなぐ
       let a0 = 0;
       while (a0 < d.curve.length - 1 && d.curve[a0 + 1].t1 < vis0) a0++;
       let a1 = d.curve.length - 1;
@@ -155,7 +155,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.lineWidth = 2;
       c.lineJoin = 'round';
       c.stroke(path);
-      // いちばん高い拍
+      // いちばん高い小節
       const px = xOf((peak.t0 + peak.t1) / 2);
       c.fillStyle = '#ffd21f';
       c.beginPath();

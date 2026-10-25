@@ -4,7 +4,7 @@
  * 連打（本数と秒数）・風船（本数と打数）・演奏時間・密度の推移。秒速を決めて連打・風船に何打入るかのシミュレーションも。
  */
 import { scoreBase, BALLOON_HIT_SCORE } from '../engine/game';
-import { contentEnd, measures, sortCourse, Timing, toPlayable, TPB, type EChart, type ECourse } from './model';
+import { contentEnd, measures, sortCourse, Timing, toPlayable, type EChart, type ECourse } from './model';
 
 export interface Analysis {
   /** 判定のある音符（ドン・カッ・大ドン・大カッ）の数 = 最大コンボ数 */
@@ -29,7 +29,7 @@ export interface Analysis {
   rolls: { type: 'roll' | 'bigRoll'; sec: number }[];
   /** 風船の長さ（秒）と打数 */
   balloons: { sec: number; hits: number }[];
-  /** 1 拍ごとの密度: 拍の始まりと終わりの時刻（秒、曲の再生位置）と、その拍の打/秒（音符数 ÷ 拍の秒数） */
+  /** 小節ごとの密度: 小節の始まりと終わりの時刻（秒、曲の再生位置）と、その小節の打/秒（音符数 ÷ 小節の秒数） */
   curve: { t0: number; t1: number; v: number }[];
   /** 最初の音符の時刻と最後の音符（連打・風船の終わりも含む）の時刻（秒、曲の再生位置） */
   firstTime: number;
@@ -83,27 +83,17 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     .map((n) => ({ type: n.type as 'roll' | 'bigRoll', sec: Math.max(0, (n.endTime ?? n.time) - n.time) }));
   const balloons = balloonsAll.map((n) => ({ sec: Math.max(0, (n.endTime ?? n.time) - n.time), hits: n.hits ?? 0 }));
 
-  /**
-   * 1 拍ごとの密度（最初の音符の拍から最後の音符の拍まで）。拍は小節の頭から 4 分音符ずつ（小節の終わりの拍は短いこともある）。
-   * 秒数は（60 ÷ BPM）× 拍数（#DELAY は入れない）
-   */
+  /** 小節ごとの密度（最初の音符の小節から最後の音符の小節まで）。秒数は（60 ÷ BPM）× 拍数（#DELAY は入れない） */
   function measureDensity() {
     const out: { t0: number; t1: number; v: number }[] = [];
     if (!ticks.length) return out;
-    let k = 0;
     for (const m of measures(course, contentEnd(course))) {
-      const mEnd = m.start + m.length;
-      if (mEnd <= firstTick) continue;
+      const end = m.start + m.length;
+      if (end <= firstTick) continue;
       if (m.start > lastTick) break;
-      for (let b = m.start; b < mEnd; b += TPB) {
-        const e = Math.min(mEnd, b + TPB);
-        if (e <= firstTick || b > lastTick) continue;
-        while (k < ticks.length && ticks[k] < b) k++;
-        let n = 0;
-        while (k + n < ticks.length && ticks[k + n] < e) n++;
-        const sec = noDelay(e) - noDelay(b);
-        out.push({ t0: t.tickToTime(b), t1: t.tickToTime(e), v: sec > 0 ? n / sec : 0 });
-      }
+      const n = ticks.filter((tk) => tk >= m.start && tk < end).length;
+      const sec = noDelay(end) - noDelay(m.start);
+      out.push({ t0: t.tickToTime(m.start), t1: t.tickToTime(end), v: sec > 0 ? n / sec : 0 });
     }
     return out;
   }

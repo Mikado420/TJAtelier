@@ -142,7 +142,8 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
       const x0 = PAD_X + b.x;
       for (let k2 = GRID; k2 < b.length - 1; k2 += GRID) {
         const gx = x0 + (k2 / TPB) * BEAT_W;
-        c.fillStyle = '#9c9c9c';
+        // 1 拍ごとの線は少しだけ濃く
+        c.fillStyle = k2 % TPB === 0 ? '#5e5e5e' : '#9c9c9c';
         c.fillRect(gx - 1, y, 2, LANE_H);
         // 上の黒い縁の切れ目
         c.fillStyle = '#cfcfcf';

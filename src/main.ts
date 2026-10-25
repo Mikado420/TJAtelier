@@ -66,7 +66,7 @@ const settings = {
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
   /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
-  rollRate: 15,
+  rollRate: 30,
   /** タッチ用の中央のドンの帯の幅 */
   donWidth: 0.6,
   /** TJA のテキストを太字で表示する */
@@ -86,6 +86,11 @@ try {
   // 横スクロール化で拡大率の意味が変わったので v2 のキーで保存
   Object.assign(settings, JSON.parse(localStorage.getItem('malody-web:settings2') ?? '{}'));
   // 前の版はプレイをオートだけにしていて、その間に保存した auto: true が残っているので一度だけ戻す
+  // 連打の秒速の初期値を 30 に変えた（前の初期値 15 のままなら 30 に）
+  if (!localStorage.getItem('malody-web:rollRate30')) {
+    if (settings.rollRate === 15) settings.rollRate = 30;
+    localStorage.setItem('malody-web:rollRate30', '1');
+  }
   if (!localStorage.getItem('malody-web:manualPlay')) {
     settings.auto = false;
     localStorage.setItem('malody-web:manualPlay', '1');
@@ -728,7 +733,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
       ${tile('天井スコア', fmtNum(a.ceiling), a.hasRoll ? '＋ 連打' : '連打なし')}
       ${tile('BPM', bpmMain, bpmRange || '変化なし')}
-      ${tile('平均密度', a.density.toFixed(2), `打/秒・1 拍ごとの最大 ${peak.toFixed(2)}`)}
+      ${tile('平均密度', a.density.toFixed(2), `打/秒・小節ごとの最大 ${peak.toFixed(2)}`)}
       ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `曲の長さ ${fmtSec3(A.length)}` : '音源なし')}
       <div class="an-tile an-ratio">
         <span class="an-k">ドン : カッ</span>
@@ -754,7 +759,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       <div class="an-sim" id="anSim"></div>
     </section>` : ''}
     <section class="an-card">
-      <h3>譜面の流れ <small>上: 譜面 ／ 下: 1 拍ごとの密度（打/秒）</small></h3>
+      <h3>譜面の流れ <small>上: 譜面 ／ 下: 小節ごとの密度（打/秒）</small></h3>
       <div class="an-timeline" id="anTimeline"></div>
     </section>
     <section class="an-card">
