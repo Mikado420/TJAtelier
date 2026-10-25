@@ -2,7 +2,7 @@
  * 最初の画面（曲選択）。左にロゴとフォルダ、真ん中に曲の縦の一覧、右の青い面に選んだ曲
  * （BPM・長さ・難易度・試聴・「プレイ」「編集」）。
  */
-import type { AudioFile } from '../io/load';
+import type { AudioEngine } from '../audio/audio';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
@@ -18,6 +18,8 @@ export interface HomeHost {
   /** 譜面情報を出す */
   analyze(id: string): void;
   toast(msg: string): void;
+  /** 試聴を鳴らす音の仕組み */
+  audio: AudioEngine;
 }
 
 type Sort = 'updated' | 'title' | 'bpm';
@@ -42,23 +44,7 @@ function jacket(e: SongEntry) {
 }
 
 /** 「未分類」（どのフォルダにも入っていない曲）を表す、フォルダ名には使えない値 */
-const UNCAT = '\u0000uncat';
-
-/** 0.05 秒の無音（試聴の音を、タップの瞬間に鳴らせる状態にしておくため） */
-const SILENT = (() => {
-  const n = 400;
-  const b = new Uint8Array(44 + n);
-  const v = new DataView(b.buffer);
-  const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
-  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVEfmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
-  str(36, 'data'); v.setUint32(40, n, true);
-  b.fill(128, 44);
-  let bin = '';
-  for (const x of b) bin += String.fromCharCode(x);
-  return `data:audio/wav;base64,${btoa(bin)}`;
-})();
+const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文字（\u0000 は属性に入れると別の文字に置き換わる）
 
 const ICON = {
   folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg>',
@@ -77,51 +63,35 @@ export class Home {
   private folder: string | null = null;
   /** 曲を選んでまとめてフォルダに入れる・外すとき（選んでいる曲） */
   private picking: Set<string> | null = null;
-  /** 試聴の音を鳴らせる状態にしたか（iPhone はタップの瞬間に一度鳴らさないと、後から鳴らせない） */
-  private unlocked = false;
   /** 自動で鳴らせなかったので、次のタップで鳴らす */
   private pendingPreview = false;
   private sel: string | null = null;
   private sort: Sort = 'updated';
   private query = '';
-  private preview = new Audio();
-  private previewUrl = '';
+  /** 試聴している曲（読み込み中も） */
   private previewId = '';
   private playing = false;
+  /** 一時停止した位置（秒） */
+  private pausedAt = -1;
 
   constructor(private readonly host: HomeHost) {
     this.el = document.getElementById('home')!;
     this.list = document.getElementById('homeList')!;
-    this.preview.loop = true;
-    this.preview.addEventListener('play', () => { this.playing = true; this.paintPlayer(); });
-    this.preview.addEventListener('pause', () => { this.playing = false; this.paintPlayer(); });
     this.detail = document.getElementById('homeDetail')!;
     this.foldersEl = document.getElementById('homeFolders')!;
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
-    // どこかに触れた瞬間に試聴の音を鳴らせる状態にする（曲を選んだ後、音源を読むのを待ってから鳴らすので）
+    // 触れた瞬間に音を鳴らせる状態にする（iPhone はタップの中でないと音を出し始められない）
     this.el.addEventListener('pointerdown', () => {
-      this.unlock();
+      const ctx = this.host.audio.ctx;
+      if (ctx.state !== 'running') void ctx.resume();
       if (this.pendingPreview) {
         this.pendingPreview = false;
-        // 音源は読み込んであるので、触れた瞬間にそのまま鳴らす（iPhone はタップの中で鳴らさないと鳴らない）
-        if (!this.playing && this.previewId === this.sel && this.preview.getAttribute('src')) {
-          void this.preview.play().catch(() => {});
-          this.unlocked = true;
-        }
+        const s = this.songs.find((x) => x.id === this.sel);
+        if (s && !this.playing) void this.startPreview(s);
       }
     }, true);
-  }
-
-  /** 試聴の音を鳴らせる状態にする（タップの中で呼ぶ） */
-  private unlock() {
-    if (this.unlocked) return;
-    this.unlocked = true;
-    if (!this.preview.getAttribute('src')) {
-      this.preview.src = SILENT;
-      void this.preview.play().then(() => this.preview.pause()).catch(() => { this.unlocked = false; });
-    }
   }
 
   /** 今見ているフォルダ（すべて・未分類なら ''）。読み込んだ曲を入れる */
@@ -334,38 +304,59 @@ export class Home {
       this.render(true);
       void this.startPreview(list[j]);
     } else if (a === 'pp') {
-      if (this.playing) this.preview.pause();
+      if (this.playing) this.pausePreview();
       else {
         const s = this.songs.find((q) => q.id === this.sel);
-        if (s && this.previewId === s.id) void this.preview.play().catch(() => {});
-        else if (s) void this.startPreview(s);
+        if (s) void this.startPreview(s, this.previewId === s.id && this.pausedAt >= 0 ? this.pausedAt : undefined);
       }
     }
   }
 
   // ---------- 試聴 ----------
 
-  private async startPreview(s: SongEntry) {
+  /** 試聴を流す（from を省くと DEMOSTART から） */
+  private async startPreview(s: SongEntry, from?: number) {
     const id = s.id;
+    const A = this.host.audio;
+    A.previewStop();
     this.previewId = id;
-    this.preview.pause();
-    const a: AudioFile | null = await loadSongAudio(id);
+    this.pausedAt = -1;
+    this.playing = false;
+    this.paintPlayer();
+    const a = await loadSongAudio(id);
+    if (this.previewId !== id || !this.visible || !a) return;
+    try {
+      await A.previewLoad(id, a.data);
+    } catch {
+      return; // 読めない音源
+    }
     if (this.previewId !== id || !this.visible) return;
-    if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
-    this.previewUrl = '';
-    if (!a) { this.paintPlayer(); return; }
-    this.previewUrl = URL.createObjectURL(new Blob([a.data]));
-    this.preview.src = this.previewUrl;
-    this.preview.currentTime = 0;
     const start = Math.max(0, s.demoStart || 0);
-    this.preview.addEventListener('loadedmetadata', () => { try { this.preview.currentTime = start; } catch { /* 無視 */ } }, { once: true });
-    // 自動で鳴らせない（まだ画面に触れていない）ときは、次に触れたときに鳴らす
-    void this.preview.play().catch(() => { this.playing = false; this.pendingPreview = true; this.paintPlayer(); });
+    // まだ画面に触れていない（音を出せない）ときは、次に触れたときに鳴らす
+    if (A.ctx.state !== 'running') {
+      void A.ctx.resume();
+      await new Promise((r) => setTimeout(r, 60));
+      if ((A.ctx.state as string) !== 'running') { this.pendingPreview = true; return; }
+    }
+    if (this.previewId !== id || !this.visible) return;
+    A.previewStart(id, from ?? start, start);
+    this.playing = true;
+    this.paintPlayer();
+  }
+
+  private pausePreview() {
+    this.pausedAt = this.host.audio.previewStop();
+    this.playing = false;
+    this.paintPlayer();
   }
 
   stopPreview() {
     this.previewId = '';
-    this.preview.pause();
+    this.pausedAt = -1;
+    this.pendingPreview = false;
+    this.host.audio.previewRelease();
+    this.playing = false;
+    this.paintPlayer();
   }
 
   private paintPlayer() {

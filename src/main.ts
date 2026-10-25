@@ -1809,6 +1809,7 @@ async function createSong(chart: EChart, folder = '') {
 }
 
 const home = new Home({
+  audio,
   open: openSong,
   importFiles: () => pickFiles('any'),
   create: (folder) => createSong(newChart(), folder),

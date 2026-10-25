@@ -349,6 +349,70 @@ export class AudioEngine {
   private customHit: Record<HitSound, AudioBuffer | null> = { don: null, ka: null, balloon: null };
   private voices: Record<'don' | 'ka', { src: AudioBufferSourceNode; g: GainNode }[]> = { don: [], ka: [] };
 
+  // ---------- 曲選択の試聴 ----------
+  // <audio> は iPhone で .ogg を鳴らせず、読み込みを待つ間にタップの扱いが切れて鳴らないことがあるので、Web Audio で鳴らす
+
+  private pvCache: { key: string; buf: AudioBuffer; gain: number } | null = null;
+  private pv: { src: AudioBufferSourceNode; g: GainNode; at: number; from: number; dur: number } | null = null;
+
+  /** 試聴の音源を読み込む（同じ key なら前に読んだものを使う） */
+  async previewLoad(key: string, data: ArrayBuffer): Promise<AudioBuffer> {
+    if (this.pvCache?.key === key) return this.pvCache.buf;
+    this.pvCache = null; // 前の曲の音（大きい）は持たない
+    const buf = await this.ctx.decodeAudioData(data.slice(0));
+    const lv = AudioEngine.level(buf, false);
+    this.pvCache = { key, buf, gain: lv > 0 ? Math.min(6, AudioEngine.TARGET / lv) : 0.8 };
+    return buf;
+  }
+
+  /** 試聴を from 秒から鳴らす（最後まで行ったら loopFrom 秒へ戻って繰り返す） */
+  previewStart(key: string, from: number, loopFrom = from) {
+    this.previewStop();
+    const c = this.pvCache;
+    if (!c || c.key !== key) return;
+    if (this.ctx.state !== 'running') void this.ctx.resume();
+    const src = this.ctx.createBufferSource();
+    src.buffer = c.buf;
+    src.loop = true;
+    src.loopStart = Math.min(Math.max(0, loopFrom), c.buf.duration - 0.1);
+    src.loopEnd = c.buf.duration;
+    const g = this.ctx.createGain();
+    const at = this.ctx.currentTime + 0.02;
+    const vol = c.gain * this.mix.music;
+    // 頭を少しずつ大きくする（いきなり大きな音にならないように）
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(vol, at + 0.4);
+    src.connect(g).connect(this.limiter ?? this.ctx.destination);
+    const off = Math.min(Math.max(0, from), Math.max(0, c.buf.duration - 0.1));
+    src.start(at, off);
+    this.pv = { src, g, at, from: off, dur: c.buf.duration };
+  }
+
+  /** 試聴を止める。止めた位置（秒）を返す */
+  previewStop(): number {
+    const p = this.pv;
+    if (!p) return 0;
+    this.pv = null;
+    const el = this.ctx.currentTime - p.at;
+    const pos = p.from + Math.max(0, el);
+    try {
+      p.g.gain.setTargetAtTime(0, this.ctx.currentTime, 0.03);
+      p.src.stop(this.ctx.currentTime + 0.15);
+    } catch { /* 止まっている */ }
+    setTimeout(() => { try { p.src.disconnect(); p.g.disconnect(); } catch { /* 無視 */ } }, 300);
+    return pos >= p.dur ? 0 : pos;
+  }
+
+  get previewing() {
+    return this.pv !== null;
+  }
+
+  /** 試聴の音源を手放す（エディタに戻るときなど） */
+  previewRelease() {
+    this.previewStop();
+    this.pvCache = null;
+  }
+
   /** 自分で用意した打音（ogg / mp3 / wav など）。null で内蔵の音に戻す */
   async setCustomHit(kind: HitSound, data: ArrayBuffer | null) {
     this.customHit[kind] = data ? trimLead(this.ctx, await this.ctx.decodeAudioData(data.slice(0))) : null;
