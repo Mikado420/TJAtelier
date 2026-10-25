@@ -1085,21 +1085,12 @@ function renderSheet() {
       </div>`;
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
-    const sw = (key: string, label: string, on: boolean) =>
-      `<label class="st-row"><span>${label}</span><input type="checkbox" class="st-sw" data-set="${key}" ${on ? 'checked' : ''}></label>`;
-    const range = (key: string, label: string, min: number, max: number, step: number, v: number, out: string) =>
-      `<label class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}"><output>${out}</output></label>`;
     body.innerHTML = `
       <div class="st-grid">
         <section class="an-card st-card">
           <h3>プレイ</h3>
-          ${sw('auto', 'オート', settings.auto)}
-          <div class="st-row"><span>打音</span><div class="st-seg">${([['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const).map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-          ${sw('padVisible', '太鼓を表示', settings.padVisible)}
-          ${!isNativeHost() && IS_IOS ? sw('restZone', '上を指置きに', settings.restZone) : ''}
-          ${range('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed, settings.speed.toFixed(1))}
-          ${range('donWidth', 'ドンの幅', 0.3, 0.9, 0.01, settings.donWidth, `${Math.round(settings.donWidth * 100)}%`)}
-          ${range('offset', '判定調整', -300, 300, 1, settings.offset, String(settings.offset))}
+          ${stSwitch('auto', 'オート', settings.auto)}
+          ${playSettingRows()}
           <div class="st-btns">
             <button data-act="calibrate">タイミング調整</button>
             ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
@@ -1107,9 +1098,7 @@ function renderSheet() {
         </section>
         <section class="an-card st-card">
           <h3>音量</h3>
-          ${range('volMusic', '音源', 0, 2, 0.05, settings.volMusic, settings.volMusic.toFixed(2))}
-          ${range('volHit', '打音', 0, 2, 0.05, settings.volHit, settings.volHit.toFixed(2))}
-          ${range('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, settings.volMetro.toFixed(2))}
+          ${volumeRows()}
         </section>
         <section class="an-card st-card">
           <h3>エディタ</h3>
@@ -1305,13 +1294,75 @@ function renderTjaHl() {
   }
 }
 
-$('sheetBody').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
-  if (!b) return;
+// ---------- 設定の欄（設定の画面とプレイのポーズ画面で同じものを使う） ----------
+
+const stSwitch = (key: string, label: string, on: boolean) =>
+  `<label class="st-row"><span>${label}</span><input type="checkbox" class="st-sw" data-set="${key}" ${on ? 'checked' : ''}></label>`;
+/** スライダーと、数字を入れられる欄（scale = 表示の倍率。ドンの幅は % で出す） */
+const stRange = (key: string, label: string, min: number, max: number, step: number, v: number, scale = 1, unit = '') =>
+  `<div class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}">` +
+  `<label class="st-num"><input type="number" inputmode="decimal" step="any" data-set="${key}" data-scale="${scale}" value="${Number((v * scale).toFixed(3))}"><i>${unit}</i></label></div>`;
+const HIT_MODES = [['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const;
+function playSettingRows() {
+  return `
+    <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
+    ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
+    ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
+    ${stRange('donWidth', 'ドンの幅', 0.3, 0.9, 0.01, settings.donWidth, 100, '%')}
+    ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}`;
+}
+function volumeRows() {
+  return `
+    ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}
+    ${stRange('volHit', '打音', 0, 2, 0.05, settings.volHit, 100, '%')}
+    ${stRange('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, 100, '%')}`;
+}
+
+/** 設定の欄が変わったとき（スライダー・数字の欄・スイッチ）。変わったら true */
+function onSettingInput(el: HTMLInputElement, commit: boolean): boolean {
+  const key = el.dataset.set as keyof typeof settings | undefined;
+  if (!key) return false;
+  if (el.type === 'checkbox') (settings[key] as boolean) = el.checked;
+  else {
+    const scale = Number(el.dataset.scale || 1);
+    const raw = el.value.trim();
+    // 入力の途中（空・「-」だけなど）は、確定するまで反映しない
+    if (raw === '' || !Number.isFinite(Number(raw))) {
+      if (commit) el.value = String(Number(((settings[key] as number) * scale).toFixed(3)));
+      return false;
+    }
+    let v = Number(raw) / scale;
+    if (key === 'speed') v = Math.max(0.1, Math.min(10, v));
+    else if (key === 'donWidth') v = Math.max(0.1, Math.min(0.95, v));
+    else if (key.startsWith('vol')) v = Math.max(0, Math.min(4, v));
+    (settings[key] as number) = v;
+    // 同じ行のスライダーと数字の欄をそろえる
+    el.closest('.st-row')?.querySelectorAll<HTMLInputElement>(`input[data-set="${key}"]`).forEach((o) => {
+      if (o === el && !commit) return;
+      o.value = o.type === 'range' ? String(v) : String(Number((v * Number(o.dataset.scale || 1)).toFixed(3)));
+    });
+  }
+  saveSettings();
+  if (key.startsWith('vol')) applyMix();
+  if (key === 'speed') applyPlayZoom();
+  return true;
+}
+
+/** 打音（オン / プレイだけオフ / オフ）のボタン */
+function onHitModeClick(b: HTMLButtonElement) {
   settings.hitMode = b.dataset.hitmode as typeof settings.hitMode;
   saveSettings();
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+}
+
+$('sheetBody').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
+  if (b) onHitModeClick(b);
 });
+$('sheetBody').addEventListener('input', (e) => { onSettingInput(e.target as HTMLInputElement, false); });
+$('sheetBody').addEventListener('change', (e) => { onSettingInput(e.target as HTMLInputElement, true); });
+
 
 $('sheetBody').addEventListener('input', (e) => {
   if ((e.target as HTMLElement).id !== 'tjaText') return;
@@ -1379,21 +1430,6 @@ $('sheetBody').addEventListener('change', (e) => {
   }
 });
 
-$('sheetBody').addEventListener('input', (e) => {
-  const el = e.target as HTMLInputElement;
-  const key = el.dataset.set as keyof typeof settings | undefined;
-  if (!key) return;
-  if (el.type === 'checkbox') (settings[key] as boolean) = el.checked;
-  else if (el instanceof HTMLSelectElement || isNaN(Number(el.value))) (settings[key] as unknown as string) = el.value;
-  else {
-    (settings[key] as number) = Number(el.value);
-    const out = el.parentElement?.querySelector('output');
-    if (out) out.textContent = key === 'speed' ? Number(el.value).toFixed(1) : key === 'donWidth' ? `${Math.round(Number(el.value) * 100)}%` : key.startsWith('vol') ? Number(el.value).toFixed(2) : el.value;
-  }
-  saveSettings();
-  if (key.startsWith('vol')) applyMix();
-  if (key === 'speed') applyPlayZoom();
-});
 
 function addEventAction(kind: string) {
   const tick = ed.snap(Math.max(0, view.pos));
@@ -1684,7 +1720,26 @@ $('back').addEventListener('click', () => play.close());
 // ポーズ: 左上のボタン。つづける／はじめから（曲の最初から）／エディタへ
 $('playPause').addEventListener('click', () => play.pause());
 $('pauseResume').addEventListener('click', () => void play.resume());
-document.querySelectorAll<HTMLButtonElement>('#pauseMenu [data-pmode]').forEach((b) => b.addEventListener('click', () => play.setAuto(b.dataset.pmode === 'auto')));
+$('pauseRetry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : play.retry()));
+// ポーズの画面の設定（変えたら今のプレイにすぐ反映）
+play.onPauseOpen = () => {
+  $('pauseSettings').innerHTML = `
+    <div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>
+    ${playSettingRows()}
+    ${volumeRows()}`;
+};
+$('pauseSettings').addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  const pm = t.closest<HTMLButtonElement>('[data-pmode]');
+  if (pm) { play.setAuto(pm.dataset.pmode === 'auto'); return; }
+  const hm = t.closest<HTMLButtonElement>('[data-hitmode]');
+  if (hm) onHitModeClick(hm);
+});
+const onPauseSetting = (e: Event, commit: boolean) => {
+  if (onSettingInput(e.target as HTMLInputElement, commit)) play.applySettings();
+};
+$('pauseSettings').addEventListener('input', (e) => onPauseSetting(e, false));
+$('pauseSettings').addEventListener('change', (e) => onPauseSetting(e, true));
 play.onSettingsChange = saveSettings;
 $('pauseRestart').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest(true)));
 $('pauseBack').addEventListener('click', () => play.close());

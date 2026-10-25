@@ -1471,3 +1471,46 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .st-seg { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
 .sheet .st-seg button { height: 32px; padding: 0 4px; font-size: 12px; font-weight: 800; border-radius: 0; background: var(--btn); color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
 .sheet .st-seg button.on { background: var(--accent); color: #fff; }
+/* 設定: 数字を入れる欄（スライダーの右） */
+.st-num { flex: none; display: flex; align-items: center; gap: 2px; }
+.st-num input { width: 64px; height: 30px; padding: 0 6px; text-align: right; font-family: var(--fd); font-size: 14px; font-weight: 800; color: var(--accent-hi); -webkit-text-fill-color: var(--accent-hi); background: var(--deep); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 0; font-variant-numeric: tabular-nums; }
+.st-num input:focus { outline: none; border-color: var(--accent); }
+.st-num i { font-style: normal; font-size: 11px; color: var(--sub); }
+.st-seg.two { grid-template-columns: 1fr 1fr; }
+
+/* ---------- プレイのポーズ画面（ほかの画面と同じ色・斜めの形） ---------- */
+.play .pause-menu {
+  --bg: #2a2d31; --panel: #303439; --deep: #1d2023; --inp: #383c41; --sub: rgba(255, 255, 255, 0.6);
+  --accent: #4d9fbe; --accent-hi: #93cde2; --btn: #3b4045; --line: rgba(255, 255, 255, 0.16);
+  background: rgba(10, 12, 14, 0.72);
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+}
+.pause-menu .panel.pm {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(0, 1.6fr);
+  gap: 0;
+  width: min(820px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  padding: 0;
+  background: var(--panel);
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.pm-main { display: flex; flex-direction: column; gap: 6px; padding: 14px; background: var(--deep); }
+.pause-menu .pm-main h2 { margin: 0 0 6px; font-size: 20px; font-weight: 900; font-style: italic; letter-spacing: 0.04em; }
+.pause-menu .pm-main button {
+  height: 44px; padding: 0 16px; font-size: 15px; font-weight: 800; text-align: left; border-radius: 0; color: #fff; background: var(--btn);
+  --sk: calc(44px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); padding-left: calc(var(--sk) + 10px);
+}
+.pause-menu .pm-main button.primary { background: var(--accent); }
+.pause-menu .pm-main button:last-child { margin-top: auto; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); clip-path: none; }
+.pm-set { min-height: 0; overflow-y: auto; touch-action: pan-y; padding: 10px 14px; }
+.pause-menu .pm-set .st-row { min-height: 36px; }
+.pause-menu .pm-set .st-seg button { padding: 0 4px; font-size: 12px; border-radius: 0; }
+.pause-menu .pm-set .st-seg button.on { background: var(--accent); color: #fff; }
+.st-num i { width: 22px; }
+.pause-menu .panel.pm { height: calc(100% - 24px); grid-template-rows: minmax(0, 1fr); }
+.pm-main { min-height: 0; overflow-y: auto; }

@@ -54,6 +54,10 @@ export class PlayMode {
   onExit: () => void = () => {};
   /** ポーズ画面で設定（オート）を変えたとき（保存用） */
   onSettingsChange: () => void = () => {};
+  /** ポーズの画面を出したとき（設定の欄を作る） */
+  onPauseOpen: () => void = () => {};
+  /** いちばん最後に始めたときの引数（「やりなおす」で同じ所から） */
+  private lastArgs: Parameters<PlayMode['start']> | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -146,6 +150,7 @@ export class PlayMode {
 
   /** fromTime 秒の位置から（2秒前から助走して）開始。clicks を渡すとその時刻にクリック音を鳴らす */
   async start(course: Course, fromTime: number, info: { title: string; course: string; level: number; genre?: string }, clicks?: number[]) {
+    this.lastArgs = [course, fromTime, info, clicks];
     if (!clicks) this.calibrating = false;
     this.hidePause();
     // fromTime が 0 以下なら曲の最初から（最初の音符が 1 秒より前なら、その 1 秒前から）
@@ -274,6 +279,23 @@ export class PlayMode {
     this.paintPauseMode();
   }
 
+  /** 前に始めた所から、もう一度始める */
+  async retry() {
+    if (!this.lastArgs) return;
+    const [c, from, info, clicks] = this.lastArgs;
+    if (clicks) this.calibrating = true;
+    await this.start(c, from, info, clicks);
+  }
+
+  /** 設定（ハイスピード・ドンの幅・太鼓の表示など）を今のプレイに反映する */
+  applySettings() {
+    const R = this.renderer;
+    R.speed = this.settings.speed;
+    R.donWidth = this.settings.donWidth ?? 0.6;
+    this.applyInputMode();
+    R.resize();
+  }
+
   /** ポーズ（曲を止めて、ポーズのメニューを出す） */
   pause() {
     if (!this.active || this.paused) return;
@@ -282,6 +304,7 @@ export class PlayMode {
     this.timeFloor = this.time();
     cancelAnimationFrame(this.raf);
     this.audio.stop();
+    this.onPauseOpen();
     this.paintPauseMode();
     this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
   }

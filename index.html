@@ -153,15 +153,15 @@
       <canvas id="game"></canvas>
       <button id="playPause" class="icon pause" aria-label="ポーズ"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg></button>
       <div id="pauseMenu" class="pause-menu hidden">
-        <div class="panel">
-          <h2>ポーズ</h2>
-          <div class="pmode" role="group" aria-label="叩き方">
-            <button data-pmode="play">プレイ</button>
-            <button data-pmode="auto">オート</button>
+        <div class="panel pm">
+          <div class="pm-main">
+            <h2>ポーズ</h2>
+            <button id="pauseResume" class="primary">つづける</button>
+            <button id="pauseRetry">やりなおす</button>
+            <button id="pauseRestart">はじめから</button>
+            <button id="pauseBack">エディタへ</button>
           </div>
-          <button id="pauseResume" class="primary">つづける</button>
-          <button id="pauseRestart">はじめから</button>
-          <button id="pauseBack">エディタへ</button>
+          <div class="pm-set" id="pauseSettings"></div>
         </div>
       </div>
     </div>
