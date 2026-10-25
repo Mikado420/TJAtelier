@@ -195,23 +195,41 @@ export class Home {
     }
     this.list.innerHTML = rows.join('');
 
-    // 選んでいるときの操作（下に出す）
+    // 選んでいるとき: 一覧の下に「すべて選択」「完了」、右の面に選んだ曲と操作
     const bar = document.getElementById('homePick')!;
     bar.classList.toggle('hidden', !pk);
     if (pk) {
-      const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
-      bar.innerHTML = `<b>${pk.size} 曲</b>
-        <button data-pk="all">${songs.length && songs.every((x) => pk.has(x.id)) ? '選択を解除' : 'すべて選択'}</button>
-        <button data-pk="add" class="primary" ${pk.size ? '' : 'disabled'}>フォルダへ…</button>
-        ${inFolder ? `<button data-pk="move" ${pk.size ? '' : 'disabled'}>移す…</button><button data-pk="remove" class="bad" ${pk.size ? '' : 'disabled'}>ここから外す</button>` : `<button data-pk="clear" ${pk.size ? '' : 'disabled'}>未分類に戻す</button>`}
-        <button data-pk="done">完了</button>`;
+      const allOn = songs.length > 0 && songs.every((x) => pk.has(x.id));
+      bar.innerHTML = `
+        <button data-pk="all" class="pk-all ${allOn ? 'on' : ''}"><i class="hr-ck">${allOn ? '✓' : ''}</i>${allOn ? '選択を解除' : 'すべて選択'}</button>
+        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲を選択中` : '曲をタップして選んでください'}</span>
+        <button data-pk="done" class="pk-done">完了</button>`;
     }
     this.el.classList.toggle('home-picking', !!pk);
-    (document.getElementById('homePickBtn') as HTMLElement).classList.toggle('on', !!pk);
+    const pb = document.getElementById('homePickBtn') as HTMLElement;
+    pb.classList.toggle('on', !!pk);
+    pb.querySelector('small')!.textContent = pk ? '完了' : '選択';
 
     // 右: 選んでいる曲
     const s = this.songs.find((x) => x.id === this.sel && songs.includes(x));
-    if (s) {
+    if (pk) {
+      const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
+      const picked = this.songs.filter((x) => pk.has(x.id));
+      const off = pk.size ? '' : 'disabled';
+      const act = (k: string, icon: string, label: string, sub: string, cls = '') =>
+        `<button data-pk="${k}" class="pk-act ${cls}" ${off}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><b>${label}</b><small>${sub}</small></span></button>`;
+      this.detail.innerHTML = `
+        <div class="pk-panel">
+          <div class="pk-head"><small>選択中</small><b>${pk.size}<span>曲</span></b></div>
+          <div class="pk-list">${picked.length ? picked.slice(0, 12).map((x) => `<span>${esc(x.title)}</span>`).join('') + (picked.length > 12 ? `<span class="more">ほか ${picked.length - 12} 曲</span>` : '') : '<p>左の一覧で曲をタップすると、ここに出ます</p>'}</div>
+          <div class="pk-acts">
+            ${act('add', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M12 11.5v5M9.5 14h5"/>', 'フォルダに入れる', 'いくつのフォルダにも入れられます')}
+            ${inFolder ? act('move', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9 14h6M13 11.5l2.5 2.5-2.5 2.5"/>', '別のフォルダへ移す', `「${esc(this.folder!)}」から外して移します`) : ''}
+            ${inFolder ? act('remove', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9.5 14h5"/>', 'このフォルダから外す', '曲は消えません') : act('clear', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9.5 11.5l5 5M14.5 11.5l-5 5"/>', '未分類に戻す', '入っているフォルダから全部外します')}
+            ${act('delete', '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>', '削除する', '譜面と音源を消します（元に戻せません）', 'bad')}
+          </div>
+        </div>`;
+    } else if (s) {
       const courses = s.courses.map((c) => `<span class="hd hd-${esc(c.name.toLowerCase())}">${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
       this.detail.innerHTML = `
         <div class="hdx-jk">${jacket(s)}</div>
@@ -284,7 +302,7 @@ export class Home {
       this.render();
     } else if (a === 'pick') {
       this.picking = this.picking ? null : new Set();
-      this.render();
+      this.render(!this.picking);
     } else if (a === 'sort') {
       const order: Sort[] = ['updated', 'title', 'bpm'];
       this.sort = order[(order.indexOf(this.sort) + 1) % order.length];
@@ -445,7 +463,7 @@ export class Home {
     const pk = this.picking;
     if (!pk) return;
     const ids = [...pk];
-    if (a === 'done') { this.picking = null; this.render(); return; }
+    if (a === 'done') { this.picking = null; this.render(true); return; }
     if (a === 'all') {
       const list = this.shown();
       if (list.every((x) => pk.has(x.id))) list.forEach((x) => pk.delete(x.id));
@@ -462,6 +480,16 @@ export class Home {
       await this.reload();
       this.render();
       this.host.toast(`${ids.length} 曲を「${this.folder}」から外しました`);
+    } else if (a === 'delete') {
+      const names = this.songs.filter((x) => pk.has(x.id)).map((x) => `・${x.title}`);
+      const shown = names.slice(0, 8).join('\n') + (names.length > 8 ? `\nほか ${names.length - 8} 曲` : '');
+      if (!confirm(`${ids.length} 曲を削除しますか？\n${shown}\n\n譜面と音源がこのブラウザから消えます。元に戻せません。`)) return;
+      if (this.sel && pk.has(this.sel)) { this.stopPreview(); this.sel = null; }
+      for (const id of ids) await deleteSong(id);
+      pk.clear();
+      await this.reload();
+      this.render();
+      this.host.toast(`${ids.length} 曲を削除しました`);
     } else if (a === 'clear') {
       if (!confirm(`${ids.length} 曲を、入っているフォルダから全部外しますか？（曲は消えません）`)) return;
       for (const f of this.folders) await removeFromFolder(ids, f);

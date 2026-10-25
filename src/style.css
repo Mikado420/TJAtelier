@@ -1399,3 +1399,34 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home-pick button.bad { background: #8a3a3a; }
 .home-pick button:disabled { opacity: 0.4; }
 .home-picking .home-list { padding-bottom: 8px; }
+/* 選択中: 一覧の下の帯（すべて選択・何曲・完了） */
+.home-pick { flex-wrap: nowrap; gap: 8px; padding: 6px 8px calc(6px + var(--safe-b)); }
+.home-pick .pk-hint { flex: 1; min-width: 0; text-align: center; font-size: 12px; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-pick .pk-hint b { color: #fff; font: 800 16px var(--fd); margin-right: 2px; }
+.home-pick .pk-all { display: flex; align-items: center; gap: 8px; background: transparent; clip-path: none; padding: 0 6px; }
+.home-pick .pk-all .hr-ck { width: 18px; height: 18px; font-size: 12px; }
+.home-pick .pk-all.on .hr-ck { background: var(--accent); border-color: var(--accent); }
+.home-pick .pk-done { background: #fff; color: #000; min-width: 72px; }
+/* 一覧の行: 選択中は左に大きめの四角 */
+.home-picking .hr { padding-left: 12px; }
+.home-picking .hr-ck { width: 24px; height: 24px; font-size: 15px; }
+.home-picking .hr.pk { background: rgba(77, 159, 190, 0.28); box-shadow: inset 4px 0 0 var(--accent); }
+.home-picking .home-mh { background: rgba(77, 159, 190, 0.18); }
+/* 右の面: 選んだ曲と操作 */
+.pk-panel { position: relative; z-index: 1; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 10px; color: #fff; }
+.pk-head { display: flex; align-items: baseline; gap: 10px; }
+.pk-head small { font-size: 13px; font-weight: 800; opacity: 0.85; }
+.pk-head b { font: italic 900 40px/1 var(--fd); }
+.pk-head b span { font-size: 16px; margin-left: 4px; font-style: normal; }
+.pk-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; touch-action: pan-y; }
+.pk-list span { max-width: 100%; padding: 3px 9px; font-size: 12px; font-weight: 700; background: rgba(0, 0, 0, 0.28); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-list span.more { background: transparent; opacity: 0.8; }
+.pk-list p { margin: 0; font-size: 13px; opacity: 0.85; line-height: 1.6; }
+.pk-acts { flex: none; display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 0; }
+.home .pk-act { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; min-height: 44px; padding: 6px 10px; text-align: left; border-radius: 0; background: var(--deep); color: #fff; --sk: calc(44px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); padding-left: calc(var(--sk) + 6px); }
+.pk-act svg { width: 22px; height: 22px; flex: none; fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.pk-act span { display: flex; flex-direction: column; min-width: 0; }
+.pk-act b { font-size: 13px; font-weight: 900; white-space: nowrap; }
+.pk-act small { font-size: 10px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home .pk-act.bad { background: #a33b3b; }
+.home .pk-act:disabled { opacity: 0.4; }
