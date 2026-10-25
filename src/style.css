@@ -1362,7 +1362,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .an-none { color: var(--sub); font-size: 13px; }
 .an-rate { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); font-weight: 700; }
 .sheet .an-rate button { width: 40px; height: 36px; padding: 0; font-size: 18px; border-radius: 0; background: var(--btn); color: #fff; }
-.sheet .an-rate input { width: 80px; height: 36px; text-align: center; font-family: var(--fd); font-size: 18px; font-weight: 800; }
+.sheet .an-rate input { width: 84px; height: 36px; padding: 0 4px; text-align: center; font-family: var(--fd); font-size: 18px; font-weight: 800; color: #fff; background: var(--inp); border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 0; -webkit-text-fill-color: #fff; }
 .an-sim { display: flex; flex-direction: column; gap: 6px; }
 .an-simrow { display: grid; grid-template-columns: 44px 1fr; align-items: baseline; gap: 2px 8px; }
 .an-simrow small { grid-column: 2; color: var(--sub); font-size: 11px; }

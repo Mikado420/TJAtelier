@@ -123,28 +123,43 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
     }
   }
 
-  // レーン・小節線・拍の線・小節の番号
+  // レーン・グリッド・小節線・小節の番号
+  // グリッドは 8 分音符ごと（小節の頭から）。上の黒い縁はグリッドの所だけ切れ目を入れる
+  const GRID = TPB / 2;
   for (let ri = 0; ri < rows.length; ri++) {
     const r = rows[ri];
     const y = rowTop(ri) + LANE_Y;
     const rowEnd = PAD_X + r.bars.reduce((w, b) => w + b.w, 0);
-    c.fillStyle = '#7a7a7a';
-    c.fillRect(0, y, rowEnd + PAD_X / 2, LANE_H);
-    c.fillStyle = '#6a6a6a';
-    c.fillRect(0, y + 6, rowEnd + PAD_X / 2, LANE_H - 12);
+    const laneEnd = rowEnd + PAD_X / 2;
+    c.fillStyle = '#7f7f7f';
+    c.fillRect(0, y, laneEnd, LANE_H);
+    c.fillStyle = '#111';
+    c.fillRect(0, y - 6, laneEnd, 3);
     c.fillStyle = '#fff';
-    c.fillRect(0, y - 2, rowEnd + PAD_X / 2, 2);
-    c.fillRect(0, y + LANE_H, rowEnd + PAD_X / 2, 2);
+    c.fillRect(0, y - 3, laneEnd, 2);
+    c.fillRect(0, y + LANE_H, laneEnd, 2);
     for (const b of r.bars) {
       const x0 = PAD_X + b.x;
-      c.fillStyle = 'rgba(255,255,255,0.22)';
-      for (let k2 = TPB; k2 < b.length; k2 += TPB) c.fillRect(x0 + (k2 / TPB) * BEAT_W - 0.5, y, 1, LANE_H);
+      for (let k2 = GRID; k2 < b.length - 1; k2 += GRID) {
+        const gx = x0 + (k2 / TPB) * BEAT_W;
+        c.fillStyle = '#9c9c9c';
+        c.fillRect(gx - 1, y, 2, LANE_H);
+        // 上の黒い縁の切れ目
+        c.fillStyle = '#cfcfcf';
+        c.fillRect(gx - 1, y - 6, 2, 3);
+      }
+    }
+    // 小節線（番号の上から、レーンの下まで）と、行の終わりの線
+    for (const b of r.bars) {
+      const x0 = PAD_X + b.x;
       if (t.barlineAt(b.start)) {
         c.fillStyle = '#fff';
-        c.fillRect(x0 - 1, y - 6, 2, LANE_H + 6);
+        c.fillRect(x0 - 1, rowTop(ri) + 8, 2, LANE_Y - 8 + LANE_H);
       }
-      pixText(c, String(b.index + 1), x0 + 3, y - 5, 1.8, '#111');
+      pixText(c, String(b.index + 1), x0 + 3, y - 9, 1.8, '#111');
     }
+    c.fillStyle = '#fff';
+    c.fillRect(rowEnd - 1, rowTop(ri) + 8, 2, LANE_Y - 8 + LANE_H);
   }
 
   // #SCROLL（赤）と #BPMCHANGE（青）の数字。最初の BPM も書く
@@ -164,7 +179,7 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
     const p = pos(tick);
     // 小節の番号より上に、下から積む（BPM の上に HS）
     ls.sort((x, y) => Number(x.hs) - Number(y.hs));
-    const base = rowTop(p.ri) + LANE_Y - 18;
+    const base = rowTop(p.ri) + LANE_Y - 22;
     ls.forEach((l, i) => pixText(c, l.text, p.x + 3, base - i * LINE, 1.6, l.hs ? '#d01e1e' : '#1d3fd0'));
     if (tick > 0) {
       c.fillStyle = 'rgba(30,30,30,0.7)';

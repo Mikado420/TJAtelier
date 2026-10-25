@@ -7,7 +7,7 @@ import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/no
 
 export interface TimelineData {
   course: Course;
-  /** 小節ごとの密度（時刻は曲の再生位置） */
+  /** 1 拍ごとの密度（時刻は曲の再生位置） */
   curve: { t0: number; t1: number; v: number }[];
   /** 平均密度 */
   density: number;
@@ -131,28 +131,36 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.fillRect(0, Math.round(yOf(v)), w, 1);
     }
     if (d.curve.length) {
-      // 小節ごとの段（小節線とそろう）
-      c.fillStyle = 'rgba(77,159,190,0.28)';
-      for (const q of d.curve) {
-        if (q.t1 < vis0 || q.t0 > vis1) continue;
-        c.fillRect(xOf(q.t0), yOf(q.v), xOf(q.t1) - xOf(q.t0), gy + GRAPH_H - yOf(q.v));
-      }
-      c.beginPath();
-      d.curve.forEach((q, i) => {
-        if (i) c.lineTo(xOf(q.t0), yOf(q.v));
-        else c.moveTo(xOf(q.t0), gy + GRAPH_H);
-        if (!i) c.lineTo(xOf(q.t0), yOf(q.v));
-        c.lineTo(xOf(q.t1), yOf(q.v));
-      });
+      // 1 拍ごとの点（拍の真ん中）を、行き過ぎない滑らかな線（単調な 3 次曲線）でつなぐ
+      let a0 = 0;
+      while (a0 < d.curve.length - 1 && d.curve[a0 + 1].t1 < vis0) a0++;
+      let a1 = d.curve.length - 1;
+      while (a1 > a0 && d.curve[a1 - 1].t0 > vis1) a1--;
+      const pts = d.curve.slice(Math.max(0, a0 - 1), a1 + 2).map((q) => ({ x: xOf((q.t0 + q.t1) / 2), y: yOf(q.v) }));
+      const first = d.curve[0];
       const last = d.curve[d.curve.length - 1];
-      c.lineTo(xOf(last.t1), gy + GRAPH_H);
+      if (a0 === 0) pts.unshift({ x: xOf(first.t0), y: yOf(first.v) });
+      if (a1 === d.curve.length - 1) pts.push({ x: xOf(last.t1), y: yOf(last.v) });
+      const path = new Path2D();
+      smoothPath(path, pts);
+      const area = new Path2D();
+      area.moveTo(pts[0].x, gy + GRAPH_H);
+      area.lineTo(pts[0].x, pts[0].y);
+      smoothPath(area, pts, true);
+      area.lineTo(pts[pts.length - 1].x, gy + GRAPH_H);
+      area.closePath();
+      c.fillStyle = 'rgba(77,159,190,0.28)';
+      c.fill(area);
       c.strokeStyle = '#93cde2';
       c.lineWidth = 2;
-      c.stroke();
-      // いちばん高い小節
-      const px = (xOf(peak.t0) + xOf(peak.t1)) / 2;
+      c.lineJoin = 'round';
+      c.stroke(path);
+      // いちばん高い拍
+      const px = xOf((peak.t0 + peak.t1) / 2);
       c.fillStyle = '#ffd21f';
-      c.fillRect(xOf(peak.t0), yOf(peak.v) - 1.5, xOf(peak.t1) - xOf(peak.t0), 3);
+      c.beginPath();
+      c.arc(px, yOf(peak.v), 3.5, 0, Math.PI * 2);
+      c.fill();
       c.textAlign = px > w - 90 ? 'right' : px < 60 ? 'left' : 'center';
       c.fillText(`最大 ${peak.v.toFixed(2)}`, px, Math.max(gy + 8, yOf(peak.v) - 9));
     }
@@ -235,4 +243,28 @@ function roundBar(c: CanvasRenderingContext2D, x1: number, x2: number, y: number
   c.arc(x2, y, r, -Math.PI / 2, Math.PI / 2);
   c.closePath();
   c.fill();
+}
+
+/**
+ * 点を滑らかにつなぐ線（単調な 3 次エルミート曲線。山と谷で行き過ぎない）。
+ * cont = true なら、今の位置から続けて描く（最初の点へ moveTo しない）
+ */
+function smoothPath(p: Path2D, pts: { x: number; y: number }[], cont = false) {
+  const n = pts.length;
+  if (!n) return;
+  if (!cont) p.moveTo(pts[0].x, pts[0].y);
+  if (n < 3) { for (let i = 1; i < n; i++) p.lineTo(pts[i].x, pts[i].y); return; }
+  const dx: number[] = [];
+  const m: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(pts[i + 1].x - pts[i].x || 1e-6);
+    m.push((pts[i + 1].y - pts[i].y) / (dx[i] || 1e-6));
+  }
+  const tan: number[] = [m[0]];
+  for (let i = 1; i < n - 1; i++) tan.push(m[i - 1] * m[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]));
+  tan.push(m[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i] / 3;
+    p.bezierCurveTo(pts[i].x + h, pts[i].y + tan[i] * h, pts[i + 1].x - h, pts[i + 1].y - tan[i + 1] * h, pts[i + 1].x, pts[i + 1].y);
+  }
 }

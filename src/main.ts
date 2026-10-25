@@ -728,7 +728,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
       ${tile('天井スコア', fmtNum(a.ceiling), a.hasRoll ? '＋ 連打' : '連打なし')}
       ${tile('BPM', bpmMain, bpmRange || '変化なし')}
-      ${tile('平均密度', a.density.toFixed(2), `打/秒・小節ごとの最大 ${peak.toFixed(2)}`)}
+      ${tile('平均密度', a.density.toFixed(2), `打/秒・1 拍ごとの最大 ${peak.toFixed(2)}`)}
       ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `曲の長さ ${fmtSec3(A.length)}` : '音源なし')}
       <div class="an-tile an-ratio">
         <span class="an-k">ドン : カッ</span>
@@ -754,7 +754,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       <div class="an-sim" id="anSim"></div>
     </section>` : ''}
     <section class="an-card">
-      <h3>譜面の流れ <small>上: 譜面 ／ 下: 小節ごとの密度（打/秒）</small></h3>
+      <h3>譜面の流れ <small>上: 譜面 ／ 下: 1 拍ごとの密度（打/秒）</small></h3>
       <div class="an-timeline" id="anTimeline"></div>
     </section>
     <section class="an-card">
@@ -768,7 +768,7 @@ function renderAnalysisSheet(body: HTMLElement) {
     if (!el) return;
     const s = simulateRolls(a, settings.rollRate);
     const parts: string[] = [];
-    if (a.rolls.length) parts.push(`<div class="an-simrow"><span class="an-k">連打</span><span class="an-eq small">${s.roll.join('<i>+</i>')}<i>=</i><b>${s.rollHits} 打</b></span></div>`);
+    if (a.rolls.length) parts.push(`<div class="an-simrow"><span class="an-k">連打</span><span class="an-eq small">${s.roll.map((h) => `<span>${h}</span>`).join('<i>+</i>')}<i>=</i><b>${s.rollHits} 打</b></span></div>`);
     if (a.balloons.length) parts.push(`<div class="an-simrow"><span class="an-k">風船</span><span class="an-eq small">${s.balloon.map((h, i) => `<span class="${h >= a.balloons[i].hits ? 'pop' : 'miss'}">${h}</span>`).join('<i>+</i>')}<i>=</i><b>${s.balloonHits} 打</b></span><small>割れる ${s.popped}/${a.balloons.length}</small></div>`);
     parts.push(`<div class="an-simsum"><div><span class="an-k">合計</span><b>${fmtNum(s.total)} 打</b></div><div><span class="an-k">スコア（全良）</span><b>${fmtNum(a.ceiling - s.balloonLoss + s.rollScore)}</b></div></div>`);
     el.innerHTML = parts.join('');
