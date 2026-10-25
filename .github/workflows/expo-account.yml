@@ -14,5 +14,9 @@ jobs:
           node-version: 22
       - name: アカウントと組織
         run: |
-          npx --yes eas-cli@latest account:view 2>&1 | tee out.txt
-          while IFS= read -r line; do [ -n "$line" ] && echo "::notice title=account::$line"; done < out.txt
+          for q in '{ meActor { __typename accounts { name } } }' '{ viewer { username accounts { name } } }' '{ meUserActor { username accounts { name } } }'; do
+            body=$(node -e 'console.log(JSON.stringify({query: process.argv[1]}))' "$q")
+            out=$(curl -sS https://api.expo.dev/graphql -H "Authorization: Bearer $EXPO_TOKEN" -H 'content-type: application/json' -d "$body" | head -c 600)
+            echo "$out"
+            echo "::notice title=account::$out"
+          done
