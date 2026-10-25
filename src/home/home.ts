@@ -183,25 +183,10 @@ export class Home {
     for (const f of [...this.folders].sort((a, b) => a.localeCompare(b, 'ja'))) {
       const n = this.songs.filter((x) => x.folders.includes(f)).length;
       const on = this.folder === f && !this.query;
-      if (this.renaming === f) {
-        // 名前を変えている途中: その場で入力する
-        fl.push(`<div class="hf hf-edit"><input class="hf-in" data-frename="${esc(f)}" value="${esc(f)}" maxlength="40" enterkeyhint="done" autocomplete="off"><button class="hf-ok" data-fok aria-label="決定">✓</button></div>`);
-        continue;
-      }
       fl.push(`<div class="hf ${on ? 'on' : ''}" data-folder="${esc(f)}"><span>${esc(f)}</span><small>${n}</small><button class="hf-more" data-fmore="${esc(f)}" aria-label="フォルダの操作">${ICON.more}</button></div>`);
     }
     fl.push(`<button class="hf hf-add" data-h="folder"><span>＋ 新しいフォルダ</span></button>`);
     this.foldersEl.innerHTML = fl.join('');
-    const rin = this.foldersEl.querySelector<HTMLInputElement>('[data-frename]');
-    if (rin) {
-      rin.focus();
-      rin.select();
-      rin.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); void this.commitRename(); }
-        else if (e.key === 'Escape') { this.renaming = null; this.render(); }
-      });
-      rin.addEventListener('blur', () => setTimeout(() => void this.commitRename(), 120));
-    }
 
     // 真ん中: 曲の縦の一覧
     const pk = this.picking;
@@ -276,8 +261,6 @@ export class Home {
     if ((x = d('[data-edit]'))) { this.stopPreview(); void this.host.open(x.dataset.edit!, 'edit'); return; }
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
-    if ((x = d('[data-fok]'))) { void this.commitRename(); return; }
-    if (d('[data-frename]')) return;
     if ((x = d('[data-fmore]'))) { this.folderMenu(x.dataset.fmore!, x); return; }
     if ((x = d('[data-pk]'))) { void this.pickAction(x.dataset.pk!, x); return; }
     if ((x = d('[data-h]'))) { void this.action(x.dataset.h!); return; }
@@ -314,8 +297,8 @@ export class Home {
     else if (a === 'online') { this.stopPreview(); this.host.online(); }
     else if (a === 'new') { this.stopPreview(); await this.host.create(this.folder ?? ''); }
     else if (a === 'folder') {
-      const name = prompt('新しいフォルダの名前')?.trim();
-      if (!name || name === UNCAT) return;
+      const name = await this.askName('新しいフォルダ', '', '作る');
+      if (!name) return;
       await addFolder(name);
       await this.reload();
       this.folder = name;
@@ -469,8 +452,8 @@ export class Home {
         }
       }] as [string, () => Promise<void>]),
       ['＋ 新しいフォルダ…', async () => {
-        const name = prompt('新しいフォルダの名前')?.trim();
-        if (!name || name === UNCAT) return;
+        const name = await this.askName('新しいフォルダ', '', '作って入れる');
+        if (!name) return;
         await addToFolder(ids, name);
         if (move) await removeFromFolder(ids, move);
         await done(`${ids.length} 曲を「${name}」に${move ? '移しました' : '入れました'}`);
@@ -519,41 +502,65 @@ export class Home {
     }
   }
 
-  /** 名前を変えているフォルダ（null = していない） */
-  private renaming: string | null = null;
-  private committing = false;
+  /**
+   * フォルダの名前を入れてもらう（画面の上のほうに大きな入力欄を出す。下はキーボードで隠れるので）。
+   * やめたら null。使えない名前は入れられない
+   */
+  private askName(title: string, initial: string, ok: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.el.querySelector('.home-ask')?.remove();
+      const box = document.createElement('div');
+      box.className = 'home-ask';
+      box.innerHTML = `<div class="ha-box" role="dialog" aria-label="${esc(title)}">
+          <h3>${esc(title)}</h3>
+          <input class="ha-in" type="text" maxlength="40" value="${esc(initial)}" placeholder="フォルダの名前" enterkeyhint="done" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <p class="ha-err"></p>
+          <div class="ha-btns"><button class="ha-cancel">やめる</button><button class="ha-ok">${esc(ok)}</button></div>
+        </div>`;
+      this.el.appendChild(box);
+      const input = box.querySelector<HTMLInputElement>('.ha-in')!;
+      const okBtn = box.querySelector<HTMLButtonElement>('.ha-ok')!;
+      const err = box.querySelector<HTMLElement>('.ha-err')!;
+      const check = () => {
+        const v = input.value.trim();
+        const bad = !v ? '' : v === UNCAT || v === 'すべて' || v === '未分類' ? 'その名前は使えません' : '';
+        err.textContent = bad;
+        okBtn.disabled = !v || !!bad || v === initial;
+        return okBtn.disabled ? null : v;
+      };
+      const close = (v: string | null) => {
+        box.remove();
+        resolve(v);
+      };
+      input.addEventListener('input', check);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); const v = check(); if (v) close(v); }
+        else if (e.key === 'Escape') close(null);
+      });
+      okBtn.addEventListener('click', () => { const v = check(); if (v) close(v); });
+      box.querySelector('.ha-cancel')!.addEventListener('click', () => close(null));
+      box.addEventListener('pointerdown', (e) => { if (e.target === box) close(null); });
+      check();
+      input.focus();
+      input.select();
+    });
+  }
 
-  /** 入力した名前に変える（同じ名前のフォルダがあるときは、まとめてよいか聞く） */
-  private async commitRename() {
-    const from = this.renaming;
-    const el = this.foldersEl.querySelector<HTMLInputElement>('[data-frename]');
-    if (from === null || !el || this.committing) return;
-    const to = el.value.trim();
-    if (!to || to === from) { this.renaming = null; this.render(); return; }
-    if (to === UNCAT) { this.host.toast('その名前は使えません'); return; }
-    this.committing = true;
-    try {
-      if (this.folders.includes(to) && !confirm(`「${to}」はすでにあります。2 つのフォルダをまとめますか？`)) {
-        el.focus();
-        return;
-      }
-      this.renaming = null;
-      await renameFolder(from, to);
-      if (this.folder === from) this.folder = to;
-      await this.reload();
-      this.render();
-      this.host.toast(`フォルダの名前を「${to}」にしました`);
-    } finally {
-      this.committing = false;
-    }
+  /** フォルダの名前を変える（同じ名前のフォルダがあるときは、まとめてよいか聞く） */
+  private async renameFolderAsk(from: string) {
+    const to = await this.askName('フォルダの名前を変える', from, '変える');
+    if (!to) return;
+    if (this.folders.includes(to) && !confirm(`「${to}」はすでにあります。2 つのフォルダをまとめますか？`)) return;
+    await renameFolder(from, to);
+    if (this.folder === from) this.folder = to;
+    await this.reload();
+    this.render();
+    this.host.toast(`フォルダの名前を「${to}」にしました`);
   }
 
   private folderMenu(name: string, anchor: HTMLElement) {
     this.popup(anchor, [
-      ['名前を変える', () => {
-        this.renaming = name;
-        this.render();
-      }],
+      ['名前を変える', () => this.renameFolderAsk(name)],
       ['フォルダを消す（曲は残す）', async () => {
         if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は消えず、このフォルダから外れるだけです）`)) return;
         await deleteFolder(name);

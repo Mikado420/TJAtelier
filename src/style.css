@@ -1616,9 +1616,17 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 }
 /* フォルダの「…」はどのフォルダにも出す（選んでいないときは控えめに） */
 .home .hf:not(.on) .hf-more { opacity: 0.45; }
-.home .hf.hf-edit { padding: 0 6px 0 8px; gap: 4px; background: rgba(255, 255, 255, 0.06); }
-.hf-in { flex: 1; min-width: 0; height: 32px; padding: 0 8px; font-size: 16px; font-weight: 700; color: #fff; background: var(--inp); border: 1px solid var(--accent); border-radius: 0; }
-.hf-in:focus { outline: none; }
-.hf-ok { width: 32px; height: 32px; flex: none; display: grid; place-items: center; font-size: 16px; font-weight: 900; color: #fff; background: var(--accent); border-radius: 0; }
-.home .hf.hf-edit .hf-in { flex: 1 1 auto; width: 100%; }
-.home .hf.hf-edit .hf-ok { background: var(--accent); color: #fff; }
+/* フォルダの名前を入れる窓（画面の上のほうに出す。下はキーボードで隠れるので） */
+.home-ask { position: absolute; inset: 0; z-index: 30; display: flex; justify-content: center; align-items: flex-start; padding: calc(env(safe-area-inset-top) + 18px) 16px 16px; background: rgba(0, 0, 0, 0.55); }
+.ha-box { width: min(460px, 100%); background: var(--panel); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6); }
+.ha-box h3 { margin: 0; font-size: 15px; font-weight: 900; color: #fff; }
+.home .ha-in { width: 100%; height: 46px; padding: 0 12px; font-size: 18px; font-weight: 700; color: #fff; -webkit-text-fill-color: #fff; background: var(--deep); border: 2px solid var(--accent); border-radius: 0; }
+.home .ha-in:focus { outline: none; border-color: var(--accent-hi); }
+.home .ha-in::placeholder { color: rgba(255, 255, 255, 0.35); -webkit-text-fill-color: rgba(255, 255, 255, 0.35); }
+.ha-err { margin: 0; min-height: 14px; font-size: 12px; color: #ff9d8a; }
+.ha-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.home .ha-btns button { height: 40px; min-width: 96px; padding: 0 16px; font-size: 14px; font-weight: 800; color: #fff; background: var(--btn); border-radius: 0; --sk: calc(40px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
+.home .ha-btns .ha-ok { background: var(--accent); }
+.home .ha-btns .ha-ok:disabled { opacity: 0.4; }
+.home .ha-in::selection { background: var(--accent); color: #fff; -webkit-text-fill-color: #fff; }
+.ha-err:empty { display: none; }
