@@ -107,6 +107,19 @@ export class Renderer {
   padVisible = true;
   /** オンライン対戦の相手（いなければ空） */
   opponents: Opponent[] = [];
+  private hud: HTMLCanvasElement | null = null;
+  /** HUD に描いてある相手のパネルの中身（変わったら描き直す） */
+  private hudKeys = new Map<string, string>();
+
+  /** オンライン対戦の相手を決める（背景・解像度を作り直す） */
+  setOpponents(list: Opponent[]) {
+    this.opponents = list;
+    this.resize();
+  }
+
+  /** 自分のレーンで求めた、画面に入る音符 [番号, x, 終わりの x, …]（相手のレーンで使い回す） */
+  private visNotes: number[] = [];
+  private visBars: number[] = [];
 
   private dpr = 1;
   private s = 1;
@@ -152,6 +165,12 @@ export class Renderer {
     bg.setAttribute('aria-hidden', 'true');
     canvas.parentElement?.insertBefore(bg, canvas);
     this.bg = bg;
+    // オンライン対戦の相手のパネル（点数などが変わったときだけ描き直す）。背景と手前の間に置く
+    const hud = document.createElement('canvas');
+    hud.className = 'game-bg game-hud';
+    hud.setAttribute('aria-hidden', 'true');
+    canvas.parentElement?.insertBefore(hud, canvas);
+    this.hud = hud;
     this.ctx = canvas.getContext('2d')!;
     // Web フォントが後から読み込まれたら、前もって描いておいた文字の絵を作り直す
     document.fonts?.addEventListener?.('loadingdone', () => {
@@ -167,7 +186,8 @@ export class Renderer {
 
   resize() {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
+    this.dpr = Math.min(this.opponents.length ? 1.5 : 2, window.devicePixelRatio || 1);
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(w * this.dpr);
@@ -199,6 +219,58 @@ export class Renderer {
     this.sprites.clear();
     this.padFlash = null;
     this.buildBackground();
+    if (this.hud) {
+      this.hud.width = this.canvas.width;
+      this.hud.height = this.canvas.height;
+      this.hud.style.display = this.opponents.length ? '' : 'none';
+    }
+    this.hudKeys.clear();
+  }
+
+  /** 相手の段の位置（上の端）と縮める割合 */
+  private rowGeom(n: number) {
+    const rowH = TEXT_BOTTOM - LANE_TOP + 12;
+    const gap = 8;
+    const top0 = TEXT_BOTTOM + 12;
+    const k = Math.min(1, (REF_H - top0) / (this.opponents.length * (rowH + gap)));
+    return { top: top0 + n * (rowH + gap) * k, k, rowH };
+  }
+
+  /** 相手のパネルを、数が変わったものだけ HUD に描き直す */
+  private updateHud() {
+    const h = this.hud;
+    if (!h) return;
+    const hc = h.getContext('2d')!;
+    for (let n = 0; n < this.opponents.length; n++) {
+      const o = this.opponents[n];
+      const no = n + 2;
+      const key = `${no}|${o.name}|${o.score}|${o.combo}|${o.good}|${o.ok}|${o.bad}|${Math.round(o.gauge)}|${o.status}`;
+      if (this.hudKeys.get(o.id) === key) continue;
+      this.hudKeys.set(o.id, key);
+      const { top, k, rowH } = this.rowGeom(n);
+      hc.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
+      hc.translate(0, top);
+      hc.scale(k, k);
+      hc.translate(0, -(LANE_TOP - 6));
+      hc.clearRect(0, LANE_TOP - 6, LANE_X, rowH);
+      const prev = this.ctx;
+      this.ctx = hc;
+      try {
+        this.paintOppPanel(o, no, 0);
+      } finally {
+        this.ctx = prev;
+      }
+      // タッチ用の太鼓（半透明）はパネルの上にも重ねる（背景の太鼓がパネルに隠れないように）
+      if (this.touch && this.padVisible) {
+        hc.save();
+        hc.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        hc.beginPath();
+        hc.rect(this.ox, this.oy + top * this.s, LANE_X * k * this.s, rowH * k * this.s);
+        hc.clip();
+        this.drawPadShape(hc);
+        hc.restore();
+      }
+    }
   }
 
   /** レーンの動かない部分（黒い枠・濃い灰色の本体・音符文字の帯） */
@@ -303,11 +375,32 @@ export class Renderer {
     c.fillStyle = '#120c0a';
     c.fillRect(V.x0, V.y1 - 70, V.x1 - V.x0, 4);
     this.paintLaneBase(c, V.x1);
+    // オンライン対戦の相手のレーンの動かない部分
+    for (let n = 0; n < this.opponents.length; n++) {
+      const { top, k } = this.rowGeom(n);
+      c.save();
+      c.translate(0, top);
+      c.scale(k, k);
+      c.translate(0, -(LANE_TOP - 6));
+      this.paintLaneBase(c, V.x1 / k);
+      c.restore();
+    }
     c.restore(); // 16:9 の枠の切り抜きを外す（太鼓は黒帯の上まで描く）
     // タッチ用の太鼓（画面 px の座標系）
     if (this.touch && this.padVisible) {
       c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawPadShape(c);
+    }
+    // 指置きの帯（動かないので背景に描いておく）
+    if (this.restZone) {
+      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      const prev = this.ctx;
+      this.ctx = c;
+      try {
+        this.drawRest();
+      } finally {
+        this.ctx = prev;
+      }
     }
     this.bg = bg;
   }
@@ -317,6 +410,7 @@ export class Renderer {
    * 毎フレームはそれを貼るだけにする。端末のピクセルの位置まで同じになるように描くので、見た目は変わらない
    */
   private gogoGrad: CanvasGradient | null = null;
+  private gogoGrads = new Map<number, CanvasGradient>();
   private gogoGradRight = 0;
   private sprites = new Map<string, { c: HTMLCanvasElement; dx: number; dy: number; x0: number; y0: number }>();
 
@@ -499,8 +593,11 @@ export class Renderer {
 
     this.drawTop(V, gogo, wall);
     this.drawTitle(info);
-    this.drawBottom(V, wall);
-    this.drawFireworks(wall);
+    // オンライン対戦では下は相手のレーンなので、花びら・花火は描かない
+    if (!this.opponents.length) {
+      this.drawBottom(V, wall);
+      this.drawFireworks(wall);
+    }
     this.drawLane(V, game, bars, now, gogo, wall);
     if (this.opponents.length) {
       this.drawOpponents(V, game, bars, now, gogo, wall);
@@ -508,7 +605,9 @@ export class Renderer {
     this.drawBursts(wall);
     this.drawPanel(st.score, st.combo, info, wall);
     // オンライン対戦: 自分の良・可・不可もパネルに出す
-    if (this.opponents.length) this.paintCounts(st.good, st.ok, st.bad);
+    if (this.opponents.length) {
+      this.drawLayer('own-counts', `${st.good}|${st.ok}|${st.bad}`, 150, LANE_TOP + 60, 190, 116, () => this.paintCounts(st.good, st.ok, st.bad));
+    }
     this.drawGauge(st.gauge, wall);
     this.drawRollBubble(wall);
     this.drawJudgeText(wall);
@@ -566,7 +665,11 @@ export class Renderer {
     // ゴーゴータイムだけ、レーンを赤紫に塗り直す
     if (gogo) {
       // 参考動画: 左（判定枠側）は暗い赤茶、右へ行くほど赤紫（グラデーションは一度だけ作って使い回す）
-      if (!this.gogoGrad || this.gogoGradRight !== right) {
+      const cached = this.gogoGrads.get(right);
+      if (cached) {
+        this.gogoGrad = cached;
+        this.gogoGradRight = right;
+      } else if (!this.gogoGrad || this.gogoGradRight !== right) {
         const g = ctx.createLinearGradient(LANE_X, 0, right, 0);
         g.addColorStop(0, '#48222a');
         g.addColorStop(0.3, '#5a2126');
@@ -575,6 +678,8 @@ export class Renderer {
         g.addColorStop(1, '#6a3550');
         this.gogoGrad = g;
         this.gogoGradRight = right;
+        if (this.gogoGrads.size > 6) this.gogoGrads.clear();
+        this.gogoGrads.set(right, g);
       }
       ctx.fillStyle = this.gogoGrad;
       ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
@@ -606,12 +711,20 @@ export class Renderer {
     }
     if (!opp) this.drawJudgeGlow(wall);
 
-    // 小節線
+    // 小節線（相手のレーンは、自分のレーンで求めた位置を使い回す）
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    for (const b of bars) {
-      const x = this.xOf(b.time, b.beat, b, now);
-      if (x < LANE_X || x > right) continue;
-      ctx.fillRect(x - 1.5, LANE_TOP, 3, LANE_BOTTOM - LANE_TOP);
+    if (opp) {
+      for (const x of this.visBars) if (x <= right) ctx.fillRect(x - 1.5, LANE_TOP, 3, LANE_BOTTOM - LANE_TOP);
+    } else {
+      const share = this.opponents.length > 0;
+      if (share) this.visBars.length = 0;
+      const far = share ? right * 1.5 : right;
+      for (const b of bars) {
+        const x = this.xOf(b.time, b.beat, b, now);
+        if (x < LANE_X || x > far) continue;
+        if (share) this.visBars.push(x);
+        if (x <= right) ctx.fillRect(x - 1.5, LANE_TOP, 3, LANE_BOTTOM - LANE_TOP);
+      }
     }
 
 
@@ -625,16 +738,35 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const states = game.states;
-    for (let i = states.length - 1; i >= 0; i--) {
+    // オンライン対戦: 画面に入る音符の位置を一度だけ求めて、相手のレーンでも使う（相手の数だけ計算し直さない）
+    const share = !opp && this.opponents.length > 0;
+    const vis = this.visNotes;
+    if (share) vis.length = 0;
+    // 自分は後ろの音符から描く（手前の音符が上になる）。相手は、自分が入れた順（同じく後ろから）に描く
+    const count = opp ? vis.length / 3 : states.length;
+    for (let k = count - 1; k >= 0; k--) {
+      const q = opp ? count - 1 - k : 0;
+      const i = opp ? vis[q * 3] : k;
       const s = states[i];
       const n = s.note;
+      let x: number;
+      let endX: number;
       if (opp) {
         const m = opp.marks[i];
         if ((m === 1 || m === 2) && n.type !== 'roll' && n.type !== 'bigRoll' && n.type !== 'balloon') continue;
-      } else if (s.done && !s.missed && n.type !== 'roll' && n.type !== 'bigRoll') continue;
-      let x = this.xOf(n.time, n.beat, n, now);
-      const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
-      if (endX < LANE_X - 120 || x > right + 120) continue;
+        x = vis[q * 3 + 1];
+        endX = vis[q * 3 + 2];
+        if (x > right + 120) continue;
+      } else {
+        const hidden = s.done && !s.missed && n.type !== 'roll' && n.type !== 'bigRoll';
+        if (hidden && !share) continue;
+        x = this.xOf(n.time, n.beat, n, now);
+        endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
+        // 相手のレーンは縮めると右に長くなるので、少し先まで入れておく
+        if (endX < LANE_X - 120 || x > (share ? right * 1.5 : right) + 120) continue;
+        if (share) vis.push(i, x, endX);
+        if (hidden || x > right + 120) continue;
+      }
       const r = isBig(n.type) ? NR * BIG_SCALE : NR;
 
       if (n.type === 'balloon') {
@@ -677,31 +809,88 @@ export class Renderer {
   private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number) {
     const ctx = this.ctx;
     const opps = this.opponents;
-    const rowH = TEXT_BOTTOM - LANE_TOP + 12; // 黒い枠を含む 1 段の高さ
-    const gap = 8;
-    const top0 = TEXT_BOTTOM + 12;
-    const k = Math.min(1, (REF_H - top0) / (opps.length * (rowH + gap)));
+    this.updateHud();
     for (let n = 0; n < opps.length; n++) {
       const o = opps[n];
-      const top = top0 + n * (rowH + gap) * k;
+      const { top, k, rowH } = this.rowGeom(n);
       ctx.save();
       // 段の中は自分の段と同じ座標で描く（上下にずらし、小さいときは左上を中心に縮める）
       ctx.translate(0, top);
       ctx.scale(k, k);
       ctx.translate(0, -(LANE_TOP - 6));
       const right = V.x1 / k;
-      this.paintOppPanel(o, n + 2, wall);
       ctx.save();
       ctx.beginPath();
       ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, rowH);
       ctx.clip();
-      this.paintLaneBase(ctx, right);
+      // レーンの動かない部分は背景に、パネルは HUD に描いてある
       this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
       this.drawOppBurst(o, game, wall);
       ctx.restore();
       this.drawOppJudgeText(o, wall);
       ctx.restore();
     }
+  }
+
+  /**
+   * 変わったときだけ描き直す絵（今の座標系の x, y, w, h の範囲）。key が同じ間は、前に描いた絵を貼るだけ
+   */
+  private layers = new Map<string, { key: string; c: HTMLCanvasElement; sc: number }>();
+  private drawLayer(id: string, key: string, x: number, y: number, w: number, h: number, paint: () => void) {
+    const ctx = this.ctx;
+    const m = ctx.getTransform();
+    const sc = Math.hypot(m.a, m.b) || 1;
+    const full = `${key}|${sc.toFixed(3)}`;
+    let L = this.layers.get(id);
+    if (!L || L.key !== full) {
+      const c = L?.c ?? document.createElement('canvas');
+      const cw = Math.ceil(w * sc) + 2;
+      const ch = Math.ceil(h * sc) + 2;
+      if (c.width !== cw || c.height !== ch) {
+        c.width = cw;
+        c.height = ch;
+      }
+      const g = c.getContext('2d')!;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, cw, ch);
+      g.setTransform(sc, 0, 0, sc, -x * sc, -y * sc);
+      const prev = this.ctx;
+      this.ctx = g;
+      try {
+        paint();
+      } finally {
+        this.ctx = prev;
+      }
+      L = { key: full, c, sc };
+      this.layers.set(id, L);
+      if (this.layers.size > 12) this.layers.delete(this.layers.keys().next().value!);
+    }
+    ctx.drawImage(L.c, x, y, L.c.width / L.sc, L.c.height / L.sc);
+  }
+
+  /** 判定枠の光（相手用。一度だけ描いて、濃さを変えて貼る） */
+  private glowSprites: Partial<Record<Judge, HTMLCanvasElement>> = {};
+  private glowSprite(judge: Judge) {
+    let c = this.glowSprites[judge];
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d')!;
+    const rg = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    if (judge === 'good') {
+      rg.addColorStop(0, 'rgb(255,246,150)');
+      rg.addColorStop(0.75, 'rgb(250,214,40)');
+      rg.addColorStop(1, 'rgb(214,160,10)');
+    } else {
+      rg.addColorStop(0, 'rgb(255,255,255)');
+      rg.addColorStop(1, 'rgb(200,215,230)');
+    }
+    g.fillStyle = rg;
+    g.beginPath();
+    g.arc(64, 64, 64, 0, Math.PI * 2);
+    g.fill();
+    this.glowSprites[judge] = c;
+    return c;
   }
 
   /** 2P・3P・4P の色（パネルの上と下、名札の丸） */
@@ -811,20 +1000,8 @@ export class Renderer {
     // 判定枠の光
     const a = 0.85 * (ms < 100 ? 1 : ms < 240 ? 1 - ((ms - 100) / 140) * 0.6 : 0.4 * (1 - (ms - 240) / 240));
     const r = NR - 4;
-    const g = ctx.createRadialGradient(this.jx, JY, 4, this.jx, JY, r);
-    if (judge === 'good') {
-      g.addColorStop(0, 'rgb(255,246,150)');
-      g.addColorStop(0.75, 'rgb(250,214,40)');
-      g.addColorStop(1, 'rgb(214,160,10)');
-    } else {
-      g.addColorStop(0, 'rgb(255,255,255)');
-      g.addColorStop(1, 'rgb(200,215,230)');
-    }
     ctx.globalAlpha = a;
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(this.jx, JY, r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(this.glowSprite(judge), this.jx - r, JY - r, r * 2, r * 2);
     // 広がる輪
     if (ms <= 200) {
       const big = isBig(game.states[fx.i]?.note.type ?? 'don');
@@ -836,7 +1013,7 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  /** 相手の「良」「可」「不可」（自分と同じく、レーンの上に出る） */
+  /** 相手の「良」「可」「不可」（自分と同じく、レーンの上に出る。文字の絵は使い回す） */
   private drawOppJudgeText(o: Opponent, wall: number) {
     const fx = o.fx;
     if (!fx) return;
@@ -847,20 +1024,10 @@ export class Renderer {
     const rise = ease(Math.min(1, age / 60));
     const y = LANE_TOP - 6 - 30 * rise;
     ctx.globalAlpha = age < 300 ? 1 : 1 - (age - 300) / 100;
-    ctx.font = `900 ${judge === 'bad' ? 56 : 68}px ${FONT}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    let fill: string | CanvasGradient;
-    if (judge === 'good') {
-      const g = ctx.createLinearGradient(0, y - 34, 0, y + 34);
-      g.addColorStop(0, '#fff6b0');
-      g.addColorStop(0.5, '#ffc21a');
-      g.addColorStop(1, '#ff8a00');
-      fill = g;
-    } else fill = judge === 'ok' ? '#ffffff' : '#7f9cff';
-    outlinedText(ctx, JUDGE_TEXT[judge], this.jx, y, fill, '#3a1300', 10);
+    drawCachedText(ctx, JUDGE_TEXT[judge], this.jx, y, `900 ${judge === 'bad' ? 56 : 68}px ${FONT}`, judge === 'good' ? '#ffc21a' : judge === 'ok' ? '#ffffff' : '#7f9cff', '#3a1300', 10);
     ctx.globalAlpha = 1;
   }
+
 
   /** 音符の下の文字（ドン / ド / コ / カッ / カ / 連打 / ふうせん） */
   private labelsFor(game: Game): Map<Note, string> {
@@ -1884,7 +2051,7 @@ export class Renderer {
     const ctx = this.ctx;
     // 叩き分けの帯は動かないので背景と一緒に前もって描いてある（drawPadShape）。ここでは光と波紋だけ
     if (!this.bg && this.padVisible) this.drawPadShape(ctx);
-    this.drawRest();
+    if (!this.bg) this.drawRest();
 
     // 叩いた側が光る（ドン＝面の左半分／右半分、カッ＝縁の左側／右側）。太鼓を隠しているときは波紋だけ。
     // 光の形は前もって小さめの画像にしておき、毎フレームはそれを貼るだけにする（大きな形を毎回塗ると重くてカクつく）

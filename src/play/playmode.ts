@@ -163,7 +163,7 @@ export class PlayMode {
     };
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
-    this.renderer.opponents = hooks.opponents;
+    this.renderer.setOpponents(hooks.opponents);
     this.renderer.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
     this.input.refresh();
@@ -188,6 +188,7 @@ export class PlayMode {
     this.autoIdx = 0;
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
+    (window as unknown as { __playPerf?: unknown }).__playPerf = this.perf;
     this.cur = { course, info, endAt, clicks: [] };
     this.timeFloor = -Infinity;
     this.runLoop();
@@ -217,7 +218,7 @@ export class PlayMode {
     postNative({ type: 'play', active: false });
     cancelAnimationFrame(this.raf);
     this.audio.stop();
-    this.renderer.opponents = [];
+    this.renderer.setOpponents([]);
     this.leaveScreen();
     o.onQuit();
   }
@@ -502,7 +503,7 @@ export class PlayMode {
       const o = this.online;
       this.sendOnline(g, true);
       this.online = null;
-      this.renderer.opponents = [];
+      this.renderer.setOpponents([]);
       this.leaveScreen();
       const s = g.stats;
       o.onFinish({ score: s.score, good: s.good, ok: s.ok, bad: s.bad, maxCombo: s.maxCombo, rolls: s.rolls });
