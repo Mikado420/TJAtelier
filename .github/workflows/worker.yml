@@ -1,0 +1,50 @@
+name: オンライン対戦サーバーを配信
+
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/worker.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: worker-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: ライブラリを入れる
+        run: npm install --no-audit --no-fund
+
+      - name: アカウントの確認
+        run: |
+          npx wrangler whoami
+          ACC=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" https://api.cloudflare.com/client/v4/accounts | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log((j.result&&j.result[0]&&j.result[0].id)||"")})')
+          echo "account: ${ACC:0:6}…"
+          echo "CLOUDFLARE_ACCOUNT_ID=$ACC" >> "$GITHUB_ENV"
+          SUB=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$ACC/workers/subdomain")
+          echo "subdomain: $SUB"
+          echo "::notice title=workers.dev::$(echo "$SUB" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).result.subdomain||"(なし)")}catch{console.log("(不明)")}})')"
+
+      - name: 配信
+        run: |
+          npx wrangler deploy 2>&1 | tee deploy.log
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
+          echo "::notice title=Worker URL::${URL:-見つかりません}"
+
+      - name: 動作確認
+        run: |
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
+          sleep 5
+          echo "::notice title=GET /rooms::$(curl -s "$URL/rooms")"
