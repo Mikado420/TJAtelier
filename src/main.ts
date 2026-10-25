@@ -23,7 +23,7 @@ import { drawChartImage } from './chart/chartImage';
 import { mountTimeline } from './ui/infoTimeline';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
-import { loadAudio, loadChart, loadHitSound, saveHitSound } from './io/storage';
+import { loadAudio, loadChart } from './io/storage';
 import { getCurrentId, listSongs, loadSongAudio, loadSongData, newId, saveSong, setCurrentId } from './io/library';
 import { Home } from './home/home';
 import { writeZip } from './io/zip';
@@ -56,6 +56,8 @@ const settings = {
   speed: 1,
   offset: 0,
   hitSound: true,
+  /** 打音: on = いつも鳴らす、playOff = プレイのときだけ鳴らさない、off = 鳴らさない */
+  hitMode: 'on' as 'on' | 'playOff' | 'off',
   metronome: false,
   auto: false,
   showTiming: false,
@@ -86,6 +88,12 @@ try {
   // 横スクロール化で拡大率の意味が変わったので v2 のキーで保存
   Object.assign(settings, JSON.parse(localStorage.getItem('malody-web:settings2') ?? '{}'));
   // 前の版はプレイをオートだけにしていて、その間に保存した auto: true が残っているので一度だけ戻す
+  // 打音のオンオフを 3 つの選び方にした（前の版でオフにしていたら「鳴らさない」）
+  if (!localStorage.getItem('malody-web:hitMode')) {
+    if (settings.hitSound === false) settings.hitMode = 'off';
+    settings.hitSound = true;
+    localStorage.setItem('malody-web:hitMode', '1');
+  }
   // 連打の秒速の初期値を 30 に変えた（前の初期値 15 のままなら 30 に）
   if (!localStorage.getItem('malody-web:rollRate30')) {
     if (settings.rollRate === 15) settings.rollRate = 30;
@@ -257,7 +265,7 @@ function scheduleAhead(t: number) {
   const until = t + 0.3 * settings.rate;
   while (hitIdx < hitEvents.length && hitEvents[hitIdx].t <= until) {
     const e = hitEvents[hitIdx++];
-    if (!settings.hitSound) continue;
+    if (settings.hitMode === 'off') continue;
     audio.scheduleHit(e.kind, e.t);
     if (e.pop) audio.scheduleHit('balloon', e.t);
   }
@@ -314,9 +322,9 @@ requestAnimationFrame(loop);
 function updateHeader() {
   $<HTMLButtonElement>('btnUndo').disabled = !ed.canUndo;
   $<HTMLButtonElement>('btnRedo').disabled = !ed.canRedo;
-  // 再生速度が 1.0 でないときだけ、メニューのボタンに小さく出す
-  $('rateLabel').textContent = `${settings.rate.toFixed(2)}x`;
-  $('rateLabel').classList.toggle('hidden', settings.rate === 1);
+  // 再生速度（右のバーのボタン）。1.0 以外は色を変える
+  $('rateLabel').textContent = `${settings.rate.toFixed(settings.rate === 1 ? 1 : 2)}x`;
+  $('btnRate').classList.toggle('on', settings.rate !== 1);
   updateDivStep();
   view.invalidate();
 }
@@ -494,20 +502,12 @@ function menuTiles(tab: MenuTab): Tile[] {
       { label: 'コピー', icon: 'copy', run: () => void fileAction('copy') },
     ];
   }
-  const rates = [1, 0.75, 0.5, 0.25];
   return [
     { label: settings.metronome ? 'メトロノーム ON' : 'メトロノーム OFF', icon: 'metro', on: settings.metronome, keep: true, wide: true, run: () => {
       settings.metronome = !settings.metronome;
       saveSettings();
       updateHeader();
     } },
-    { head: '再生速度' },
-    ...rates.map((r) => ({ label: `${r.toFixed(r === 1 ? 1 : 2)}x`, on: settings.rate === r, keep: true, run: () => {
-      settings.rate = r;
-      saveSettings();
-      updateHeader();
-      if (playing) { stopPlayback(); void startPlayback(); }
-    } })),
   ];
 }
 const svgIcon = (k: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k] ?? ''}</svg>`;
@@ -541,6 +541,15 @@ const closeMenu = () => {
   menuPanel.classList.add('hidden');
   $('btnMenu').classList.remove('open');
 };
+// 再生速度: 押すたびに 1.0 → 0.75 → 0.5 → 0.25 → 1.0
+const RATES = [1, 0.75, 0.5, 0.25];
+$('btnRate').addEventListener('click', () => {
+  closeMenus();
+  settings.rate = RATES[(RATES.indexOf(settings.rate) + 1) % RATES.length] ?? 1;
+  saveSettings();
+  updateHeader();
+  if (playing) { stopPlayback(); void startPlayback(); }
+});
 $('btnMenu').addEventListener('click', (e) => {
   e.stopPropagation();
   closeFlyMenu();
@@ -1080,15 +1089,12 @@ function renderSheet() {
       `<label class="st-row"><span>${label}</span><input type="checkbox" class="st-sw" data-set="${key}" ${on ? 'checked' : ''}></label>`;
     const range = (key: string, label: string, min: number, max: number, step: number, v: number, out: string) =>
       `<label class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}"><output>${out}</output></label>`;
-    const hit = (k: 'don' | 'ka' | 'balloon', label: string) =>
-      `<div class="st-row"><span>${label}</span><em class="st-file ${hitNames[k] ? 'on' : ''}">${esc(hitNames[k] ?? '内蔵')}</em></div>`;
     body.innerHTML = `
       <div class="st-grid">
         <section class="an-card st-card">
           <h3>プレイ</h3>
           ${sw('auto', 'オート', settings.auto)}
-          ${sw('hitSound', '打音', settings.hitSound)}
-          ${sw('showTiming', 'ずれを表示', settings.showTiming)}
+          <div class="st-row"><span>打音</span><div class="st-seg">${([['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const).map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
           ${sw('padVisible', '太鼓を表示', settings.padVisible)}
           ${!isNativeHost() && IS_IOS ? sw('restZone', '上を指置きに', settings.restZone) : ''}
           ${range('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed, settings.speed.toFixed(1))}
@@ -1104,21 +1110,11 @@ function renderSheet() {
           ${range('volMusic', '音源', 0, 2, 0.05, settings.volMusic, settings.volMusic.toFixed(2))}
           ${range('volHit', '打音', 0, 2, 0.05, settings.volHit, settings.volHit.toFixed(2))}
           ${range('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, settings.volMetro.toFixed(2))}
-          <h3>打音</h3>
-          ${hit('don', 'ドン')}
-          ${hit('ka', 'カッ')}
-          ${hit('balloon', '風船')}
-          <div class="st-btns">
-            <button data-act="hitLoad">ファイルを選ぶ</button>
-            <button data-act="hitReset" ${hitNames.don || hitNames.ka || hitNames.balloon ? '' : 'disabled'}>内蔵に戻す</button>
-          </div>
         </section>
         <section class="an-card st-card">
           <h3>エディタ</h3>
-          ${sw('metronome', 'メトロノーム', settings.metronome)}
           <div class="st-sub">レーンの下に出すイベント</div>
           <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>
-          <div class="st-btns"><button data-act="resetZoom">拡大率を戻す</button></div>
         </section>
       </div>
       <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
@@ -1308,6 +1304,14 @@ function renderTjaHl() {
     gut.style.transform = `translateY(${first * lh - ta.scrollTop}px)`;
   }
 }
+
+$('sheetBody').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
+  if (!b) return;
+  settings.hitMode = b.dataset.hitmode as typeof settings.hitMode;
+  saveSettings();
+  b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+});
 
 $('sheetBody').addEventListener('input', (e) => {
   if ((e.target as HTMLElement).id !== 'tjaText') return;
@@ -1607,23 +1611,10 @@ async function fileAction(act: string) {
     const name = COURSE_NAMES.find((n) => !used.has(n)) ?? 'Edit';
     ed.addCourse(name, act === 'dupCourse' ? ed.course.level : 1, act === 'dupCourse' ? ed.course : undefined);
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
-  } else if (act === 'hitLoad') {
-    $<HTMLInputElement>('fileHit').click();
-  } else if (act === 'hitReset') {
-    for (const k of ['don', 'ka', 'balloon'] as const) {
-      await audio.setCustomHit(k, null);
-      hitNames[k] = null;
-      void saveHitSound(k, null);
-    }
-    renderSheet();
-    toast('打音を内蔵の音に戻しました');
   } else if (act === 'calibrate') {
     stopPlayback();
     closeSheet();
     await play.startCalibration();
-  } else if (act === 'resetZoom') {
-    resetZoom();
-    toast('拡大率を戻しました');
   } else if (act === 'delCourse') {
     if (confirm(`${ed.course.name} を削除しますか？`)) ed.removeCourse(ed.courseIndex);
   }
@@ -1631,42 +1622,12 @@ async function fileAction(act: string) {
 
 // ---------- 打音 ----------
 
-const hitNames: Record<HitSound, string | null> = { don: null, ka: null, balloon: null };
-
-async function applyHitSound(kind: HitSound, f: AudioFile | null, save: boolean) {
+/** 打音は同梱の dong / ka / balloon を使う（無ければ内蔵の合成音） */
+async function applyHitSound(kind: HitSound, f: AudioFile) {
   try {
-    await audio.setCustomHit(kind, f ? f.data : null);
-    hitNames[kind] = f ? f.name : null;
-    if (save) void saveHitSound(kind, f);
-    return true;
-  } catch {
-    toast(`「${f?.name}」はこのブラウザで再生できません`);
-    return false;
-  }
+    await audio.setCustomHit(kind, f.data);
+  } catch { /* 再生できない */ }
 }
-
-$<HTMLInputElement>('fileHit').addEventListener('change', async () => {
-  const input = $<HTMLInputElement>('fileHit');
-  const files = Array.from(input.files ?? []);
-  input.value = '';
-  if (!files.length) return;
-  const pick = (re: RegExp) => files.find((f) => re.test(f.name.replace(/\.[^.]+$/, '')));
-  const balloon = pick(/balloon|fusen|ふうせん|風船/i);
-  let don = pick(/don/i);
-  let ka = pick(/(^|[^a-z])ka|katsu|kat/i);
-  // 名前で分けられないときは 1 つ目をドン、2 つ目をカッ
-  if (!don && !ka) [don, ka] = files.filter((f) => f !== balloon);
-  const done: string[] = [];
-  const label = { don: 'ドン', ka: 'カッ', balloon: '風船が割れる音' };
-  for (const [kind, f] of [['don', don], ['ka', ka], ['balloon', balloon]] as const) {
-    if (!f) continue;
-    if (await applyHitSound(kind, { name: f.name, data: await f.arrayBuffer() }, true)) {
-      done.push(label[kind]);
-    }
-  }
-  if (done.length) toast(`${done.join('・')}の打音を読み込みました`);
-  renderSheet();
-});
 
 // ---------- テストプレイ ----------
 
@@ -1752,8 +1713,8 @@ async function siteHitSound(kind: HitSound): Promise<AudioFile | null> {
 
 async function boot() {
   for (const k of ['don', 'ka', 'balloon'] as const) {
-    const f = (await loadHitSound(k)) ?? (await siteHitSound(k));
-    if (f) await applyHitSound(k, f, false);
+    const f = await siteHitSound(k);
+    if (f) await applyHitSound(k, f);
   }
   // 前の版で 1 曲だけ保存していた譜面は、曲の一覧に移す。一覧が空ならサンプル譜面を入れておく
   if (!(await listSongs()).length) {

@@ -1457,3 +1457,17 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .st-chip span { display: block; padding: 6px 10px; font-size: 12px; font-weight: 800; color: var(--c); border: 1.5px solid var(--c); opacity: 0.45; }
 .st-chip input:checked + span { opacity: 1; background: color-mix(in srgb, var(--c) 18%, transparent); }
 .st-ver { margin: 4px 0 0; text-align: right; font-size: 11px; color: var(--sub); }
+/* 選んだ曲: 1 行に 1 曲、全部 */
+.pk-list { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 0; background: rgba(0, 0, 0, 0.18); }
+.pk-item { flex: none; display: flex; align-items: baseline; gap: 8px; min-height: 30px; padding: 5px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); min-width: 0; }
+.pk-item b { font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pk-item small { flex: none; max-width: 40%; font-size: 11px; opacity: 0.75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 右のバーの再生速度 */
+.side > .ratebtn b { font: 800 12px var(--fd); color: #fff; letter-spacing: -0.02em; white-space: nowrap; }
+.side > .ratebtn::before { content: '速度'; font-size: 9px; font-weight: 700; color: rgba(255, 255, 255, 0.75); }
+.side > .ratebtn.on { background: var(--deep); }
+.side > .ratebtn.on b { color: var(--accent-hi); }
+/* 設定: 3 つから選ぶ */
+.st-seg { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.sheet .st-seg button { height: 32px; padding: 0 4px; font-size: 12px; font-weight: 800; border-radius: 0; background: var(--btn); color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
+.sheet .st-seg button.on { background: var(--accent); color: #fff; }

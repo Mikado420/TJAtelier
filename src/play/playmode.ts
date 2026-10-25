@@ -30,6 +30,8 @@ export interface PlaySettings {
   showTiming?: boolean;
   /** 打音を鳴らす */
   hitSound?: boolean;
+  /** 打音: on = 鳴らす、playOff・off = プレイでは鳴らさない */
+  hitMode?: 'on' | 'playOff' | 'off';
   /** タッチを passive で受け取る（iPhone が指を待たずに次へ進むように） */
   passiveTouch?: boolean;
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
@@ -72,7 +74,7 @@ export class PlayMode {
         // オートのときは叩いた入力を受け付けない
         if (!this.active || this.paused || !this.game || this.settings.auto) return;
         // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）
-        this.audio.playHit(kind);
+        if (this.hitOn) this.audio.playHit(kind);
         this.renderer.pushHit(kind, side);
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
@@ -105,6 +107,11 @@ export class PlayMode {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.pause();
     });
+  }
+
+  /** プレイで打音を鳴らすか */
+  private get hitOn() {
+    return (this.settings.hitMode ?? 'on') === 'on' && this.settings.hitSound !== false;
   }
 
   get isActive() {
@@ -311,7 +318,7 @@ export class PlayMode {
   /** これから 0.3 秒以内に鳴る打音を、音符の時刻ちょうどに鳴るよう予約する（叩いた処理の遅れで音がずれない） */
   private scheduleSounds(now: number) {
     const ev = this.autoEvents;
-    const on = this.settings.hitSound !== false;
+    const on = this.hitOn;
     while (this.soundIdx < ev.length && ev[this.soundIdx].t <= now + 0.3) {
       const e = ev[this.soundIdx++];
       if (!on || e.t < now - 0.05) continue;

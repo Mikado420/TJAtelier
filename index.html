@@ -92,7 +92,8 @@
         <button id="btnUndo" title="元に戻す"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
         <button id="btnRedo" title="やり直し"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
         <!-- メニュー: 編集・ファイル・再生をまとめたパネルを出す -->
-        <button id="btnMenu" title="メニュー"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><small id="rateLabel" class="hidden">1.0x</small></button>
+        <button id="btnMenu" title="メニュー"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <button id="btnRate" class="ratebtn" title="再生速度"><b id="rateLabel">1.0x</b></button>
         <button id="btnTest" data-fly="test" title="テストプレイ"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg></button>
         <button id="btnSettings" title="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
       </nav>
@@ -147,7 +148,6 @@
 
     <!-- iPhone では accept に .tja を書くと選べなくなるので拡張子の制限はしない -->
     <input type="file" id="fileOpen" multiple hidden />
-    <input type="file" id="fileHit" multiple hidden />
 
     <div id="play" class="play hidden">
       <canvas id="game"></canvas>

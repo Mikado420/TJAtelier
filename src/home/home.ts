@@ -221,7 +221,7 @@ export class Home {
       this.detail.innerHTML = `
         <div class="pk-panel">
           <div class="pk-head"><small>選択中</small><b>${pk.size}<span>曲</span></b></div>
-          <div class="pk-list">${picked.length ? picked.slice(0, 12).map((x) => `<span>${esc(x.title)}</span>`).join('') + (picked.length > 12 ? `<span class="more">ほか ${picked.length - 12} 曲</span>` : '') : ''}</div>
+          <div class="pk-list">${picked.map((x) => `<div class="pk-item"><b>${esc(x.title)}</b>${x.subtitle ? `<small>${esc(x.subtitle)}</small>` : ''}</div>`).join('')}</div>
           <div class="pk-acts">
             ${act('add', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M12 11.5v5M9.5 14h5"/>', 'フォルダに入れる', '')}
             ${inFolder ? act('move', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9 14h6M13 11.5l2.5 2.5-2.5 2.5"/>', '別のフォルダへ移す', '') : ''}
