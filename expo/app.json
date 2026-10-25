@@ -12,6 +12,11 @@
     "runtimeVersion": {
       "policy": "sdkVersion"
     },
-    "owner": "tjatelier"
+    "owner": "tjatelier",
+    "extra": {
+      "eas": {
+        "projectId": "66852881-5978-446f-9869-8169b13ab3c3"
+      }
+    }
   }
 }

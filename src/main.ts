@@ -42,7 +42,7 @@ const esc = (s: string) =>
 /** iPhone / iPad か */
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 /** Expo Go で開くリンク（EAS Update で配信。.github/workflows/expo-update.yml） */
-const EXPO_LINK = 'exp://u.expo.dev/9ed04cc6-474e-416c-9f42-3cb53d9c2efa?runtime-version=exposdk:58.0.0&channel-name=main';
+const EXPO_LINK = 'exp://u.expo.dev/66852881-5978-446f-9869-8169b13ab3c3?runtime-version=exposdk:58.0.0&channel-name=main';
 
 const settings = {
   /** 前の版の「1 拍を何分割」（読み込みの引き継ぎ用） */
