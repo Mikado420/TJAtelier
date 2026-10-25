@@ -48,3 +48,20 @@ jobs:
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
           sleep 5
           echo "::notice title=GET /rooms::$(curl -s "$URL/rooms")"
+          # 部屋を作って、もう 1 人が入れるかを確かめる
+          node -e '
+            const base = process.argv[1].replace(/^http/, "ws");
+            const id = "T" + Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X");
+            const a = new WebSocket(`${base}/ws/${id}?name=check&create=1&title=check`);
+            const out = [];
+            const done = (m) => { console.log("::notice title=WebSocket::" + m); process.exit(0); };
+            setTimeout(() => done("timeout " + out.join(" ")), 10000);
+            a.onmessage = (e) => {
+              const m = JSON.parse(e.data); out.push("A:" + m.t);
+              if (m.t === "hello") {
+                const b = new WebSocket(`${base}/ws/${id}?name=check2`);
+                b.onmessage = (e2) => { const n = JSON.parse(e2.data); out.push("B:" + n.t); if (n.t === "roster" && n.players.length === 2) done("ok " + out.join(" ")); };
+              }
+            };
+            a.onerror = () => done("error " + out.join(" "));
+          ' "$URL"
