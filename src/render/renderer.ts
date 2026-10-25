@@ -107,7 +107,11 @@ export class Renderer {
   private banner: { combo: number; t: number } | null = null;
   private flowerPop = 0;
   /** ゴーゴータイムの始まりに下の背景で上がる花火 */
-  private fireworks: { x: number; y: number; t: number; hue: number; n: number }[] = [];
+  /**
+   * 床から噴き上がる火花の柱（ゴーゴーの始まり）。t = 噴き出し始めた時刻、last = いちばん最後にゴーゴーが始まった時刻、
+   * ignites = 噴いている最中にまたゴーゴーが始まった時刻（そのたびに柱が光り、火花をぱっと散らす）
+   */
+  private fireworks: { x: number; t: number; last: number; ignites: number[]; n: number }[] = [];
   private wasGogo = false;
   /** 風船が割れた瞬間（白い輪） */
   private rainbow: number | null = null;
@@ -461,7 +465,10 @@ export class Renderer {
     const gogo = course.gogo.some(([a, b]) => now >= a && now < b);
     if (gogo && !this.wasGogo) {
       this.startFireworks(wall);
-      this.gogoStartWall = wall;
+      // 判定枠の炎の広がり: 前の広がりがまだ途中なら最初からやり直さない（短い間隔で点滅するゴーゴーでも跳ねないように）。
+      // レーンが明るくなる光は毎回出す
+      if (wall - this.gogoStartWall >= 260) this.gogoStartWall = wall;
+      this.gogoFlashWall = wall;
     }
     this.wasGogo = gogo;
 
@@ -1225,6 +1232,8 @@ export class Renderer {
 
   /** ゴーゴータイムが始まった時刻（ゴーゴースタートの演出用） */
   private gogoStartWall = -1e9;
+  /** ゴーゴーが始まった最後の時刻（レーンを一瞬明るくする光） */
+  private gogoFlashWall = -1e9;
 
   /**
    * 炎の形（玉の右上から 1 本の先がのびる）。玉と同じ色で、玉の下に描くと 1 つの炎の玉に見える。
@@ -1266,12 +1275,16 @@ export class Renderer {
     const ctx = this.ctx;
     ctx.save();
     const since = wall - this.gogoStartWall;
+    const sinceFlash = wall - this.gogoFlashWall;
+    if (sinceFlash >= 0 && sinceFlash < 260) {
+      // レーンも一瞬だけ明るく（ゴーゴーが始まるたび）
+      ctx.fillStyle = `rgba(255,150,120,${0.16 * (1 - sinceFlash / 260)})`;
+      ctx.fillRect(LANE_X, LANE_TOP, this.vis.x1 - LANE_X, LANE_BOTTOM - LANE_TOP);
+    }
     if (since >= 0 && since < 260) {
-      // ゴーゴースタート: 薄い大きな炎が玉から広がって消える。レーンも一瞬だけ明るく
+      // ゴーゴースタート: 薄い大きな炎が玉から広がって消える
       const k = since / 260;
       const e = 1 - (1 - k) * (1 - k);
-      ctx.fillStyle = `rgba(255,150,120,${0.16 * (1 - k)})`;
-      ctx.fillRect(LANE_X, LANE_TOP, this.vis.x1 - LANE_X, LANE_BOTTOM - LANE_TOP);
       ctx.save();
       ctx.globalAlpha = 0.4 * (1 - k);
       ctx.translate(this.jx, JY);
@@ -1344,17 +1357,29 @@ export class Renderer {
    * 一斉に噴き上がり、上で火花が散って消える）
    */
   private startFireworks(wall: number) {
+    // まだ噴いている最中に次のゴーゴーが始まったら、柱を足さずに、今の柱をもう一度光らせて噴き続ける
+    // （短い間隔で点滅するゴーゴーでも、柱が重なって明るくなりすぎたり、途切れたりしない）
+    const live = this.fireworks.filter((f) => wall - f.last < FW_EMIT + 150);
+    if (live.length) {
+      for (const f of live) {
+        f.last = wall + Math.random() * 30;
+        f.ignites.push(f.last);
+        if (f.ignites.length > 8) f.ignites.shift();
+      }
+      return;
+    }
     const V = this.vis;
     const step = 230;
     for (let x = V.x0 + step / 2; x < V.x1; x += step) {
-      this.fireworks.push({ x: x + (Math.random() - 0.5) * 40, y: 0, t: wall + Math.random() * 60, hue: 45, n: 150 });
+      const t = wall + Math.random() * 60;
+      this.fireworks.push({ x: x + (Math.random() - 0.5) * 40, t, last: t, ignites: [], n: 150 });
     }
   }
 
   private drawFireworks(wall: number) {
     if (!this.fireworks.length) return;
     const ctx = this.ctx;
-    const EMIT = 650; // 噴き出している時間
+    const EMIT = FW_EMIT; // 噴き出している時間（最後にゴーゴーが始まってから）
     const LIFE = 700; // 1 粒の寿命
     const bottom = REF_H - 70;
     const top = TEXT_BOTTOM;
@@ -1365,52 +1390,78 @@ export class Renderer {
     ctx.rect(this.vis.x0, top + 4, this.vis.x1 - this.vis.x0, hgt - 4);
     ctx.clip();
     ctx.globalCompositeOperation = 'lighter';
-    this.fireworks = this.fireworks.filter((f) => wall - f.t < EMIT + LIFE);
+    this.fireworks = this.fireworks.filter((f) => wall - f.last < EMIT + LIFE);
     for (const f of this.fireworks) {
       const age = wall - f.t;
       if (age < 0) continue;
+      const sinceLast = wall - f.last;
+      // 噴いている最中にまたゴーゴーが始まったときの光（すぐ明るくなって、なめらかに戻る）
+      let pulse = 0;
+      for (const b of f.ignites) {
+        const d = wall - b;
+        if (d >= 0 && d < 220) pulse = Math.max(pulse, d < 40 ? d / 40 : 1 - (d - 40) / 180);
+      }
       // 火花の柱の光
-      if (age < EMIT + 150) {
-        const a = age < 80 ? age / 80 : age < EMIT ? 1 : 1 - (age - EMIT) / 150;
-        const h = hgt * 0.95 * Math.min(1, age / 140);
+      if (sinceLast < EMIT + 150) {
+        const fadeIn = age < 80 ? age / 80 : 1;
+        const fadeOut = sinceLast < EMIT ? 1 : 1 - (sinceLast - EMIT) / 150;
+        const a = Math.min(1, fadeIn * fadeOut + 0.35 * pulse);
+        const h = hgt * Math.min(1, 0.95 * Math.min(1, age / 140) + 0.05 * pulse);
+        const wd = 1 + 0.3 * pulse;
         const g = ctx.createLinearGradient(0, bottom, 0, bottom - h);
         g.addColorStop(0, `rgba(255,252,240,${a})`);
         g.addColorStop(0.65, `rgba(255,228,160,${0.75 * a})`);
         g.addColorStop(1, 'rgba(255,190,90,0)');
         ctx.fillStyle = g;
         ctx.beginPath();
-        ctx.moveTo(f.x - 14, bottom);
-        ctx.lineTo(f.x - 48, bottom - h);
-        ctx.lineTo(f.x + 48, bottom - h);
-        ctx.lineTo(f.x + 14, bottom);
+        ctx.moveTo(f.x - 14 * wd, bottom);
+        ctx.lineTo(f.x - 48 * wd, bottom - h);
+        ctx.lineTo(f.x + 48 * wd, bottom - h);
+        ctx.lineTo(f.x + 14 * wd, bottom);
         ctx.closePath();
         ctx.fill();
       }
-      // 火花の粒（決まった乱数で、噴き出した時刻ごとに 1 粒）
-      for (let i = 0; i < f.n; i++) {
-        const born = (i / f.n) * EMIT;
+      // 火花の粒（決まった乱数で、噴き出した時刻ごとに 1 粒）。最後にゴーゴーが始まってから EMIT の間は噴き続ける
+      const dt = EMIT / f.n;
+      const total = Math.ceil((f.last - f.t + EMIT) / dt);
+      const v0 = Math.max(0, Math.floor((age - LIFE) / dt));
+      for (let i = v0; i < total; i++) {
+        const born = i * dt;
         const pa = (age - born) / 1000;
+        if (pa < 0) break;
+        if (pa * 1000 > LIFE) continue;
+        this.spark(f.x + i * 7.13, f.x * 1.7 + i * 3.91, f.x, pa, i, bottom, hgt, LIFE, 1);
+      }
+      // またゴーゴーが始まった瞬間に、ぱっと散る火花
+      for (const b of f.ignites) {
+        const pa = (wall - b) / 1000;
         if (pa < 0 || pa * 1000 > LIFE) continue;
-        const r1 = hash(f.x + i * 7.13);
-        const r2 = hash(f.x * 1.7 + i * 3.91);
-        const vy = -(hgt * 1.5 + r1 * hgt * 0.9);
-        const vx = (r2 - 0.5) * 260;
-        const g = hgt * 2.4;
-        const px = f.x + vx * pa;
-        const py = bottom + vy * pa + 0.5 * g * pa * pa;
-        const life = pa * 1000 / LIFE;
-        ctx.globalAlpha = 1 - life;
-        ctx.fillStyle = i % 4 === 0 ? '#ffd27a' : '#fffaf0';
-        if (i % 3 === 0) star(ctx, px, py, 9);
-        else {
-          ctx.beginPath();
-          ctx.arc(px, py, 4, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        for (let i = 0; i < 18; i++) this.spark(b * 0.37 + i * 5.3, b * 0.71 + i * 2.9, f.x, pa, i, bottom, hgt, LIFE, 1.25);
       }
       ctx.globalAlpha = 1;
     }
     ctx.restore();
+  }
+
+  /** 火花の粒を 1 つ描く（r1・r2 = 決まった乱数の元、pa = 噴き出してからの秒、boost = 勢い） */
+  private spark(k1: number, k2: number, x: number, pa: number, i: number, bottom: number, hgt: number, LIFE: number, boost: number) {
+    const ctx = this.ctx;
+    const r1 = hash(k1);
+    const r2 = hash(k2);
+    const vy = -(hgt * 1.5 + r1 * hgt * 0.9) * boost;
+    const vx = (r2 - 0.5) * 260 * boost;
+    const g = hgt * 2.4;
+    const px = x + vx * pa;
+    const py = bottom + vy * pa + 0.5 * g * pa * pa;
+    const life = (pa * 1000) / LIFE;
+    ctx.globalAlpha = 1 - life;
+    ctx.fillStyle = i % 4 === 0 ? '#ffd27a' : '#fffaf0';
+    if (i % 3 === 0) star(ctx, px, py, 9);
+    else {
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
 
@@ -1700,6 +1751,9 @@ export class Renderer {
 }
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
+
+/** 火花の柱が噴き出している時間（ms。最後にゴーゴーが始まってから） */
+const FW_EMIT = 650;
 
 /** 0〜1 の決まった乱数 */
 function hash(n: number) {
