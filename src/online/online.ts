@@ -427,7 +427,13 @@ export class OnlineScreen {
         o.combo = Number(s.c) || 0;
         o.gauge = Number(s.g) || 0;
         for (const [i, j] of s.j) {
-          if (i >= 0 && i < o.marks.length) o.marks[i] = j + 1;
+          if (!(i >= 0 && i < o.marks.length) || j < 0 || j > 2) continue;
+          if (!o.marks[i]) {
+            if (j === 0) o.good++;
+            else if (j === 1) o.ok++;
+            else o.bad++;
+          }
+          o.marks[i] = j + 1;
           o.fx = { j: j + 1, t: performance.now() };
         }
       },
@@ -531,7 +537,7 @@ export class OnlineScreen {
     const opps: Opponent[] = [];
     for (const p of players) {
       if (p.p === c.me) continue;
-      const o: Opponent = { id: p.p, name: p.name, score: 0, combo: 0, gauge: 0, marks: new Uint8Array(course.notes.length), fx: null, status: '' };
+      const o: Opponent = { id: p.p, name: p.name, score: 0, combo: 0, gauge: 0, good: 0, ok: 0, bad: 0, marks: new Uint8Array(course.notes.length), fx: null, status: '' };
       this.opponents.set(p.p, o);
       opps.push(o);
     }

@@ -80,6 +80,9 @@ export interface Opponent {
   gauge: number;
   /** 音符ごとの判定（0 まだ / 1 良 / 2 可 / 3 不可） */
   marks: Uint8Array;
+  good: number;
+  ok: number;
+  bad: number;
   /** 最後に判定したとき */
   fx: { j: number; t: number } | null;
   status: '' | 'fin' | 'quit' | 'lost';
@@ -499,7 +502,10 @@ export class Renderer {
     this.drawBottom(V, wall);
     this.drawFireworks(wall);
     this.drawLane(V, game, bars, now, gogo, wall);
-    if (this.opponents.length) this.drawOpponents(V, game, bars, now, wall);
+    if (this.opponents.length) {
+      this.drawOpponents(V, game, bars, now, gogo, wall);
+      this.drawOwnCounts(st.good, st.ok, st.bad);
+    }
     this.drawBursts(wall);
     this.drawPanel(st.score, st.combo, info, wall);
     this.drawGauge(st.gauge, wall);
@@ -550,7 +556,8 @@ export class Renderer {
   }
 
 
-  private drawLane(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number) {
+  /** opp を渡すと、オンライン対戦の相手のレーンとして描く（相手が叩いた音符を消す・叩いた光は出さない） */
+  private drawLane(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number, opp?: Opponent) {
     const ctx = this.ctx;
     const right = V.x1;
 
@@ -573,7 +580,7 @@ export class Renderer {
     }
 
     // 叩いたときにレーン全体が色づく（ドン＝赤茶、カッ＝青）
-    for (const f of this.flashes) {
+    for (const f of opp ? [] : this.flashes) {
       const a = 1 - (wall - f.t) / 170;
       if (a <= 0) continue;
       ctx.fillStyle = f.kind === 'don' ? `rgba(170,90,40,${0.2 * a})` : `rgba(40,140,170,${0.2 * a})`;
@@ -581,7 +588,7 @@ export class Renderer {
     }
 
     // 判定枠: 音符と同じ大きさの暗い円＋外側の細い輪。ゴーゴータイムは炎の玉になる
-    if (gogo) this.drawFireball(wall);
+    if (gogo && !opp) this.drawFireball(wall);
     else {
       ctx.beginPath();
       ctx.arc(this.jx, JY, NR - 2, 0, Math.PI * 2);
@@ -596,7 +603,7 @@ export class Renderer {
       ctx.strokeStyle = '#5e5e5e';
       ctx.stroke();
     }
-    this.drawJudgeGlow(wall);
+    if (!opp) this.drawJudgeGlow(wall);
 
     // 小節線
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
@@ -620,7 +627,10 @@ export class Renderer {
     for (let i = states.length - 1; i >= 0; i--) {
       const s = states[i];
       const n = s.note;
-      if (s.done && !s.missed && n.type !== 'roll' && n.type !== 'bigRoll') continue;
+      if (opp) {
+        const m = opp.marks[i];
+        if ((m === 1 || m === 2) && n.type !== 'roll' && n.type !== 'bigRoll' && n.type !== 'balloon') continue;
+      } else if (s.done && !s.missed && n.type !== 'roll' && n.type !== 'bigRoll') continue;
       let x = this.xOf(n.time, n.beat, n, now);
       const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
       if (endX < LANE_X - 120 || x > right + 120) continue;
@@ -630,7 +640,7 @@ export class Renderer {
         if (s.done && s.count >= (n.hits ?? 5)) continue; // 割れた
         const active = now >= n.time && now <= (n.endTime ?? n.time);
         // 叩いている間は、レーンの音符の代わりにふくらむ風船を出す
-        if (active && this.rollFx?.balloon) continue;
+        if (active && !opp && this.rollFx?.balloon) continue;
         if (active) x = this.jx;
         if (now > (n.endTime ?? n.time)) continue;
         drawBalloon(ctx, x, JY, r, null);
@@ -660,90 +670,136 @@ export class Renderer {
   }
 
   /**
-   * オンライン対戦の相手のレーン（自分のレーンの下に小さく並べる）。
-   * 音符の位置は自分のレーンと同じ（同じ時刻に同じ所を流れる）で、相手が叩いた音符は消える
+   * オンライン対戦の相手のレーン（自分のレーンの下に、自分のレーンと同じ描き方で並べる）。
+   * 2 人までは同じ大きさ、3 人のときは縦に収まるよう少し小さくする（判定枠の位置はそろえる）
    */
-  private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, wall: number) {
+  private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number) {
     const ctx = this.ctx;
     const opps = this.opponents;
-    const top0 = TEXT_BOTTOM + 26;
-    const gap = 14;
-    const H = Math.min(170, (REF_H - top0 - 16) / opps.length - gap);
-    const r = Math.min(NR * 0.62, H * 0.36);
-    const right = V.x1;
-    const states = game.states;
-    for (let k = 0; k < opps.length; k++) {
-      const o = opps[k];
-      const top = top0 + k * (H + gap);
-      const cy = top + H / 2;
-      // 枠
-      ctx.fillStyle = 'rgba(0,0,0,0.78)';
-      ctx.fillRect(0, top - 4, right, H + 8);
-      ctx.fillStyle = '#262626';
-      ctx.fillRect(LANE_X, top, right - LANE_X, H);
-      // 判定枠
-      ctx.beginPath();
-      ctx.arc(this.jx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#1b1b1b';
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#5e5e5e';
-      ctx.stroke();
-      // 判定の光
-      if (o.fx && wall - o.fx.t < 260) {
-        const a = 1 - (wall - o.fx.t) / 260;
-        ctx.beginPath();
-        ctx.arc(this.jx, cy, r * (1.05 + 0.3 * (1 - a)), 0, Math.PI * 2);
-        ctx.lineWidth = 6;
-        ctx.strokeStyle = o.fx.j === 1 ? `rgba(255,214,80,${a})` : o.fx.j === 2 ? `rgba(255,255,255,${a * 0.8})` : `rgba(90,140,255,${a * 0.7})`;
-        ctx.stroke();
-      }
-      // 小節線
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      for (const b of bars) {
-        const x = this.xOf(b.time, b.beat, b, now);
-        if (x < LANE_X || x > right) continue;
-        ctx.fillRect(x - 1, top, 2, H);
-      }
-      // 音符
+    const laneH = TEXT_BOTTOM - LANE_TOP + 12; // 黒い枠を含む高さ
+    const gap = 10;
+    const top0 = TEXT_BOTTOM + 14;
+    const k = Math.min(1, (REF_H - top0 - 4) / (opps.length * (laneH + gap)));
+    for (let n = 0; n < opps.length; n++) {
+      const o = opps[n];
+      const top = top0 + n * (laneH + gap) * k; // 黒い枠の上の端
+      // 左のパネル（名前・点数・コンボ・良可不可）
+      // 小さくしたレーンは判定枠を中心に縮めるので、レーンの左の端までパネルを伸ばす
+      const pw = this.jx - (this.jx - (LANE_X - 6)) * k;
+      ctx.fillStyle = 'rgba(10,10,12,0.86)';
+      ctx.fillRect(0, top, pw, laneH * k);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(0, top, 8, laneH * k);
+      this.drawStatsPanel(o.name, o.score, o.combo, o.good, o.ok, o.bad, 24, top, pw - 34, laneH * k, k, o.status);
+      // レーン（自分のレーンと同じ絵を、縦にずらして（小さいときは判定枠を中心に縮めて）描く）
       ctx.save();
+      ctx.translate(this.jx, top);
+      ctx.scale(k, k);
+      ctx.translate(-this.jx, -(LANE_TOP - 8));
+      const right = this.jx + (V.x1 - this.jx) / k;
       ctx.beginPath();
-      ctx.rect(LANE_X, top, right - LANE_X, H);
+      ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, laneH);
       ctx.clip();
-      for (let i = states.length - 1; i >= 0; i--) {
-        const n = states[i].note;
-        const m = o.marks[i] ?? 0;
-        const isRoll = n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon';
-        if (!isRoll && (m === 1 || m === 2)) continue;
-        const x = this.xOf(n.time, n.beat, n, now);
-        const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
-        if (endX < LANE_X - 60 || x > right + 60) continue;
-        if (n.type === 'balloon' && now > (n.endTime ?? n.time)) continue;
-        const rr = isBig(n.type) ? r * BIG_SCALE : r;
-        if (n.type === 'balloon') drawBalloon(ctx, now >= n.time ? this.jx : x, cy, rr, null);
-        else drawAny(ctx, n.type, x, cy, rr, endX);
-      }
+      this.paintLaneBase(ctx, right);
+      this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
+      this.drawOppJudge(o, wall);
       ctx.restore();
-      // 左: 名前・点数・コンボ
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.font = `900 34px ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText(o.name, 30, top + H * 0.26, LANE_X - 60);
-      ctx.font = `900 40px ${FONT}`;
-      ctx.fillStyle = '#ffe9a8';
-      ctx.fillText(String(o.score).padStart(7, ' '), 30, top + H * 0.62);
-      ctx.font = `800 26px ${FONT}`;
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      ctx.fillText(o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '切断' : `${o.combo} コンボ`, 250, top + H * 0.62);
-      // ゲージ（下の細い帯）
-      const gw = LANE_X - 60;
-      ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      ctx.fillRect(30, top + H * 0.86, gw, 8);
+      // ゲージ（パネルの下の細い帯）
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.fillRect(0, top + laneH * k - 6, pw, 6);
       ctx.fillStyle = o.gauge >= CLEAR_LINE ? '#ffd23f' : '#e5533d';
-      ctx.fillRect(30, top + H * 0.86, gw * Math.max(0, Math.min(1, o.gauge / 100)), 8);
-      ctx.textAlign = 'center';
+      ctx.fillRect(0, top + laneH * k - 6, pw * Math.max(0, Math.min(1, o.gauge / 100)), 6);
     }
+  }
+
+  /** 名前・点数・コンボ・良 可 不可（オンライン対戦の相手のパネルと、自分の数） */
+  private drawStatsPanel(name: string, score: number, combo: number, good: number, ok: number, bad: number, x: number, top: number, w: number, h: number, k: number, status = '') {
+    const ctx = this.ctx;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const f = (px: number) => `${Math.round(px * Math.max(0.75, k))}px`;
+    if (name) {
+      ctx.font = `900 ${f(32)} ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(name, x, top + h * 0.2, w);
+    }
+    ctx.font = `900 ${f(46)} ${FONT}`;
+    ctx.fillStyle = '#ffe9a8';
+    ctx.fillText(String(score), x, top + h * 0.47, w * 0.62);
+    ctx.textAlign = 'right';
+    ctx.font = `800 ${f(28)} ${FONT}`;
+    ctx.fillStyle = status ? '#ff9d8a' : 'rgba(255,255,255,0.85)';
+    ctx.fillText(status === 'fin' ? '終了' : status === 'quit' ? 'やめた' : status === 'lost' ? '切断' : `${combo} コンボ`, x + w, top + h * 0.47);
+    // 良 可 不可
+    const y = top + h * 0.76;
+    const cols: [string, number, string][] = [['良', good, '#ffc21a'], ['可', ok, '#ffffff'], ['不可', bad, '#8fa8ff']];
+    const cw = w / 3;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < 3; i++) {
+      const [label, v, color] = cols[i];
+      const cx = x + cw * i;
+      ctx.font = `900 ${f(24)} ${FONT}`;
+      ctx.fillStyle = color;
+      ctx.fillText(label, cx, y);
+      const lw = ctx.measureText(label).width;
+      ctx.font = `800 ${f(30)} ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(String(v), cx + lw + 8, y, cw - lw - 12);
+    }
+    ctx.textAlign = 'center';
+  }
+
+  /** オンライン対戦: 自分の良・可・不可（左上、自分のパネルの上） */
+  private drawOwnCounts(good: number, ok: number, bad: number) {
+    const ctx = this.ctx;
+    const x = 130;
+    const y = 150;
+    const w = LANE_X - 6 - x;
+    ctx.fillStyle = 'rgba(10,10,12,0.72)';
+    ctx.fillRect(x, y, w, 50);
+    ctx.textBaseline = 'middle';
+    const cols: [string, number, string][] = [['良', good, '#ffc21a'], ['可', ok, '#ffffff'], ['不可', bad, '#8fa8ff']];
+    const cw = (w - 20) / 3;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < 3; i++) {
+      const [label, v, color] = cols[i];
+      const cx = x + 12 + cw * i;
+      ctx.font = `900 24px ${FONT}`;
+      ctx.fillStyle = color;
+      ctx.fillText(label, cx, y + 26);
+      const lw = ctx.measureText(label).width;
+      ctx.font = `800 30px ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(String(v), cx + lw + 8, y + 26, cw - lw - 12);
+    }
+    ctx.textAlign = 'center';
+  }
+
+  /** 相手の判定（判定枠の光と「良」「可」「不可」の文字） */
+  private drawOppJudge(o: Opponent, wall: number) {
+    const fx = o.fx;
+    if (!fx) return;
+    const age = wall - fx.t;
+    if (age > 400) return;
+    const ctx = this.ctx;
+    if (fx.j !== 3 && age < 300) {
+      const a = 0.85 * (1 - age / 300);
+      ctx.globalAlpha = a;
+      ctx.beginPath();
+      ctx.arc(this.jx, JY, NR - 4, 0, Math.PI * 2);
+      ctx.fillStyle = fx.j === 1 ? 'rgb(250,214,40)' : 'rgb(230,238,245)';
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    const judge: Judge = fx.j === 1 ? 'good' : fx.j === 2 ? 'ok' : 'bad';
+    const rise = ease(Math.min(1, age / 60));
+    const y = LANE_TOP + 46 - 12 * rise;
+    ctx.globalAlpha = age < 300 ? 1 : 1 - (age - 300) / 100;
+    ctx.font = `900 ${judge === 'bad' ? 46 : 54}px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    outlinedText(ctx, JUDGE_TEXT[judge], this.jx, y, judge === 'good' ? '#ffc21a' : judge === 'ok' ? '#ffffff' : '#7f9cff', '#3a1300', 9);
+    ctx.globalAlpha = 1;
   }
 
   /** 音符の下の文字（ドン / ド / コ / カッ / カ / 連打 / ふうせん） */
