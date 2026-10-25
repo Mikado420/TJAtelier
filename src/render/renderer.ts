@@ -84,7 +84,7 @@ export interface Opponent {
   ok: number;
   bad: number;
   /** 最後に判定したとき */
-  fx: { j: number; t: number } | null;
+  fx: { j: number; t: number; i: number } | null;
   status: '' | 'fin' | 'quit' | 'lost';
 }
 
@@ -504,10 +504,11 @@ export class Renderer {
     this.drawLane(V, game, bars, now, gogo, wall);
     if (this.opponents.length) {
       this.drawOpponents(V, game, bars, now, gogo, wall);
-      this.drawOwnCounts(st.good, st.ok, st.bad);
     }
     this.drawBursts(wall);
     this.drawPanel(st.score, st.combo, info, wall);
+    // オンライン対戦: 自分の良・可・不可もパネルに出す
+    if (this.opponents.length) this.paintCounts(st.good, st.ok, st.bad);
     this.drawGauge(st.gauge, wall);
     this.drawRollBubble(wall);
     this.drawJudgeText(wall);
@@ -670,135 +671,194 @@ export class Renderer {
   }
 
   /**
-   * オンライン対戦の相手のレーン（自分のレーンの下に、自分のレーンと同じ描き方で並べる）。
-   * 2 人までは同じ大きさ、3 人のときは縦に収まるよう少し小さくする（判定枠の位置はそろえる）
+   * オンライン対戦の相手（自分の段の下に、自分の段と同じ描き方で並べる）。
+   * 左のパネル（2P・3P・4P の色）・レーン・判定の演出まで自分と同じ。2 人までは同じ大きさ、3 人のときは段ごと縮める
    */
   private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number) {
     const ctx = this.ctx;
     const opps = this.opponents;
-    const laneH = TEXT_BOTTOM - LANE_TOP + 12; // 黒い枠を含む高さ
-    const gap = 10;
-    const top0 = TEXT_BOTTOM + 14;
-    const k = Math.min(1, (REF_H - top0 - 4) / (opps.length * (laneH + gap)));
+    const rowH = TEXT_BOTTOM - LANE_TOP + 12; // 黒い枠を含む 1 段の高さ
+    const gap = 8;
+    const top0 = TEXT_BOTTOM + 12;
+    const k = Math.min(1, (REF_H - top0) / (opps.length * (rowH + gap)));
     for (let n = 0; n < opps.length; n++) {
       const o = opps[n];
-      const top = top0 + n * (laneH + gap) * k; // 黒い枠の上の端
-      // 左のパネル（名前・点数・コンボ・良可不可）
-      // 小さくしたレーンは判定枠を中心に縮めるので、レーンの左の端までパネルを伸ばす
-      const pw = this.jx - (this.jx - (LANE_X - 6)) * k;
-      ctx.fillStyle = 'rgba(10,10,12,0.86)';
-      ctx.fillRect(0, top, pw, laneH * k);
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      ctx.fillRect(0, top, 8, laneH * k);
-      this.drawStatsPanel(o.name, o.score, o.combo, o.good, o.ok, o.bad, 24, top, pw - 34, laneH * k, k, o.status);
-      // レーン（自分のレーンと同じ絵を、縦にずらして（小さいときは判定枠を中心に縮めて）描く）
+      const top = top0 + n * (rowH + gap) * k;
       ctx.save();
-      ctx.translate(this.jx, top);
+      // 段の中は自分の段と同じ座標で描く（上下にずらし、小さいときは左上を中心に縮める）
+      ctx.translate(0, top);
       ctx.scale(k, k);
-      ctx.translate(-this.jx, -(LANE_TOP - 8));
-      const right = this.jx + (V.x1 - this.jx) / k;
+      ctx.translate(0, -(LANE_TOP - 6));
+      const right = V.x1 / k;
+      this.paintOppPanel(o, n + 2, wall);
+      ctx.save();
       ctx.beginPath();
-      ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, laneH);
+      ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, rowH);
       ctx.clip();
       this.paintLaneBase(ctx, right);
       this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
-      this.drawOppJudge(o, wall);
+      this.drawOppBurst(o, game, wall);
       ctx.restore();
-      // ゲージ（パネルの下の細い帯）
-      ctx.fillStyle = 'rgba(255,255,255,0.14)';
-      ctx.fillRect(0, top + laneH * k - 6, pw, 6);
-      ctx.fillStyle = o.gauge >= CLEAR_LINE ? '#ffd23f' : '#e5533d';
-      ctx.fillRect(0, top + laneH * k - 6, pw * Math.max(0, Math.min(1, o.gauge / 100)), 6);
+      this.drawOppJudgeText(o, wall);
+      ctx.restore();
     }
   }
 
-  /** 名前・点数・コンボ・良 可 不可（オンライン対戦の相手のパネルと、自分の数） */
-  private drawStatsPanel(name: string, score: number, combo: number, good: number, ok: number, bad: number, x: number, top: number, w: number, h: number, k: number, status = '') {
+  /** 2P・3P・4P の色（パネルの上と下、名札の丸） */
+  private static readonly PLAYER_COLOR: Record<number, [string, string, string]> = {
+    2: ['#3f8be8', '#2563c4', '#1f5fd0'],
+    3: ['#34b26f', '#1f8a52', '#1d9a5a'],
+    4: ['#e8a032', '#c27c18', '#d98a10'],
+  };
+
+  /** 相手の左のパネル（自分のパネルと同じ形。色だけ違う） */
+  private paintOppPanel(o: Opponent, no: number, wall: number) {
     const ctx = this.ctx;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    const f = (px: number) => `${Math.round(px * Math.max(0.75, k))}px`;
-    if (name) {
-      ctx.font = `900 ${f(32)} ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText(name, x, top + h * 0.2, w);
+    const [c1, c2, badge] = Renderer.PLAYER_COLOR[no] ?? Renderer.PLAYER_COLOR[2];
+    const g = ctx.createLinearGradient(0, LANE_TOP - 6, 0, TEXT_BOTTOM);
+    g.addColorStop(0, c1);
+    g.addColorStop(1, c2);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, LANE_TOP - 6, LANE_X, TEXT_BOTTOM - LANE_TOP + 12);
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    for (let x = 30; x < LANE_X; x += 70) {
+      for (let y = LANE_TOP + 30; y < TEXT_BOTTOM; y += 70) {
+        ctx.beginPath();
+        ctx.arc(x + ((y / 70) % 2) * 35, y, 18, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-    ctx.font = `900 ${f(46)} ${FONT}`;
-    ctx.fillStyle = '#ffe9a8';
-    ctx.fillText(String(score), x, top + h * 0.47, w * 0.62);
+    // スコア欄と点数
+    ctx.fillStyle = 'rgba(0,0,30,0.45)';
+    ctx.fillRect(0, LANE_TOP - 6, 316, 62);
+    ctx.font = `900 50px ${FONT}`;
     ctx.textAlign = 'right';
-    ctx.font = `800 ${f(28)} ${FONT}`;
-    ctx.fillStyle = status ? '#ff9d8a' : 'rgba(255,255,255,0.85)';
-    ctx.fillText(status === 'fin' ? '終了' : status === 'quit' ? 'やめた' : status === 'lost' ? '切断' : `${combo} コンボ`, x + w, top + h * 0.47);
-    // 良 可 不可
-    const y = top + h * 0.76;
-    const cols: [string, number, string][] = [['良', good, '#ffc21a'], ['可', ok, '#ffffff'], ['不可', bad, '#8fa8ff']];
-    const cw = w / 3;
-    ctx.textAlign = 'left';
-    for (let i = 0; i < 3; i++) {
-      const [label, v, color] = cols[i];
-      const cx = x + cw * i;
-      ctx.font = `900 ${f(24)} ${FONT}`;
-      ctx.fillStyle = color;
-      ctx.fillText(label, cx, y);
-      const lw = ctx.measureText(label).width;
-      ctx.font = `800 ${f(30)} ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText(String(v), cx + lw + 8, y, cw - lw - 12);
-    }
-    ctx.textAlign = 'center';
-  }
-
-  /** オンライン対戦: 自分の良・可・不可（左上、自分のパネルの上） */
-  private drawOwnCounts(good: number, ok: number, bad: number) {
-    const ctx = this.ctx;
-    const x = 130;
-    const y = 150;
-    const w = LANE_X - 6 - x;
-    ctx.fillStyle = 'rgba(10,10,12,0.72)';
-    ctx.fillRect(x, y, w, 50);
     ctx.textBaseline = 'middle';
-    const cols: [string, number, string][] = [['良', good, '#ffc21a'], ['可', ok, '#ffffff'], ['不可', bad, '#8fa8ff']];
-    const cw = (w - 20) / 3;
-    ctx.textAlign = 'left';
+    outlinedText(ctx, String(o.score), 282, LANE_TOP + 28, '#fff', '#111', 9);
+    // 魂ゲージ（スコア欄の右の細い帯）
+    const gx = 326;
+    const gw = LANE_X - 18 - gx;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    roundRect(ctx, gx, LANE_TOP + 14, gw, 20, 10);
+    ctx.fill();
+    const v = Math.max(0, Math.min(1, o.gauge / 100));
+    if (v > 0) {
+      ctx.fillStyle = o.gauge >= CLEAR_LINE ? '#ffd23f' : '#ff5a3c';
+      roundRect(ctx, gx + 3, LANE_TOP + 17, Math.max(14, (gw - 6) * v), 14, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillRect(gx + 3 + (gw - 6) * (CLEAR_LINE / 100), LANE_TOP + 12, 3, 24);
+    // 良・可・不可
+    this.paintCounts(o.good, o.ok, o.bad);
+    // コンボ太鼓
+    this.paintComboDrum(o.combo, 1);
+    // 名札（色の丸・状態の帯・名前の帯）
+    const state = o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '通信が切れた' : 'オンライン対戦';
+    this.drawNameplate(`${no}P`, badge, state, o.name);
+    void wall;
+  }
+
+  /** 良・可・不可の数（パネルの難易度の右） */
+  private paintCounts(good: number, ok: number, bad: number) {
+    const ctx = this.ctx;
+    const rows: [string, number, string][] = [['良', good, '#ffd23a'], ['可', ok, '#ffffff'], ['不可', bad, '#9db4ff']];
+    ctx.textBaseline = 'middle';
     for (let i = 0; i < 3; i++) {
-      const [label, v, color] = cols[i];
-      const cx = x + 12 + cw * i;
-      ctx.font = `900 24px ${FONT}`;
-      ctx.fillStyle = color;
-      ctx.fillText(label, cx, y + 26);
-      const lw = ctx.measureText(label).width;
-      ctx.font = `800 30px ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText(String(v), cx + lw + 8, y + 26, cw - lw - 12);
+      const [label, v, color] = rows[i];
+      const y = LANE_TOP + 80 + i * 31;
+      ctx.font = `900 23px ${FONT}`;
+      ctx.textAlign = 'left';
+      outlinedText(ctx, label, 168, y, color, '#2a1208', 6);
+      ctx.font = `900 27px ${FONT}`;
+      ctx.textAlign = 'right';
+      outlinedText(ctx, String(v), 318, y, '#fff', '#2a1208', 6);
     }
     ctx.textAlign = 'center';
   }
 
-  /** 相手の判定（判定枠の光と「良」「可」「不可」の文字） */
-  private drawOppJudge(o: Opponent, wall: number) {
+  /** コンボ太鼓（相手用。スプライトを使わずに描く） */
+  private paintComboDrum(combo: number, scale: number) {
+    const ctx = this.ctx;
+    const { x, y, r } = DRUM;
+    ctx.fillStyle = '#1d2b4a';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 26, r, r * 0.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#34507f';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 18, r * 0.98, r * 0.88, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#16203a';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.93, 0, Math.PI * 2);
+    ctx.fillStyle = '#f3e3c6';
+    ctx.fill();
+    this.paintComboNumber(combo, scale);
+  }
+
+  /** 相手の判定の光と、判定枠から広がる輪（自分と同じ演出） */
+  private drawOppBurst(o: Opponent, game: Game, wall: number) {
+    const fx = o.fx;
+    if (!fx || fx.j === 3) return;
+    const ms = wall - fx.t;
+    if (ms < 0 || ms > 480) return;
+    const ctx = this.ctx;
+    const judge: Judge = fx.j === 1 ? 'good' : 'ok';
+    // 判定枠の光
+    const a = 0.85 * (ms < 100 ? 1 : ms < 240 ? 1 - ((ms - 100) / 140) * 0.6 : 0.4 * (1 - (ms - 240) / 240));
+    const r = NR - 4;
+    const g = ctx.createRadialGradient(this.jx, JY, 4, this.jx, JY, r);
+    if (judge === 'good') {
+      g.addColorStop(0, 'rgb(255,246,150)');
+      g.addColorStop(0.75, 'rgb(250,214,40)');
+      g.addColorStop(1, 'rgb(214,160,10)');
+    } else {
+      g.addColorStop(0, 'rgb(255,255,255)');
+      g.addColorStop(1, 'rgb(200,215,230)');
+    }
+    ctx.globalAlpha = a;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(this.jx, JY, r, 0, Math.PI * 2);
+    ctx.fill();
+    // 広がる輪
+    if (ms <= 200) {
+      const big = isBig(game.states[fx.i]?.note.type ?? 'don');
+      const kk = 0.92 + 0.12 * ease(Math.min(1, ms / 80));
+      const half = (big ? 230 : 130) * kk;
+      ctx.globalAlpha = 0.8 * (ms < 90 ? 1 : 1 - (ms - 90) / 110);
+      ctx.drawImage(this.burstSprite(judge, big), this.jx - half, JY - half, half * 2, half * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** 相手の「良」「可」「不可」（自分と同じく、レーンの上に出る） */
+  private drawOppJudgeText(o: Opponent, wall: number) {
     const fx = o.fx;
     if (!fx) return;
     const age = wall - fx.t;
     if (age > 400) return;
     const ctx = this.ctx;
-    if (fx.j !== 3 && age < 300) {
-      const a = 0.85 * (1 - age / 300);
-      ctx.globalAlpha = a;
-      ctx.beginPath();
-      ctx.arc(this.jx, JY, NR - 4, 0, Math.PI * 2);
-      ctx.fillStyle = fx.j === 1 ? 'rgb(250,214,40)' : 'rgb(230,238,245)';
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
     const judge: Judge = fx.j === 1 ? 'good' : fx.j === 2 ? 'ok' : 'bad';
     const rise = ease(Math.min(1, age / 60));
-    const y = LANE_TOP + 46 - 12 * rise;
+    const y = LANE_TOP - 6 - 30 * rise;
     ctx.globalAlpha = age < 300 ? 1 : 1 - (age - 300) / 100;
-    ctx.font = `900 ${judge === 'bad' ? 46 : 54}px ${FONT}`;
+    ctx.font = `900 ${judge === 'bad' ? 56 : 68}px ${FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    outlinedText(ctx, JUDGE_TEXT[judge], this.jx, y, judge === 'good' ? '#ffc21a' : judge === 'ok' ? '#ffffff' : '#7f9cff', '#3a1300', 9);
+    let fill: string | CanvasGradient;
+    if (judge === 'good') {
+      const g = ctx.createLinearGradient(0, y - 34, 0, y + 34);
+      g.addColorStop(0, '#fff6b0');
+      g.addColorStop(0.5, '#ffc21a');
+      g.addColorStop(1, '#ff8a00');
+      fill = g;
+    } else fill = judge === 'ok' ? '#ffffff' : '#7f9cff';
+    outlinedText(ctx, JUDGE_TEXT[judge], this.jx, y, fill, '#3a1300', 10);
     ctx.globalAlpha = 1;
   }
 
@@ -1009,7 +1069,7 @@ export class Renderer {
   }
 
   /** 左下の名札（オリジナルの意匠: 1P の丸・紫の称号の帯・白い名前の帯） */
-  private drawNameplate() {
+  private drawNameplate(badge = '1P', badgeColor = '#e8352b', title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
     const y0 = 470;
     // 称号の帯
@@ -1020,7 +1080,7 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#fff';
-    ctx.fillText('TJAtelier テストプレイ', 200, y0 + 15);
+    ctx.fillText(title, 200, y0 + 15);
     // 名前の帯
     ctx.fillStyle = '#fff';
     roundRect(ctx, 46, y0 + 32, 290, 40, 20);
@@ -1030,17 +1090,17 @@ export class Renderer {
     ctx.stroke();
     ctx.font = `900 24px ${FONT}`;
     ctx.fillStyle = '#222';
-    ctx.fillText('プレイヤー', 206, y0 + 53);
+    ctx.fillText(name, 206, y0 + 53, 250);
     // 1P の丸
     ctx.beginPath();
     ctx.arc(38, y0 + 36, 34, 0, Math.PI * 2);
-    ctx.fillStyle = '#e8352b';
+    ctx.fillStyle = badgeColor;
     ctx.fill();
     ctx.lineWidth = 5;
     ctx.strokeStyle = '#fff';
     ctx.stroke();
     ctx.font = `900 30px ${FONT}`;
-    outlinedText(ctx, '1P', 38, y0 + 38, '#fff', '#5a0e08', 6);
+    outlinedText(ctx, badge, 38, y0 + 38, '#fff', '#0e1a3a', 6);
   }
 
   /** 右上の曲名（ジャンルの色の丸＋曲名、下にジャンル名の帯） */
@@ -1115,11 +1175,16 @@ export class Renderer {
       }
     }
 
-    if (combo < 10) return;
     const p = Math.min(1, (wall - this.comboPop) / 90);
-    const scale = 1 + 0.22 * (1 - p);
-    const digits = String(combo);
-    const size = digits.length >= 4 ? 50 : digits.length === 3 ? 64 : 76;
+    this.paintComboNumber(combo, 1 + 0.22 * (1 - p));
+  }
+
+  /** コンボ太鼓の数（10 以上で出す。100 以上は金色） */
+  private paintComboNumber(combo: number, scale: number) {
+    if (combo < 10) return;
+    const ctx = this.ctx;
+    const { x, y } = DRUM;
+    const digits = String(combo);    const size = digits.length >= 4 ? 50 : digits.length === 3 ? 64 : 76;
     ctx.save();
     ctx.translate(x, y - 8);
     ctx.scale(1, scale);

@@ -434,7 +434,7 @@ export class OnlineScreen {
             else o.bad++;
           }
           o.marks[i] = j + 1;
-          o.fx = { j: j + 1, t: performance.now() };
+          o.fx = { j: j + 1, t: performance.now(), i };
         }
       },
       fin: (p) => { const o = this.opponents.get(p); if (o) o.status = 'fin'; },

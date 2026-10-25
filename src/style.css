@@ -1614,3 +1614,11 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   .ol-side { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
   .ol-room { grid-template-columns: 1fr; overflow-y: auto; }
 }
+/* フォルダの「…」はどのフォルダにも出す（選んでいないときは控えめに） */
+.home .hf:not(.on) .hf-more { opacity: 0.45; }
+.home .hf.hf-edit { padding: 0 6px 0 8px; gap: 4px; background: rgba(255, 255, 255, 0.06); }
+.hf-in { flex: 1; min-width: 0; height: 32px; padding: 0 8px; font-size: 16px; font-weight: 700; color: #fff; background: var(--inp); border: 1px solid var(--accent); border-radius: 0; }
+.hf-in:focus { outline: none; }
+.hf-ok { width: 32px; height: 32px; flex: none; display: grid; place-items: center; font-size: 16px; font-weight: 900; color: #fff; background: var(--accent); border-radius: 0; }
+.home .hf.hf-edit .hf-in { flex: 1 1 auto; width: 100%; }
+.home .hf.hf-edit .hf-ok { background: var(--accent); color: #fff; }
