@@ -4,7 +4,7 @@
  */
 import type { AudioFile } from '../io/load';
 import {
-  addFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, moveSong, renameFolder, type SongEntry,
+  addFolder, addToFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
@@ -41,6 +41,25 @@ function jacket(e: SongEntry) {
   return `<svg class="hj" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g transform="rotate(8 50 50)">${bands}</g></svg>`;
 }
 
+/** 「未分類」（どのフォルダにも入っていない曲）を表す、フォルダ名には使えない値 */
+const UNCAT = '\u0000uncat';
+
+/** 0.05 秒の無音（試聴の音を、タップの瞬間に鳴らせる状態にしておくため） */
+const SILENT = (() => {
+  const n = 400;
+  const b = new Uint8Array(44 + n);
+  const v = new DataView(b.buffer);
+  const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  b.fill(128, 44);
+  let bin = '';
+  for (const x of b) bin += String.fromCharCode(x);
+  return `data:audio/wav;base64,${btoa(bin)}`;
+})();
+
 const ICON = {
   folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg>',
   back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg>',
@@ -54,8 +73,14 @@ export class Home {
   private readonly foldersEl: HTMLElement;
   private songs: SongEntry[] = [];
   private folders: string[] = [];
-  /** 今見ているフォルダ（null は「すべて」） */
+  /** 今見ているフォルダ（null は「すべて」、UNCAT は「未分類」） */
   private folder: string | null = null;
+  /** 曲を選んでまとめてフォルダに入れる・外すとき（選んでいる曲） */
+  private picking: Set<string> | null = null;
+  /** 試聴の音を鳴らせる状態にしたか（iPhone はタップの瞬間に一度鳴らさないと、後から鳴らせない） */
+  private unlocked = false;
+  /** 自動で鳴らせなかったので、次のタップで鳴らす */
+  private pendingPreview = false;
   private sel: string | null = null;
   private sort: Sort = 'updated';
   private query = '';
@@ -75,11 +100,40 @@ export class Home {
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
+    // どこかに触れた瞬間に試聴の音を鳴らせる状態にする（曲を選んだ後、音源を読むのを待ってから鳴らすので）
+    this.el.addEventListener('pointerdown', () => {
+      this.unlock();
+      if (this.pendingPreview) {
+        this.pendingPreview = false;
+        // 音源は読み込んであるので、触れた瞬間にそのまま鳴らす（iPhone はタップの中で鳴らさないと鳴らない）
+        if (!this.playing && this.previewId === this.sel && this.preview.getAttribute('src')) {
+          void this.preview.play().catch(() => {});
+          this.unlocked = true;
+        }
+      }
+    }, true);
   }
 
-  /** 今見ているフォルダ（一番上なら ''） */
+  /** 試聴の音を鳴らせる状態にする（タップの中で呼ぶ） */
+  private unlock() {
+    if (this.unlocked) return;
+    this.unlocked = true;
+    if (!this.preview.getAttribute('src')) {
+      this.preview.src = SILENT;
+      void this.preview.play().then(() => this.preview.pause()).catch(() => { this.unlocked = false; });
+    }
+  }
+
+  /** 今見ているフォルダ（すべて・未分類なら ''）。読み込んだ曲を入れる */
   get currentFolder() {
-    return this.folder ?? '';
+    return this.folder && this.folder !== UNCAT ? this.folder : '';
+  }
+
+  /** 曲が今見ているフォルダに出るか */
+  private inView(e: SongEntry) {
+    if (this.folder === null) return true;
+    if (this.folder === UNCAT) return !e.folders.length;
+    return e.folders.includes(this.folder);
   }
 
   get visible() {
@@ -93,11 +147,14 @@ export class Home {
     if (select) {
       const e = this.songs.find((x) => x.id === select);
       if (e) {
-        this.folder = e.folder || null;
+        if (!this.inView(e)) this.folder = null;
         this.sel = e.id;
       }
     }
     this.render(true);
+    // 選んでいる曲の試聴を流す（自動で鳴らせないときは、次に触れたときに）
+    const s = this.songs.find((x) => x.id === this.sel);
+    if (s) void this.startPreview(s);
   }
 
   hide() {
@@ -109,8 +166,9 @@ export class Home {
     this.songs = await listSongs();
     this.folders = await listFolders();
     // 曲が入っているのに一覧に無いフォルダも出す
-    for (const s of this.songs) if (s.folder && !this.folders.includes(s.folder)) this.folders.push(s.folder);
-    if (this.folder && !this.folders.includes(this.folder)) this.folder = null;
+    for (const s of this.songs) for (const f of s.folders) if (!this.folders.includes(f)) this.folders.push(f);
+    if (this.folder && this.folder !== UNCAT && !this.folders.includes(this.folder)) this.folder = null;
+    if (this.picking) for (const id of [...this.picking]) if (!this.songs.some((x) => x.id === id)) this.picking.delete(id);
   }
 
   /** 読み込んだ・作った曲を選ぶ */
@@ -118,7 +176,7 @@ export class Home {
     await this.reload();
     const e = this.songs.find((x) => x.id === id);
     if (e) {
-      this.folder = e.folder || null;
+      if (!this.inView(e)) this.folder = null;
       this.sel = id;
     }
     this.render(true);
@@ -139,15 +197,19 @@ export class Home {
       const q = this.query.toLowerCase();
       return this.sorted(this.songs.filter((s) => `${s.title} ${s.subtitle}`.toLowerCase().includes(q)));
     }
-    return this.sorted(this.folder === null ? this.songs : this.songs.filter((s) => s.folder === this.folder));
+    return this.sorted(this.songs.filter((s) => this.inView(s)));
   }
 
   private render(scrollToSel = false) {
     const songs = this.shown();
     // 左: フォルダ（選んでいるフォルダには「…」で名前の変更・削除）
-    const fl = [`<button class="hf ${this.folder === null && !this.query ? 'on' : ''}" data-folder=""><span>すべて</span><small>${this.songs.length}</small></button>`];
+    const uncat = this.songs.filter((x) => !x.folders.length).length;
+    const fl = [
+      `<button class="hf ${this.folder === null && !this.query ? 'on' : ''}" data-folder=""><span>すべて</span><small>${this.songs.length}</small></button>`,
+      `<button class="hf hf-uncat ${this.folder === UNCAT && !this.query ? 'on' : ''}" data-folder="${UNCAT}"><span>未分類</span><small>${uncat}</small></button>`,
+    ];
     for (const f of [...this.folders].sort((a, b) => a.localeCompare(b, 'ja'))) {
-      const n = this.songs.filter((x) => x.folder === f).length;
+      const n = this.songs.filter((x) => x.folders.includes(f)).length;
       const on = this.folder === f && !this.query;
       fl.push(`<div class="hf ${on ? 'on' : ''}" data-folder="${esc(f)}"><span>${esc(f)}</span><small>${n}</small>${on ? `<button class="hf-more" data-fmore="${esc(f)}" aria-label="フォルダの操作">${ICON.more}</button>` : ''}</div>`);
     }
@@ -155,11 +217,27 @@ export class Home {
     this.foldersEl.innerHTML = fl.join('');
 
     // 真ん中: 曲の縦の一覧
-    const rows = songs.map((s) => `<div class="hr ${s.id === this.sel ? 'on' : ''}" data-song="${s.id}"><i class="hr-mk"></i><div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}</small></div><span class="hr-bpm">${fmtBpm(s)}</span></div>`);
+    const pk = this.picking;
+    const tags = (s: SongEntry) => (this.folder === null || this.query ? s.folders : s.folders.filter((f) => f !== this.folder));
+    const rows = songs.map((s) => `<div class="hr ${s.id === this.sel && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}">${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : '<i class="hr-mk"></i>'}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small></div><span class="hr-bpm">${fmtBpm(s)}</span></div>`);
     if (!rows.length) {
-      rows.push(`<div class="hr-empty">${this.query ? '見つかりませんでした' : this.folder !== null ? 'このフォルダには曲がありません' : 'まだ曲がありません。左下の読み込み（↓）で .tja・.zip・音源を入れるか、＋で新しく作れます'}</div>`);
+      rows.push(`<div class="hr-empty">${this.query ? '見つかりませんでした' : this.folder === UNCAT ? '未分類の曲はありません' : this.folder !== null ? 'このフォルダには曲がありません。「選択」で曲を選んで入れられます' : 'まだ曲がありません。左下の読み込み（↓）で .tja・.zip・音源を入れるか、＋で新しく作れます'}</div>`);
     }
     this.list.innerHTML = rows.join('');
+
+    // 選んでいるときの操作（下に出す）
+    const bar = document.getElementById('homePick')!;
+    bar.classList.toggle('hidden', !pk);
+    if (pk) {
+      const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
+      bar.innerHTML = `<b>${pk.size} 曲</b>
+        <button data-pk="all">${songs.length && songs.every((x) => pk.has(x.id)) ? '選択を解除' : 'すべて選択'}</button>
+        <button data-pk="add" class="primary" ${pk.size ? '' : 'disabled'}>フォルダへ…</button>
+        ${inFolder ? `<button data-pk="move" ${pk.size ? '' : 'disabled'}>移す…</button><button data-pk="remove" class="bad" ${pk.size ? '' : 'disabled'}>ここから外す</button>` : `<button data-pk="clear" ${pk.size ? '' : 'disabled'}>未分類に戻す</button>`}
+        <button data-pk="done">完了</button>`;
+    }
+    this.el.classList.toggle('home-picking', !!pk);
+    (document.getElementById('homePickBtn') as HTMLElement).classList.toggle('on', !!pk);
 
     // 右: 選んでいる曲
     const s = this.songs.find((x) => x.id === this.sel && songs.includes(x));
@@ -179,7 +257,7 @@ export class Home {
     }
 
     (document.getElementById('homeSort') as HTMLElement).textContent = SORT_LABEL[this.sort];
-    (document.getElementById('homePath') as HTMLElement).textContent = this.query ? `「${this.query}」` : this.folder ?? 'すべて';
+    (document.getElementById('homePath') as HTMLElement).textContent = this.query ? `「${this.query}」` : this.folder === UNCAT ? '未分類' : this.folder ?? 'すべて';
     (document.getElementById('homeCount') as HTMLElement).textContent = `${songs.length} 曲`;
     if (scrollToSel) this.list.querySelector('.hr.on')?.scrollIntoView({ block: 'center' });
     this.paintPlayer();
@@ -194,6 +272,7 @@ export class Home {
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
     if ((x = d('[data-fmore]'))) { this.folderMenu(x.dataset.fmore!, x); return; }
+    if ((x = d('[data-pk]'))) { void this.pickAction(x.dataset.pk!, x); return; }
     if ((x = d('[data-h]'))) { void this.action(x.dataset.h!); return; }
     if ((x = d('[data-folder]'))) {
       const f = x.dataset.folder!;
@@ -207,6 +286,13 @@ export class Home {
     }
     if ((x = d('[data-song]'))) {
       const id = x.dataset.song!;
+      // 選んでいるとき: タップで選ぶ・外す
+      if (this.picking) {
+        if (this.picking.has(id)) this.picking.delete(id);
+        else this.picking.add(id);
+        this.render();
+        return;
+      }
       if (this.sel === id) return;
       this.sel = id;
       this.render();
@@ -221,10 +307,13 @@ export class Home {
     else if (a === 'new') { this.stopPreview(); await this.host.create(this.folder ?? ''); }
     else if (a === 'folder') {
       const name = prompt('新しいフォルダの名前')?.trim();
-      if (!name) return;
+      if (!name || name === UNCAT) return;
       await addFolder(name);
       await this.reload();
       this.folder = name;
+      this.render();
+    } else if (a === 'pick') {
+      this.picking = this.picking ? null : new Set();
       this.render();
     } else if (a === 'sort') {
       const order: Sort[] = ['updated', 'title', 'bpm'];
@@ -270,7 +359,8 @@ export class Home {
     this.preview.currentTime = 0;
     const start = Math.max(0, s.demoStart || 0);
     this.preview.addEventListener('loadedmetadata', () => { try { this.preview.currentTime = start; } catch { /* 無視 */ } }, { once: true });
-    void this.preview.play().catch(() => { this.playing = false; this.paintPlayer(); });
+    // 自動で鳴らせない（まだ画面に触れていない）ときは、次に触れたときに鳴らす
+    void this.preview.play().catch(() => { this.playing = false; this.pendingPreview = true; this.paintPlayer(); });
   }
 
   stopPreview() {
@@ -311,19 +401,10 @@ export class Home {
   private songMenu(id: string, anchor: HTMLElement) {
     const s = this.songs.find((x) => x.id === id);
     if (!s) return;
-    const moves: [string, () => Promise<void>][] = [
-      ...(s.folder ? [['一番上へ出す', async () => { await moveSong(id, ''); await this.select(id); }] as [string, () => Promise<void>]] : []),
-      ...this.folders.filter((f) => f !== s.folder).map((f) => [`「${f}」へ移す`, async () => { await moveSong(id, f); await this.select(id); }] as [string, () => Promise<void>]),
-    ];
+    const inFolder = this.folder !== null && this.folder !== UNCAT && s.folders.includes(this.folder);
     this.popup(anchor, [
-      ...moves,
-      ['新しいフォルダへ移す…', async () => {
-        const name = prompt('新しいフォルダの名前')?.trim();
-        if (!name) return;
-        await addFolder(name);
-        await moveSong(id, name);
-        await this.select(id);
-      }],
+      ...(inFolder ? [[`「${this.folder}」から外す`, async () => { await removeFromFolder([id], this.folder!); await this.reload(); this.render(); }] as [string, () => Promise<void>]] : []),
+      ['入れるフォルダを選ぶ…', () => this.folderPicker([id], anchor)],
       ['この曲を消す', async () => {
         if (!confirm(`「${s.title}」を消しますか？（譜面と音源がこのブラウザから消えます）`)) return;
         this.stopPreview();
@@ -334,6 +415,69 @@ export class Home {
         this.host.toast(`「${s.title}」を消しました`);
       }, true],
     ]);
+  }
+
+  /**
+   * 入れるフォルダを選ぶ（いくつでも。✓ が入っているフォルダ）。ids の曲を、押したフォルダに入れる・外す。
+   * move を渡すと、そのフォルダから外して移す
+   */
+  private folderPicker(ids: string[], anchor: HTMLElement, move?: string) {
+    const has = (f: string) => ids.every((id) => this.songs.find((x) => x.id === id)?.folders.includes(f));
+    const names = [...this.folders].sort((a, b) => a.localeCompare(b, 'ja')).filter((f) => f !== move);
+    const done = async (msg: string) => { await this.reload(); this.render(); this.host.toast(msg); };
+    this.popup(anchor, [
+      ...names.map((f) => [`${has(f) && !move ? '✓ ' : '　 '}${f}`, async () => {
+        if (move) {
+          await addToFolder(ids, f);
+          await removeFromFolder(ids, move);
+          await done(`${ids.length} 曲を「${f}」へ移しました`);
+        } else if (has(f)) {
+          await removeFromFolder(ids, f);
+          await done(`${ids.length} 曲を「${f}」から外しました`);
+        } else {
+          await addToFolder(ids, f);
+          await done(`${ids.length} 曲を「${f}」に入れました`);
+        }
+      }] as [string, () => Promise<void>]),
+      ['＋ 新しいフォルダ…', async () => {
+        const name = prompt('新しいフォルダの名前')?.trim();
+        if (!name || name === UNCAT) return;
+        await addToFolder(ids, name);
+        if (move) await removeFromFolder(ids, move);
+        await done(`${ids.length} 曲を「${name}」に${move ? '移しました' : '入れました'}`);
+      }],
+    ]);
+  }
+
+  /** 曲を選んでいるときの操作 */
+  private async pickAction(a: string, anchor: HTMLElement) {
+    const pk = this.picking;
+    if (!pk) return;
+    const ids = [...pk];
+    if (a === 'done') { this.picking = null; this.render(); return; }
+    if (a === 'all') {
+      const list = this.shown();
+      if (list.every((x) => pk.has(x.id))) list.forEach((x) => pk.delete(x.id));
+      else list.forEach((x) => pk.add(x.id));
+      this.render();
+      return;
+    }
+    if (!ids.length) return;
+    if (a === 'add') this.folderPicker(ids, anchor);
+    else if (a === 'move' && this.folder) this.folderPicker(ids, anchor, this.folder);
+    else if (a === 'remove' && this.folder) {
+      await removeFromFolder(ids, this.folder);
+      pk.clear();
+      await this.reload();
+      this.render();
+      this.host.toast(`${ids.length} 曲を「${this.folder}」から外しました`);
+    } else if (a === 'clear') {
+      if (!confirm(`${ids.length} 曲を、入っているフォルダから全部外しますか？（曲は消えません）`)) return;
+      for (const f of this.folders) await removeFromFolder(ids, f);
+      await this.reload();
+      this.render();
+      this.host.toast(`${ids.length} 曲をフォルダから外しました`);
+    }
   }
 
   private folderMenu(name: string, anchor: HTMLElement) {
@@ -347,7 +491,7 @@ export class Home {
         this.render();
       }],
       ['フォルダを消す（曲は残す）', async () => {
-        if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は一番上に出ます）`)) return;
+        if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は消えず、このフォルダから外れるだけです）`)) return;
         await deleteFolder(name);
         await this.reload();
         this.render();

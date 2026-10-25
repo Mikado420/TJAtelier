@@ -115,11 +115,14 @@
         <div class="home-mh">
           <b id="homePath">すべて</b><small id="homeCount">0</small>
           <span class="sp"></span>
+          <button data-h="pick" id="homePickBtn" class="home-pickbtn" title="曲を選んでフォルダに入れる・外す"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3"/><path d="M10 6h10M10 12h10M10 18h10"/></svg><small>選択</small></button>
           <button data-h="sort" class="home-sort" title="並べ替え"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h11M4 17h6"/></svg><small id="homeSort">更新順</small></button>
           <button data-h="search" title="検索" aria-label="検索"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg></button>
         </div>
         <div id="homeSearch" class="home-search hidden"><input id="homeQuery" type="search" placeholder="曲名・アーティストで探す" autocomplete="off"></div>
         <div id="homeList" class="home-list"></div>
+        <!-- 曲を選んでいるときの操作 -->
+        <div id="homePick" class="home-pick hidden"></div>
       </section>
       <section id="homeDetail" class="home-det"></section>
     </div>

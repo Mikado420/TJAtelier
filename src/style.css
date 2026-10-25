@@ -1381,3 +1381,21 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 /* 譜面画像 */
 .an-img { background: #cfcfcf; min-height: 80px; display: grid; place-items: center; max-height: 70vh; overflow: auto; touch-action: pan-x pan-y; }
 .an-img img { display: block; width: 100%; height: auto; }
+/* ---------- 曲選択: 曲を選んでフォルダに入れる・外す ---------- */
+.home-mh .home-pickbtn.on { background: #fff; }
+.home-mh .home-pickbtn.on svg { stroke: #000; }
+.home-mh .home-pickbtn.on small { color: #000; }
+.hr-ck { width: 20px; height: 20px; flex: none; display: grid; place-items: center; border: 2px solid rgba(255, 255, 255, 0.6); font-size: 13px; font-weight: 900; color: #fff; transform: skewX(calc(-1 * var(--tilt))); }
+.hr.pk { background: rgba(77, 159, 190, 0.22); }
+.hr.pk .hr-ck { background: var(--accent); border-color: var(--accent); }
+.hr-tags { display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: 1px; }
+.hr-tags em { font-style: normal; font-size: 10px; font-weight: 700; padding: 0 5px; background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.8); }
+.hr.on .hr-tags em { background: rgba(0, 0, 0, 0.1); color: rgba(0, 0, 0, 0.7); }
+.hf-uncat { font-style: italic; }
+.home-pick { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px calc(8px + var(--safe-b)); background: var(--deep); border-top: 2px solid var(--accent); }
+.home-pick b { font-size: 13px; margin-right: auto; white-space: nowrap; }
+.home-pick button { height: 34px; padding: 0 12px; font-size: 13px; font-weight: 800; border-radius: 0; background: var(--btn); color: #fff; --sk: calc(34px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); white-space: nowrap; }
+.home-pick button.primary { background: var(--accent); }
+.home-pick button.bad { background: #8a3a3a; }
+.home-pick button:disabled { opacity: 0.4; }
+.home-picking .home-list { padding-bottom: 8px; }

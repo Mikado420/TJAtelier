@@ -21,6 +21,8 @@ const GRAPH_H = 120;
 const AXIS_H = 18;
 const H = LANE_H + GRAPH_H + AXIS_H;
 const MAX_ZOOM = 60;
+/** レーンの音符の半径（px） */
+const NOTE_R = 9;
 
 export function mountTimeline(root: HTMLElement, d: TimelineData) {
   root.innerHTML = `
@@ -43,15 +45,6 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
   /** 1 秒の幅（px） */
   const pps = () => (viewW / dur) * zoom;
   const peak = d.curve.reduce((m, p) => (p.v > m.v ? p : m), d.curve[0] ?? { t0: 0, t1: 0, v: 0 });
-  /** 音符の大きさ: プレイ画面のハイスピード 1 と同じ「1 拍の幅に対する音符の大きさ」（半径 54 ÷ 1 拍 367.5）。いちばん長く使われている BPM で */
-  const mainBpm = (() => {
-    const use = new Map<number, number>();
-    const ns = d.course.notes;
-    for (let i = 0; i + 1 < ns.length; i++) use.set(ns[i].bpm, (use.get(ns[i].bpm) ?? 0) + (ns[i + 1].time - ns[i].time));
-    let best = ns[0]?.bpm ?? 120;
-    for (const [b, v] of use) if (v > (use.get(best) ?? 0)) best = b;
-    return best;
-  })();
   const top = Math.max(1, Math.ceil(peak.v));
 
   const layout = () => {
@@ -98,7 +91,8 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     }
     // 音符（後ろから）
     const cy = LANE_H / 2;
-    const r = Math.max(3, Math.min(16, (54 / 367.5) * p * (60 / mainBpm)));
+    // 音符の大きさは拡大率に関係なく同じ（拡大・縮小で変わるのは間隔だけ）
+    const r = NOTE_R;
     const notes = d.course.notes;
     for (let i = notes.length - 1; i >= 0; i--) {
       const n = notes[i];

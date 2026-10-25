@@ -18,8 +18,10 @@ export interface SongEntry {
   bpmMin: number;
   bpmMax: number;
   courses: { name: string; level: number }[];
-  /** 入っているフォルダ（'' は一番上） */
-  folder: string;
+  /** 入っているフォルダ（いくつでも。空なら未分類） */
+  folders: string[];
+  /** 前の版の「入っているフォルダ（1 つだけ、'' は一番上）」。読み込むときに folders へ移す */
+  folder?: string;
   audioName: string;
   demoStart: number;
   updatedAt: number;
@@ -35,7 +37,13 @@ const kFolders = 'lib-folders';
 const kChart = (id: string) => `lib-chart-${id}`;
 const kAudio = (id: string) => `lib-audio-${id}`;
 
-export const listSongs = async () => (await dbGet<SongEntry[]>(kIndex)) ?? [];
+/** 前の版（フォルダが 1 つだけ）の一覧を、今の形（いくつでも）に直す */
+const norm = (x: SongEntry): SongEntry => {
+  if (Array.isArray(x.folders)) return x;
+  const { folder, ...rest } = x;
+  return { ...rest, folders: folder ? [folder] : [] };
+};
+export const listSongs = async () => ((await dbGet<SongEntry[]>(kIndex)) ?? []).map(norm);
 export const listFolders = async () => (await dbGet<string[]>(kFolders)) ?? [];
 export const loadSongData = (id: string) => dbGet<SongData>(kChart(id));
 export const loadSongAudio = (id: string) => dbGet<AudioFile>(kAudio(id));
@@ -57,7 +65,7 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
     bpmMax: Math.max(...bpms),
     length: length ?? prev.length ?? 0,
     courses: chart.courses.map((c) => ({ name: c.name, level: c.level })),
-    folder: prev.folder ?? '',
+    folders: prev.folders ?? (prev.folder ? [prev.folder] : []),
     audioName: chart.wave,
     demoStart: chart.demoStart,
     updatedAt: Date.now(),
@@ -66,10 +74,11 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
 
 async function writeIndex(f: (list: SongEntry[]) => SongEntry[]) {
   const list = await listSongs();
-  await dbPut(kIndex, f(list));
+  // 前の版の folder は持たない（folders に移してある）
+  await dbPut(kIndex, f(list).map(({ folder: _old, ...x }) => x));
 }
 
-/** 曲を保存する（audio は undefined なら音源はそのまま、null なら消す） */
+/** 曲を保存する（audio は undefined なら音源はそのまま、null なら消す。folder は新しい曲を入れるフォルダ） */
 export async function saveSong(id: string, data: SongData, audio?: AudioFile | null, length?: number, folder?: string) {
   await dbPut(kChart(id), data);
   if (audio !== undefined) {
@@ -78,7 +87,8 @@ export async function saveSong(id: string, data: SongData, audio?: AudioFile | n
   }
   await writeIndex((list) => {
     const prev = list.find((x) => x.id === id);
-    const e = entryOf(id, data.chart, { ...prev, ...(folder !== undefined ? { folder } : {}) }, audio === null ? 0 : length);
+    const folders = prev ? prev.folders : folder ? [folder] : [];
+    const e = entryOf(id, data.chart, { ...prev, folders }, audio === null ? 0 : length);
     return prev ? list.map((x) => (x.id === id ? e : x)) : [...list, e];
   });
 }
@@ -89,8 +99,15 @@ export async function deleteSong(id: string) {
   await writeIndex((list) => list.filter((x) => x.id !== id));
 }
 
-export async function moveSong(id: string, folder: string) {
-  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, folder } : x)));
+/** 曲（いくつでも）をフォルダに入れる（ほかのフォルダからは外さない） */
+export async function addToFolder(ids: string[], folder: string) {
+  await addFolder(folder);
+  await writeIndex((list) => list.map((x) => (ids.includes(x.id) && !x.folders.includes(folder) ? { ...x, folders: [...x.folders, folder] } : x)));
+}
+
+/** 曲（いくつでも）をフォルダから外す */
+export async function removeFromFolder(ids: string[], folder: string) {
+  await writeIndex((list) => list.map((x) => (ids.includes(x.id) ? { ...x, folders: x.folders.filter((f) => f !== folder) } : x)));
 }
 
 export async function addFolder(name: string) {
@@ -101,12 +118,12 @@ export async function addFolder(name: string) {
 export async function renameFolder(from: string, to: string) {
   const fs = await listFolders();
   await dbPut(kFolders, fs.map((f) => (f === from ? to : f)).filter((f, i, a) => a.indexOf(f) === i));
-  await writeIndex((list) => list.map((x) => (x.folder === from ? { ...x, folder: to } : x)));
+  await writeIndex((list) => list.map((x) => (x.folders.includes(from) ? { ...x, folders: [...new Set(x.folders.map((f) => (f === from ? to : f)))] } : x)));
 }
 
-/** フォルダを消す（中の曲は一番上に出す） */
+/** フォルダを消す（中の曲は消さず、そのフォルダから外すだけ） */
 export async function deleteFolder(name: string) {
   const fs = await listFolders();
   await dbPut(kFolders, fs.filter((f) => f !== name));
-  await writeIndex((list) => list.map((x) => (x.folder === name ? { ...x, folder: '' } : x)));
+  await writeIndex((list) => list.map((x) => (x.folders.includes(name) ? { ...x, folders: x.folders.filter((f) => f !== name) } : x)));
 }
