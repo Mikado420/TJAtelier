@@ -728,7 +728,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
       ${tile('天井スコア', fmtNum(a.ceiling), a.hasRoll ? '＋ 連打' : '連打なし')}
       ${tile('BPM', bpmMain, bpmRange || '変化なし')}
-      ${tile('平均密度', a.density.toFixed(2), `打/秒・最大 ${peak.toFixed(1)}`)}
+      ${tile('平均密度', a.density.toFixed(2), `打/秒・小節ごとの最大 ${peak.toFixed(2)}`)}
       ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `曲の長さ ${fmtSec3(A.length)}` : '音源なし')}
       <div class="an-tile an-ratio">
         <span class="an-k">ドン : カッ</span>
@@ -754,7 +754,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       <div class="an-sim" id="anSim"></div>
     </section>` : ''}
     <section class="an-card">
-      <h3>譜面の流れ <small>上: 譜面 ／ 下: 密度（打/秒）</small></h3>
+      <h3>譜面の流れ <small>上: 譜面 ／ 下: 小節ごとの密度（打/秒）</small></h3>
       <div class="an-timeline" id="anTimeline"></div>
     </section>
     <section class="an-card">

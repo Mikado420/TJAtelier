@@ -4,20 +4,23 @@
  * ゴーゴータイムはレーンの上の桃色の帯、#SCROLL は赤（HS）、#BPMCHANGE は青（BPM）の文字で書く。
  */
 import { measures, contentEnd, sortCourse, Timing, TPB, type EChart, type ECourse } from './model';
-import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/notes';
+import { COLOR, drawBalloon, drawNoteHead, isBig } from '../render/notes';
 import type { NoteType } from './types';
 
 const COURSE_JA: Record<string, string> = { Easy: 'かんたん', Normal: 'ふつう', Hard: 'むずかしい', Oni: 'おに', Edit: 'おに（裏）' };
 
 /** 画像の寸法（基準の px） */
 const PAD_X = 24;
-const BEAT_W = 48;
+const BEAT_W = 72;
 const ROW_W = BEAT_W * 16; // 4/4 の小節 4 つ
 const HEAD_H = 92;
-const ROW_H = 74;
-const LANE_Y = 34; // 行の中のレーンの上端（上に HS・BPM の文字と小節の番号）
+const ROW_H = 84;
+const LANE_Y = 44; // 行の中のレーンの上端（上に HS・BPM の文字と小節の番号）
 const LANE_H = 32;
-const NOTE_R = 11;
+/** 音符の半径: プレイ画面のハイスピード 1 と同じ「1 拍の幅に対する大きさ」（半径 54 ÷ 1 拍 367.5） */
+const NOTE_R = (BEAT_W * 54) / 367.5;
+/** 大音符の半径（プレイ画面と同じ 83 ÷ 54 倍） */
+const BIG_R = (NOTE_R * 83) / 54;
 const FONT = "system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif";
 
 interface Row {
@@ -103,17 +106,19 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
   }
   if (gs !== null) gogo.push([gs, rows[rows.length - 1].end]);
   c.fillStyle = '#f5b8c0';
-  for (const [a, b] of gogo) spanRows(a, b, (ri, x1, x2) => c.fillRect(x1, rowTop(ri) + 4, x2 - x1, LANE_Y - 4));
+  // 次の行へまたぐときは、その行の右端まで・次の行の左端から塗る
+  for (const [a, b] of gogo) spanRows(a, b, (ri, x1, x2) => c.fillRect(x1, rowTop(ri) + 4, x2 - x1, LANE_Y - 4), true);
 
   /** tick a〜b を行ごとに分けて f(行, x1, x2) */
-  function spanRows(a: number, b: number, f: (ri: number, x1: number, x2: number) => void) {
+  function spanRows(a: number, b: number, f: (ri: number, x1: number, x2: number) => void, edges = false) {
     const p = pos(a);
     const q = pos(b);
     for (let ri = p.ri; ri <= q.ri; ri++) {
       const r = rows[ri];
       const rowEnd = PAD_X + r.bars.reduce((w, bb) => w + bb.w, 0);
-      const x1 = ri === p.ri ? p.x : PAD_X;
-      const x2 = ri === q.ri ? q.x : rowEnd;
+      // edges: 行をまたぐ所はレーンの端（左は 0、右はレーンの終わり）まで
+      const x1 = ri === p.ri ? p.x : edges ? 0 : PAD_X;
+      const x2 = ri === q.ri ? q.x : edges ? rowEnd + PAD_X / 2 : rowEnd;
       if (x2 > x1) f(ri, x1, x2);
     }
   }
@@ -138,33 +143,33 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
         c.fillStyle = '#fff';
         c.fillRect(x0 - 1, y - 6, 2, LANE_H + 6);
       }
-      c.fillStyle = '#111';
-      c.font = `700 9px ${FONT}`;
-      c.fillText(String(b.index + 1), x0 + 2, y - 8);
+      pixText(c, String(b.index + 1), x0 + 3, y - 5, 1.8, '#111');
     }
   }
 
-  // #SCROLL（赤）と #BPMCHANGE（青）の文字。最初の BPM と、1 でない最初の SCROLL も書く
-  const labels = new Map<number, string[]>();
-  const add = (tick: number, s: string) => { const l = labels.get(tick) ?? []; l.push(s); labels.set(tick, l); };
-  add(0, `BPM${num(chart.bpm)}`);
+  // #SCROLL（赤）と #BPMCHANGE（青）の数字。最初の BPM も書く
+  const labels = new Map<number, { hs: boolean; text: string }[]>();
+  const add = (tick: number, hs: boolean, v: number) => {
+    const l = (labels.get(tick) ?? []).filter((x) => x.hs !== hs);
+    l.push({ hs, text: num(v) });
+    labels.set(tick, l);
+  };
+  add(0, false, chart.bpm);
   for (const e of course.events) {
-    if (e.kind === 'scroll') add(e.tick, `HS${num(e.value)}`);
-    else if (e.kind === 'bpm' && e.tick > 0) add(e.tick, `BPM${num(e.value)}`);
-    else if (e.kind === 'bpm' && e.tick === 0 && e.value !== chart.bpm) labels.set(0, [`BPM${num(e.value)}`]);
+    if (e.kind === 'scroll') add(e.tick, true, e.value);
+    else if (e.kind === 'bpm') add(e.tick, false, e.value);
   }
-  c.font = `700 8px ${FONT}`;
+  const LINE = 11;
   for (const [tick, ls] of labels) {
     const p = pos(tick);
-    // 小節の番号より上に、下から積む
-    const base = rowTop(p.ri) + LANE_Y - 15;
-    ls.forEach((s, i) => {
-      c.fillStyle = s.startsWith('HS') ? '#d01e1e' : '#1d3fd0';
-      c.fillText(s, p.x + 2, base - (ls.length - 1 - i) * 8);
-    });
+    // 小節の番号より上に、下から積む（BPM の上に HS）
+    ls.sort((x, y) => Number(x.hs) - Number(y.hs));
+    const base = rowTop(p.ri) + LANE_Y - 18;
+    ls.forEach((l, i) => pixText(c, l.text, p.x + 3, base - i * LINE, 1.6, l.hs ? '#d01e1e' : '#1d3fd0'));
     if (tick > 0) {
       c.fillStyle = 'rgba(30,30,30,0.7)';
-      c.fillRect(p.x - 0.5, base - ls.length * 8, 1, LANE_Y - base + rowTop(p.ri) + ls.length * 8 + LANE_H);
+      const top = base - ls.length * LINE;
+      c.fillRect(p.x - 0.5, top, 1, rowTop(p.ri) + LANE_Y + LANE_H - top);
     }
   }
 
@@ -173,7 +178,7 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
   const notes = [...course.notes].sort((a, b) => b.tick - a.tick);
   for (const n of notes) {
     const big = isBig(n.type as NoteType);
-    const r = big ? NOTE_R * BIG_SCALE * 0.9 : NOTE_R;
+    const r = big ? BIG_R : NOTE_R;
     if (n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon') {
       const endTick = n.endTick ?? n.tick;
       if (n.type !== 'balloon') spanRows(n.tick, endTick, (ri, x1, x2) => rollBar(c, x1, x2, cy(ri), r, COLOR.roll));
@@ -213,3 +218,35 @@ function rollBar(c: CanvasRenderingContext2D, x1: number, x2: number, y: number,
 }
 
 const num = (v: number) => String(Number(v.toFixed(3)));
+
+/** ドット風の数字（3×5 の点）。0〜9 と . - / */
+const GLYPH: Record<string, string[]> = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '010', '010', '010'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+  '.': ['0', '0', '0', '0', '1'],
+  '-': ['000', '000', '111', '000', '000'],
+  '/': ['001', '001', '010', '100', '100'],
+};
+
+/** ドット風の数字を書く（x = 左、y = 下の線、px = 1 つの点の大きさ） */
+function pixText(c: CanvasRenderingContext2D, text: string, x: number, y: number, px: number, color: string) {
+  c.fillStyle = color;
+  let cx = x;
+  const top = y - 5 * px;
+  for (const ch of text) {
+    const g = GLYPH[ch];
+    if (!g) { cx += 2 * px; continue; }
+    g.forEach((row, ry) => {
+      for (let rx = 0; rx < row.length; rx++) if (row[rx] === '1') c.fillRect(cx + rx * px, top + ry * px, px, px);
+    });
+    cx += (g[0].length + 1) * px;
+  }
+}

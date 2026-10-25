@@ -4,7 +4,7 @@
  * 連打（本数と秒数）・風船（本数と打数）・演奏時間・密度の推移。秒速を決めて連打・風船に何打入るかのシミュレーションも。
  */
 import { scoreBase, BALLOON_HIT_SCORE } from '../engine/game';
-import { sortCourse, Timing, toPlayable, type EChart, type ECourse } from './model';
+import { contentEnd, measures, sortCourse, Timing, toPlayable, type EChart, type ECourse } from './model';
 
 export interface Analysis {
   /** 判定のある音符（ドン・カッ・大ドン・大カッ）の数 = 最大コンボ数 */
@@ -29,8 +29,8 @@ export interface Analysis {
   rolls: { type: 'roll' | 'bigRoll'; sec: number }[];
   /** 風船の長さ（秒）と打数 */
   balloons: { sec: number; hits: number }[];
-  /** 密度の推移: 演奏の最初からの秒（区間の真ん中）と、その区間の打/秒 */
-  curve: { t: number; v: number }[];
+  /** 小節ごとの密度: 小節の始まりと終わりの時刻（秒、曲の再生位置）と、その小節の打/秒（音符数 ÷ 小節の秒数） */
+  curve: { t0: number; t1: number; v: number }[];
   /** 最初の音符の時刻と最後の音符（連打・風船の終わりも含む）の時刻（秒、曲の再生位置） */
   firstTime: number;
   lastTime: number;
@@ -83,6 +83,21 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     .map((n) => ({ type: n.type as 'roll' | 'bigRoll', sec: Math.max(0, (n.endTime ?? n.time) - n.time) }));
   const balloons = balloonsAll.map((n) => ({ sec: Math.max(0, (n.endTime ?? n.time) - n.time), hits: n.hits ?? 0 }));
 
+  /** 小節ごとの密度（最初の音符の小節から最後の音符の小節まで）。秒数は（60 ÷ BPM）× 拍数（#DELAY は入れない） */
+  function measureDensity() {
+    const out: { t0: number; t1: number; v: number }[] = [];
+    if (!ticks.length) return out;
+    for (const m of measures(course, contentEnd(course))) {
+      const end = m.start + m.length;
+      if (end <= firstTick) continue;
+      if (m.start > lastTick) break;
+      const n = ticks.filter((tk) => tk >= m.start && tk < end).length;
+      const sec = noDelay(end) - noDelay(m.start);
+      out.push({ t0: t.tickToTime(m.start), t1: t.tickToTime(end), v: sec > 0 ? n / sec : 0 });
+    }
+    return out;
+  }
+
   const firstTime = pc.notes.length ? pc.notes[0].time : 0;
   const lastTime = pc.notes.reduce((m, n) => Math.max(m, n.endTime ?? n.time), firstTime);
 
@@ -101,25 +116,10 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     playTime,
     rolls,
     balloons,
-    curve: densityCurve(combo.map((n) => n.time), firstTime, lastTime),
+    curve: measureDensity(),
     firstTime,
     lastTime,
   };
-}
-
-/** 密度の推移: 2 秒の幅の窓を 0.5 秒ずつずらして、窓の中の音符の数 ÷ 2 */
-export function densityCurve(times: number[], from: number, to: number, win = 2, step = 0.5): { t: number; v: number }[] {
-  const out: { t: number; v: number }[] = [];
-  if (!times.length || to <= from) return out;
-  const sorted = [...times].sort((a, b) => a - b);
-  let lo = 0;
-  let hi = 0;
-  for (let s = from - win / 2; s <= to - win / 2 + 1e-9; s += step) {
-    while (lo < sorted.length && sorted[lo] < s) lo++;
-    while (hi < sorted.length && sorted[hi] < s + win) hi++;
-    out.push({ t: s + win / 2 - from, v: (hi - lo) / win });
-  }
-  return out;
 }
 
 /**

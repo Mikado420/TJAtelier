@@ -52,3 +52,13 @@ describe('譜面情報', () => {
     expect(s.balloonLoss).toBe(10 * 100);
   });
 });
+
+describe('小節ごとの密度', () => {
+  it('小節の音符数 ÷ 小節の秒数', () => {
+    // 120BPM の 4/4 = 2 秒。1 小節目 4 個 → 2、2 小節目 8 個 → 4
+    const c = parseTJA('TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n11111111,\n1,\n#END\n');
+    const a = analyzeCourse(c, c.courses[0]);
+    expect(a.curve.map((m) => m.v)).toEqual([2, 4, 0.5]);
+    expect(a.curve[1].t0).toBeCloseTo(2, 6);
+  });
+});

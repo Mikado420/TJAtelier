@@ -7,10 +7,11 @@ import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/no
 
 export interface TimelineData {
   course: Course;
-  curve: { t: number; v: number }[];
+  /** 小節ごとの密度（時刻は曲の再生位置） */
+  curve: { t0: number; t1: number; v: number }[];
   /** 平均密度 */
   density: number;
-  /** 最初の音符の時刻（curve の t の 0） */
+  /** 最初の音符の時刻 */
   firstTime: number;
   lastTime: number;
 }
@@ -41,7 +42,16 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
   let viewW = 0;
   /** 1 秒の幅（px） */
   const pps = () => (viewW / dur) * zoom;
-  const peak = d.curve.reduce((m, p) => (p.v > m.v ? p : m), d.curve[0] ?? { t: 0, v: 0 });
+  const peak = d.curve.reduce((m, p) => (p.v > m.v ? p : m), d.curve[0] ?? { t0: 0, t1: 0, v: 0 });
+  /** 音符の大きさ: プレイ画面のハイスピード 1 と同じ「1 拍の幅に対する音符の大きさ」（半径 54 ÷ 1 拍 367.5）。いちばん長く使われている BPM で */
+  const mainBpm = (() => {
+    const use = new Map<number, number>();
+    const ns = d.course.notes;
+    for (let i = 0; i + 1 < ns.length; i++) use.set(ns[i].bpm, (use.get(ns[i].bpm) ?? 0) + (ns[i + 1].time - ns[i].time));
+    let best = ns[0]?.bpm ?? 120;
+    for (const [b, v] of use) if (v > (use.get(best) ?? 0)) best = b;
+    return best;
+  })();
   const top = Math.max(1, Math.ceil(peak.v));
 
   const layout = () => {
@@ -88,7 +98,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     }
     // 音符（後ろから）
     const cy = LANE_H / 2;
-    const r = Math.max(4, Math.min(13, 0.09 * p + 4));
+    const r = Math.max(3, Math.min(16, (54 / 367.5) * p * (60 / mainBpm)));
     const notes = d.course.notes;
     for (let i = notes.length - 1; i >= 0; i--) {
       const n = notes[i];
@@ -120,27 +130,31 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.fillStyle = 'rgba(255,255,255,0.07)';
       c.fillRect(0, Math.round(yOf(v)), w, 1);
     }
-    if (d.curve.length > 1) {
-      c.beginPath();
-      c.moveTo(xOf(d.firstTime + d.curve[0].t), gy + GRAPH_H);
-      for (const q of d.curve) c.lineTo(xOf(d.firstTime + q.t), yOf(q.v));
-      c.lineTo(xOf(d.firstTime + d.curve[d.curve.length - 1].t), gy + GRAPH_H);
-      c.closePath();
+    if (d.curve.length) {
+      // 小節ごとの段（小節線とそろう）
       c.fillStyle = 'rgba(77,159,190,0.28)';
-      c.fill();
+      for (const q of d.curve) {
+        if (q.t1 < vis0 || q.t0 > vis1) continue;
+        c.fillRect(xOf(q.t0), yOf(q.v), xOf(q.t1) - xOf(q.t0), gy + GRAPH_H - yOf(q.v));
+      }
       c.beginPath();
-      d.curve.forEach((q, i) => (i ? c.lineTo(xOf(d.firstTime + q.t), yOf(q.v)) : c.moveTo(xOf(d.firstTime + q.t), yOf(q.v))));
+      d.curve.forEach((q, i) => {
+        if (i) c.lineTo(xOf(q.t0), yOf(q.v));
+        else c.moveTo(xOf(q.t0), gy + GRAPH_H);
+        if (!i) c.lineTo(xOf(q.t0), yOf(q.v));
+        c.lineTo(xOf(q.t1), yOf(q.v));
+      });
+      const last = d.curve[d.curve.length - 1];
+      c.lineTo(xOf(last.t1), gy + GRAPH_H);
       c.strokeStyle = '#93cde2';
       c.lineWidth = 2;
       c.stroke();
-      // いちばん高い所
-      const px = xOf(d.firstTime + peak.t);
+      // いちばん高い小節
+      const px = (xOf(peak.t0) + xOf(peak.t1)) / 2;
       c.fillStyle = '#ffd21f';
-      c.beginPath();
-      c.arc(px, yOf(peak.v), 3.5, 0, Math.PI * 2);
-      c.fill();
-      c.textAlign = px > w - 90 ? 'right' : 'left';
-      c.fillText(`最大 ${peak.v.toFixed(1)}`, px + (c.textAlign === 'right' ? -6 : 6), Math.max(gy + 8, yOf(peak.v) - 2));
+      c.fillRect(xOf(peak.t0), yOf(peak.v) - 1.5, xOf(peak.t1) - xOf(peak.t0), 3);
+      c.textAlign = px > w - 90 ? 'right' : px < 60 ? 'left' : 'center';
+      c.fillText(`最大 ${peak.v.toFixed(2)}`, px, Math.max(gy + 8, yOf(peak.v) - 9));
     }
     // 平均（点線）
     c.setLineDash([5, 4]);
