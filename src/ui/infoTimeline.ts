@@ -27,7 +27,7 @@ const NOTE_R = 9;
 export function mountTimeline(root: HTMLElement, d: TimelineData) {
   root.innerHTML = `
     <div class="tl-tools">
-      <span class="tl-hint">横にスクロール・2 本指で拡大</span>
+      <span class="tl-hint"></span>
       <button data-tl="out" aria-label="縮小"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
       <button data-tl="reset" aria-label="全体を表示"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/></svg><b class="tl-zoom">100%</b></button>
       <button data-tl="in" aria-label="拡大"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>

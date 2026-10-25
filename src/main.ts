@@ -165,7 +165,7 @@ async function setAudio(file: AudioFile | null, save = true) {
     await audio.loadMusic(file ? file.data.slice(0) : null);
   } catch {
     await audio.loadMusic(null);
-    toast(`「${file?.name}」はこのブラウザで再生できません（mp3 / m4a なら再生できます）`);
+    toast(`「${file?.name}」は再生できません`);
   }
   if (save) void persist(file);
   view.setWave(...computePeaks());
@@ -415,7 +415,7 @@ $('divMid').addEventListener('click', () => {
   const t = v.trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
   const n = /^\d+$/.test(t) ? Number(t) : NaN;
   if (!gridOk(n)) {
-    toast('1 以上の整数を入力してください（負の数・0・小数は使えません）');
+    toast('1 以上の整数を入力してください');
     return;
   }
   setDivisor(n);
@@ -759,12 +759,12 @@ function renderAnalysisSheet(body: HTMLElement) {
       <div class="an-sim" id="anSim"></div>
     </section>` : ''}
     <section class="an-card">
-      <h3>譜面の流れ <small>上: 譜面 ／ 下: 小節ごとの密度（打/秒）</small></h3>
+      <h3>譜面の流れ</h3>
       <div class="an-timeline" id="anTimeline"></div>
     </section>
     <section class="an-card">
       <h3>譜面画像</h3>
-      <div class="an-img" id="anImg"><p class="note">作っています…</p></div>
+      <div class="an-img" id="anImg"></div>
       <div class="btns"><button data-an-img="save" class="primary">画像を保存</button><button data-an-img="open">大きく見る</button></div>
     </section>`;
 
@@ -847,10 +847,10 @@ function renderGradPickSheet(body: HTMLElement) {
   const items: string[] = [];
   if (gp.before) items.push(`<button data-gp="before" class="gp-item"><b>前のグラデを開く</b><small>${val(gp.before)}　${range(gp.before)}</small></button>`);
   if (gp.after) items.push(`<button data-gp="after" class="gp-item"><b>後ろのグラデを開く</b><small>${val(gp.after)}　${range(gp.after)}</small></button>`);
-  if (!gp.after) items.push(`<button data-gp="new" class="gp-item"><b>ここから新しいグラデを始める</b><small>次に、終わりにしたい位置をタップ</small></button>`);
-  else if (!gp.before) items.push(`<button data-gp="new" class="gp-item"><b>ここで終わる新しいグラデを作る</b><small>次に、始めにしたい位置をタップ</small></button>`);
-  items.push(`<button data-gp="point" class="gp-item"><b>この位置に SCROLL を重ねて置く</b><small>${ed.label(gp.tick)}・グラデの値の代わりにする</small></button>`);
-  body.innerHTML = `<p class="note">${ed.label(gp.tick)}</p><div class="gp-list">${items.join('')}</div>`;
+  if (!gp.after) items.push(`<button data-gp="new" class="gp-item"><b>ここから新しいグラデ</b></button>`);
+  else if (!gp.before) items.push(`<button data-gp="new" class="gp-item"><b>ここまでの新しいグラデ</b></button>`);
+  items.push(`<button data-gp="point" class="gp-item"><b>ここに SCROLL を置く</b></button>`);
+  body.innerHTML = `<div class="gp-list">${items.join('')}</div>`;
   // タップで開いた直後に、そのタップから来るクリックがちょうど指の下のボタンを押してしまわないように
   const openedAt = performance.now();
   body.querySelectorAll<HTMLButtonElement>('[data-gp]').forEach((b) => b.addEventListener('click', () => {
@@ -967,7 +967,7 @@ function openSheet(kind: SheetKind) {
   // BPM・OFFSET の画面は画面いっぱい
   $('sheet').classList.toggle('tempo', kind === 'tempo' || kind === 'cut');
   // 譜面情報は縦いっぱい・横広め
-  $('sheet').classList.toggle('info', kind === 'analysis');
+  $('sheet').classList.toggle('info', kind === 'analysis' || kind === 'settings');
   document.body.classList.toggle('tja-open', kind === 'events');
   renderSheet();
 }
@@ -1076,37 +1076,52 @@ function renderSheet() {
       </div>`;
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
+    const sw = (key: string, label: string, on: boolean) =>
+      `<label class="st-row"><span>${label}</span><input type="checkbox" class="st-sw" data-set="${key}" ${on ? 'checked' : ''}></label>`;
+    const range = (key: string, label: string, min: number, max: number, step: number, v: number, out: string) =>
+      `<label class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}"><output>${out}</output></label>`;
+    const hit = (k: 'don' | 'ka' | 'balloon', label: string) =>
+      `<div class="st-row"><span>${label}</span><em class="st-file ${hitNames[k] ? 'on' : ''}">${esc(hitNames[k] ?? '内蔵')}</em></div>`;
     body.innerHTML = `
-      <h3>レーンの下に出すイベント</h3>
-      <div class="ev-show">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span style="color:${EVENT_COLOR[k]}">${EV_NAMES[k]}</span></label>`).join('')}</div>
-      <h3>プレイ・再生</h3>
-      <label class="field"><span>オート</span><input type="checkbox" data-set="auto" ${settings.auto ? 'checked' : ''}></label>
-      <label class="field"><span>ハイスピード</span><input type="range" min="0.5" max="4" step="0.1" data-set="speed" value="${settings.speed}"><output>${settings.speed.toFixed(1)}</output></label>
-      <label class="field"><span>判定調整 ms</span><input type="range" min="-300" max="300" step="1" data-set="offset" value="${settings.offset}"><output>${settings.offset}</output></label>
-      <label class="field"><span>打音</span><input type="checkbox" data-set="hitSound" ${settings.hitSound ? 'checked' : ''}></label>
-      <label class="field"><span>ずれを表示</span><input type="checkbox" data-set="showTiming" ${settings.showTiming ? 'checked' : ''}></label>
-      <label class="field"><span>太鼓を表示</span><input type="checkbox" data-set="padVisible" ${settings.padVisible ? 'checked' : ''}></label>
-      <label class="field"><span>ドンの幅</span><input type="range" min="0.3" max="0.9" step="0.01" data-set="donWidth" value="${settings.donWidth}"><output>${Math.round(settings.donWidth * 100)}%</output></label>
-      ${isNativeHost() ? '<p class="note">Expo Go のアプリで動いています。指置きなしで叩けます。</p>' : IS_IOS ? `
-      <label class="field"><span>上を指置きに</span><input type="checkbox" data-set="restZone" ${settings.restZone ? 'checked' : ''}></label>
-      <p class="note">iPhone の Safari では、両手で速く叩くとタッチが届かないことがあります。画面の上に指を 1 本置いたまま叩くか、Expo Go のアプリで開いてください（指置きなしで叩けます）。</p>
-      <a class="btn-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
-      <button data-act="calibrate">タイミング調整（クリック音に合わせて叩いて、判定調整を測る）</button>
-      <h3>音量（自動で同じ大きさに揃えてから、この比率を掛けます。.zip の音源も、音源と打音の比率に合わせて書き出します）</h3>
-      <label class="field"><span>音源</span><input type="range" min="0" max="2" step="0.05" data-set="volMusic" value="${settings.volMusic}"><output>${settings.volMusic.toFixed(2)}</output></label>
-      <label class="field"><span>打音</span><input type="range" min="0" max="2" step="0.05" data-set="volHit" value="${settings.volHit}"><output>${settings.volHit.toFixed(2)}</output></label>
-      <label class="field"><span>メトロノーム</span><input type="range" min="0" max="2" step="0.05" data-set="volMetro" value="${settings.volMetro}"><output>${settings.volMetro.toFixed(2)}</output></label>
-      <h3>打音</h3>
-      <p class="note">ドン: ${esc(hitNames.don ?? '内蔵の音')} ／ カッ: ${esc(hitNames.ka ?? '内蔵の音')} ／ 風船が割れる音: ${esc(hitNames.balloon ?? '内蔵の音')}<br>
-        3 つまとめて選べます。ファイル名に「don」が入っているものをドン、「ka」をカッ、「balloon」を風船が割れる音にします（例: dong.ogg / ka.ogg / Balloon.ogg）。読み込んだ音はこの端末の中だけに保存されます。</p>
-      <div class="btns">
-        <button data-act="hitLoad">打音ファイルを選ぶ</button>
-        <button data-act="hitReset" ${hitNames.don || hitNames.ka || hitNames.balloon ? '' : 'disabled'}>内蔵の音に戻す</button>
+      <div class="st-grid">
+        <section class="an-card st-card">
+          <h3>プレイ</h3>
+          ${sw('auto', 'オート', settings.auto)}
+          ${sw('hitSound', '打音', settings.hitSound)}
+          ${sw('showTiming', 'ずれを表示', settings.showTiming)}
+          ${sw('padVisible', '太鼓を表示', settings.padVisible)}
+          ${!isNativeHost() && IS_IOS ? sw('restZone', '上を指置きに', settings.restZone) : ''}
+          ${range('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed, settings.speed.toFixed(1))}
+          ${range('donWidth', 'ドンの幅', 0.3, 0.9, 0.01, settings.donWidth, `${Math.round(settings.donWidth * 100)}%`)}
+          ${range('offset', '判定調整', -300, 300, 1, settings.offset, String(settings.offset))}
+          <div class="st-btns">
+            <button data-act="calibrate">タイミング調整</button>
+            ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
+          </div>
+        </section>
+        <section class="an-card st-card">
+          <h3>音量</h3>
+          ${range('volMusic', '音源', 0, 2, 0.05, settings.volMusic, settings.volMusic.toFixed(2))}
+          ${range('volHit', '打音', 0, 2, 0.05, settings.volHit, settings.volHit.toFixed(2))}
+          ${range('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, settings.volMetro.toFixed(2))}
+          <h3>打音</h3>
+          ${hit('don', 'ドン')}
+          ${hit('ka', 'カッ')}
+          ${hit('balloon', '風船')}
+          <div class="st-btns">
+            <button data-act="hitLoad">ファイルを選ぶ</button>
+            <button data-act="hitReset" ${hitNames.don || hitNames.ka || hitNames.balloon ? '' : 'disabled'}>内蔵に戻す</button>
+          </div>
+        </section>
+        <section class="an-card st-card">
+          <h3>エディタ</h3>
+          ${sw('metronome', 'メトロノーム', settings.metronome)}
+          <div class="st-sub">レーンの下に出すイベント</div>
+          <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>
+          <div class="st-btns"><button data-act="resetZoom">拡大率を戻す</button></div>
+        </section>
       </div>
-      <button data-act="resetZoom">エディタの拡大率を初期値（プレイ画面と同じ間隔）に戻す</button>
-      <label class="field"><span>メトロノーム</span><input type="checkbox" data-set="metronome" ${settings.metronome ? 'checked' : ''}></label>
-      <p class="note">編集内容はこのブラウザに自動保存されます。書き出した .tja はシフトJIS です。</p>
-      <p class="note">バージョン: ${esc(BUILD_ID.slice(0, 7))}</p>`;
+      <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
   } else if (sheet === 'cut') {
     renderCutSheet(body);
   } else if (sheet === 'tempo') {
@@ -1548,11 +1563,11 @@ async function exportAudioData(a: AudioFile): Promise<ArrayBuffer> {
     const chs = boostWithLimiter(bufferChannels(buf), buf.sampleRate, gain);
     const data = await pcmToOgg(chs, buf.sampleRate, (p) => busy(msg, p), 8);
     busyEnd();
-    toast(`音源を ×${gain.toFixed(2)}（音源 ${settings.volMusic.toFixed(2)} : 打音 ${settings.volHit.toFixed(2)}）で書き出しました`);
+    toast('書き出しました');
     return data;
   } catch (err) {
     busyEnd();
-    toast(`音量を合わせられなかったので、元の音源のまま書き出します（${(err as Error).message}）`);
+    toast('音量を合わせられませんでした（元の音源で書き出します）');
     return a.data;
   }
 }
@@ -1565,7 +1580,6 @@ async function fileAction(act: string) {
   else if (act === 'new') {
     await createSong(newChart());
     closeSheet();
-    toast('「読み込み・書き出し → 音源を読み込む」で曲を設定してください');
   } else if (act === 'sample') {
     await createSong(parseTJA(DEMO_TJA));
     closeSheet();
@@ -1609,7 +1623,7 @@ async function fileAction(act: string) {
     await play.startCalibration();
   } else if (act === 'resetZoom') {
     resetZoom();
-    toast('拡大率を初期値（プレイ画面と同じ間隔）に戻しました');
+    toast('拡大率を戻しました');
   } else if (act === 'delCourse') {
     if (confirm(`${ed.course.name} を削除しますか？`)) ed.removeCourse(ed.courseIndex);
   }
@@ -1687,7 +1701,7 @@ $('growFace').addEventListener('click', () => {
 $('copyLog').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(play.lastLog);
-    toast('記録をコピーしました。チャットに貼り付けてください');
+    toast('記録をコピーしました');
   } catch {
     // コピーできない環境では、選択できる形で表示する
     const ta = document.createElement('textarea');
@@ -1805,7 +1819,6 @@ async function createSong(chart: EChart, folder = '') {
   const id = newId();
   await saveSong(id, { chart, courseIndex: 0 }, null, 0, folder);
   await openSong(id, 'edit');
-  toast('「⇅ → 音源を読み込む」で曲を設定してください');
 }
 
 const home = new Home({
@@ -3534,9 +3547,6 @@ function drawArr(playhead = -1) {
     ctx.fillStyle = col.solid;
     ctx.fillRect(x - 8, y - 1.5, 16, 3);
     ctx.fillRect(x - 1.5, y - 8, 3, 16);
-    ctx.font = '700 11px system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    if (L.laneH >= 70) ctx.fillText('タップで音源を取り込む', x + 22, y + 4);
   }
   // トラックを足す（いちばん下の丸い ＋）
   const ay = L.top(a.tracks);
@@ -3591,7 +3601,7 @@ function drawArr(playhead = -1) {
     ctx.lineTo(mx, Math.min(HH, Math.max(A_RULER, a.cutDrag)));
     ctx.stroke();
     ctx.setLineDash([]);
-    const label = ready ? `✂ 離すとトラック ${tk + 1} をここで切る` : a.cutDrag > A_RULER + 10 ? 'ここにクリップがありません' : '下へドラッグで切る';
+    const label = ready ? '✂ ここで切る' : a.cutDrag > A_RULER + 10 ? 'クリップなし' : '✂';
     ctx.font = '800 13px system-ui, sans-serif';
     const lw = ctx.measureText(label).width + 16;
     const lx = Math.max(4, Math.min(W - lw - 4, mx + 10));
