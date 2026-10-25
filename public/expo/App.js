@@ -13,7 +13,7 @@
  * 判定が遅れない（Web 版は「届くまでの遅れがいちばん少なかったとき」を基準に時刻を直す）。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Alert, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -113,12 +113,14 @@ export default function App() {
     try {
       const m = JSON.parse(e.nativeEvent.data);
       if (m.type === 'file') {
+        if (!files.current[m.id]) web.current?.injectJavaScript(`window.__nativeFileAck&&window.__nativeFileAck(${JSON.stringify(m.id)});true;`);
         const f = (files.current[m.id] ||= { parts: [], got: 0 });
         if (f.parts[m.part] === undefined) f.got += 1;
         f.parts[m.part] = m.data;
         if (f.got >= m.total) {
           delete files.current[m.id];
           saveAndShare(m.name, m.mime, f.parts.join('')).catch((err) => {
+            Alert.alert('保存できませんでした', String((err && err.message) || err));
             web.current?.injectJavaScript(`window.__nativeSaveError&&window.__nativeSaveError(${JSON.stringify(String(err && err.message || err))});true;`);
           });
         }

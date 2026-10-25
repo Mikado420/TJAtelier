@@ -16,17 +16,32 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-/** アプリへファイルを渡す。アプリの中でなければ false */
-export async function nativeSave(blob: Blob, name: string, mime = blob.type || 'application/octet-stream'): Promise<boolean> {
+type W = { __nativeFileAck?: (id: string) => void; __nativeSaveError?: (msg: string) => void };
+const acks = new Map<string, () => void>();
+let onError: (msg: string) => void = () => {};
+(window as unknown as W).__nativeFileAck = (id) => { acks.get(id)?.(); acks.delete(id); };
+(window as unknown as W).__nativeSaveError = (msg) => onError(msg);
+/** アプリで保存に失敗したときに知らせる先 */
+export function onNativeSaveError(f: (msg: string) => void) { onError = f; }
+
+/**
+ * アプリへファイルを渡す。
+ * 'ok' = アプリが受け取った / 'old' = アプリが受け取らなかった（古い版のアプリ） / 'none' = アプリの中ではない
+ */
+export async function nativeSave(blob: Blob, name: string, mime = blob.type || 'application/octet-stream'): Promise<'ok' | 'old' | 'none'> {
   const host = rn();
-  if (!host) return false;
+  if (!host) return 'none';
   const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const total = Math.max(1, Math.ceil(b64.length / CHUNK));
+  const acked = new Promise<boolean>((res) => {
+    acks.set(id, () => res(true));
+    setTimeout(() => { acks.delete(id); res(false); }, 4000);
+  });
   for (let i = 0; i < total; i++) {
     host.postMessage(JSON.stringify({ type: 'file', id, name, mime, part: i, total, data: b64.slice(i * CHUNK, (i + 1) * CHUNK) }));
     // 大きいときは少しずつ（アプリ側が詰まらないように）
     if (total > 1) await new Promise((r) => setTimeout(r, 0));
   }
-  return true;
+  return (await acked) ? 'ok' : 'old';
 }
