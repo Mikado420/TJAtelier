@@ -1,4 +1,4 @@
-import { canNativeSave, nativeSave, onNativeSaveError } from './io/nativeSave';
+import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
 import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent } from './chart/model';
@@ -1097,6 +1097,7 @@ function renderSheet() {
             <button data-act="calibrate">タイミング調整</button>
             ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
           </div>
+          ${isNativeHost() ? `<p class="st-ver">アプリ v${nativeAppVersion() || '2 以前'}</p>` : ''}
         </section>
         <section class="an-card st-card">
           <h3>音量</h3>
@@ -1569,7 +1570,10 @@ async function nativeSaveToast(blob: Blob, name: string, mime?: string) {
   toast('保存の準備をしています…');
   try {
     const r = await nativeSave(blob, name, mime);
-    if (r === 'old') toast('アプリが古い版です。Expo Go でこのアプリを完全に閉じてから開き直してください');
+    if (r === 'old') {
+      const v = nativeAppVersion();
+      toast(v ? `アプリ（v${v}）から返事がありません。もう一度押してください` : 'アプリ本体が古い版です（v3 未満）。Expo Go を完全に閉じて、開き直してください');
+    }
   } catch {
     toast('書き出せませんでした');
   }

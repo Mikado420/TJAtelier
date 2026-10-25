@@ -21,6 +21,17 @@ const acks = new Map<string, () => void>();
 let onError: (msg: string) => void = () => {};
 (window as unknown as W).__nativeFileAck = (id) => { acks.get(id)?.(); acks.delete(id); };
 (window as unknown as W).__nativeSaveError = (msg) => onError(msg);
+// アプリからの WebView.postMessage（もう一つの道）
+const onMsg = (e: Event) => {
+  try {
+    const m = JSON.parse(String((e as MessageEvent).data));
+    if (m && m.type === 'fileAck') (window as unknown as W).__nativeFileAck?.(m.id);
+  } catch { /* 関係ないメッセージ */ }
+};
+window.addEventListener('message', onMsg);
+document.addEventListener('message', onMsg);
+/** アプリ本体の版（古いアプリでは無い） */
+export const nativeAppVersion = () => (window as unknown as { __nativeApp?: number }).__nativeApp ?? 0;
 /** アプリで保存に失敗したときに知らせる先 */
 export function onNativeSaveError(f: (msg: string) => void) { onError = f; }
 

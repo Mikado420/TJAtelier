@@ -1514,3 +1514,4 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .st-num i { width: 22px; }
 .pause-menu .panel.pm { height: calc(100% - 24px); grid-template-rows: minmax(0, 1fr); }
 .pm-main { min-height: 0; overflow-y: auto; }
+.st-ver { margin: 8px 0 0; font-size: 11px; color: var(--sub); text-align: right; }

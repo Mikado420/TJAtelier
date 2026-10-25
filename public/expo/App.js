@@ -88,6 +88,10 @@ async function saveAndShare(name, mime, b64) {
   await Sharing.shareAsync(file.uri, { mimeType: mime, dialogTitle: safe });
 }
 
+/** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
+const APP_VERSION = 3;
+const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
+
 const URL = 'https://mikado420.github.io/TJAtelier/';
 
 export default function App() {
@@ -113,7 +117,12 @@ export default function App() {
     try {
       const m = JSON.parse(e.nativeEvent.data);
       if (m.type === 'file') {
-        if (!files.current[m.id]) web.current?.injectJavaScript(`window.__nativeFileAck&&window.__nativeFileAck(${JSON.stringify(m.id)});true;`);
+        if (!files.current[m.id]) {
+          const ack = JSON.stringify(m.id);
+          web.current?.injectJavaScript(`window.__nativeFileAck&&window.__nativeFileAck(${ack});true;`);
+          // 念のためもう一つの道でも知らせる
+          web.current?.postMessage(JSON.stringify({ type: 'fileAck', id: m.id }));
+        }
         const f = (files.current[m.id] ||= { parts: [], got: 0 });
         if (f.parts[m.part] === undefined) f.got += 1;
         f.parts[m.part] = m.data;
@@ -166,6 +175,8 @@ export default function App() {
         source={{ uri: URL }}
         style={styles.web}
         onMessage={onMessage}
+        injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
+        injectedJavaScript={INJECT_BEFORE}
         onLoadStart={() => setPlaying(false)}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
