@@ -4,7 +4,7 @@ import { parseTJA } from './tja';
 
 const tja = (body: string, head = '') => parseTJA(`TITLE:t\nBPM:120\n${head}COURSE:Oni\nLEVEL:10\nBALLOON:40,30\n#START\n${body}\n#END\n`);
 
-describe('譜面分析', () => {
+describe('譜面情報', () => {
   it('総ノーツ数・ドンとカッ・平均密度（(音符数 − 1) ÷ 演奏時間）', () => {
     const c = tja('1212,\n3400,');
     const a = analyzeCourse(c, c.courses[0]);

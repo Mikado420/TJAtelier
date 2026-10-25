@@ -15,7 +15,7 @@ export interface HomeHost {
   /** 新しい譜面を作って開く */
   create(folder: string): Promise<void>;
   settings(): void;
-  /** 譜面分析を出す */
+  /** 譜面情報を出す */
   analyze(id: string): void;
   toast(msg: string): void;
 }
@@ -173,7 +173,7 @@ export class Home {
         <div class="hdx-bpm">${fmtBpm(s)}<small>BPM</small></div>
         <div class="hdx-row"><span>長さ ${fmtLen(s.length)}</span><span class="hdx-pv"><button data-h="prev" aria-label="前の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/></svg></button><button data-h="pp" aria-label="試聴"></button><button data-h="next" aria-label="次の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button></span></div>
         <div class="hdx-diffs">${courses}</div>
-        <div class="hdx-acts"><button class="hdx-an" data-analyze="${s.id}" aria-label="譜面分析"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>分析</button><button class="hdx-edit" data-edit="${s.id}">編集</button><button class="hdx-play" data-play="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>プレイ</button></div>`;
+        <div class="hdx-acts"><button class="hdx-an" data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>情報</button><button class="hdx-edit" data-edit="${s.id}">編集</button><button class="hdx-play" data-play="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>プレイ</button></div>`;
     } else {
       this.detail.innerHTML = `<div class="hdx-empty"><b>曲を選んでください</b><small>.tja・.zip・音源ファイルから読み込めます</small><button class="hdx-play" data-h="import">読み込む</button></div>`;
     }

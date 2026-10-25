@@ -18,7 +18,9 @@ import { DIVISORS, Editor, type Tool } from './editor/editor';
 import { EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow } from './editor/view';
 import { loadFiles, type AudioFile } from './io/load';
 import { encodeSJIS } from './chart/sjis';
-import { analyzeCourse, simulateRolls, type Analysis } from './chart/analyze';
+import { analyzeCourse, simulateRolls } from './chart/analyze';
+import { drawChartImage } from './chart/chartImage';
+import { mountTimeline } from './ui/infoTimeline';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart, loadHitSound, saveHitSound } from './io/storage';
@@ -63,7 +65,7 @@ const settings = {
   passiveTouch: false,
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
-  /** 譜面分析: 連打・風船のシミュレーションの秒速（打/秒） */
+  /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
   rollRate: 15,
   /** タッチ用の中央のドンの帯の幅 */
   donWidth: 0.6,
@@ -470,7 +472,7 @@ function menuTiles(tab: MenuTab): Tile[] {
       { label: '曲の情報', icon: 'info', run: () => openSheet('info') },
       { label: 'TJA', icon: 'tja', run: () => openSheet('events') },
       { label: 'BPM 測定', icon: 'tempo', run: () => startTempo() },
-      { label: '譜面分析', icon: 'chart', run: () => openAnalysis() },
+      { label: '譜面情報', icon: 'chart', run: () => openAnalysis() },
     ];
   }
   if (tab === 'file') {
@@ -670,10 +672,14 @@ $('selBar').addEventListener('click', (e) => {
   if (b && !b.disabled) selAction(b.dataset.sel!);
 });
 
-// ---------- 譜面分析 ----------
+// ---------- 譜面情報 ----------
 
-/** 分析する譜面（エディタの今の譜面か、曲選択で選んだ曲）と難易度、曲の長さ（秒） */
+/** 譜面情報を出す譜面（エディタの今の譜面か、曲選択で選んだ曲）と難易度、曲の長さ（秒） */
 let analysisOf: { chart: EChart; course: number; length: number } | null = null;
+/** 譜面画像の URL（作り直すときに前のものを空ける） */
+let analysisBlob = '';
+/** 譜面情報の「譜面の流れ」の後片付け */
+let disposeTimeline: (() => void) | null = null;
 
 function openAnalysis() {
   analysisOf = { chart: ed.chart, course: ed.courseIndex, length: audio.buffer ? audio.musicDuration : 0 };
@@ -688,95 +694,141 @@ const fmtNum = (n: number) => n.toLocaleString('ja-JP');
 const fmtBpm = (b: number) => String(Number(b.toFixed(3)));
 
 function renderAnalysisSheet(body: HTMLElement) {
+  disposeTimeline?.();
+  disposeTimeline = null;
   const A = analysisOf!;
   const chart = A.chart;
   const ci = Math.max(0, Math.min(A.course, chart.courses.length - 1));
   const course = chart.courses[ci];
-  $('sheetTitle').textContent = '譜面分析';
+  $('sheetTitle').textContent = '譜面情報';
   if (!course) { body.innerHTML = '<p class="note">難易度がありません</p>'; return; }
   const a = analyzeCourse(chart, course);
-  const tabs = chart.courses.map((c, i) => `<button data-an-course="${i}" class="an-tab hd-${esc(c.name.toLowerCase())} ${i === ci ? 'on' : ''}">${esc(COURSE_JA[c.name] ?? c.name)} ★${c.level}</button>`).join('');
-  const pct = (n: number) => (a.notes ? ((n / a.notes) * 100).toFixed(1) : '0.0');
+  const sum = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
   const donAll = a.don + a.bigDon;
   const kaAll = a.ka + a.bigKa;
-  const bpm = a.bpmMin === a.bpmMax ? fmtBpm(a.bpmMin) : `${fmtBpm(a.bpmMin)}~${fmtBpm(a.bpmMax)}(${fmtBpm(a.bpmMain)})`;
-  const sum = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
-  const rollText = a.rolls.length
-    ? `${a.rolls.length} 本　${a.rolls.map((r) => r.sec.toFixed(3)).join('+')}=${sum(a.rolls.map((r) => r.sec)).toFixed(3)} 秒`
-    : 'なし';
-  const balloonText = a.balloons.length
-    ? `${a.balloons.length} 本　${a.balloons.map((b) => b.hits).join('+')}=${sum(a.balloons.map((b) => b.hits))} 打`
-    : 'なし';
+  const donPct = a.notes ? (donAll / a.notes) * 100 : 50;
+  const peak = a.curve.reduce((m, p) => Math.max(m, p.v), 0);
+  const bpmMain = a.bpmMin === a.bpmMax ? fmtBpm(a.bpmMin) : fmtBpm(a.bpmMain);
+  const bpmRange = a.bpmMin === a.bpmMax ? '' : `${fmtBpm(a.bpmMin)}~${fmtBpm(a.bpmMax)}(${fmtBpm(a.bpmMain)})`;
   const sub = chart.subtitle.replace(/^--/, '');
-  const rows: [string, string][] = [
-    ['タイトル', esc(chart.title || '（無題）') + (sub ? `<br><small>${esc(sub)}</small>` : '')],
-    ['難易度', `${esc(COURSE_JA[course.name] ?? course.name)} ★${course.level}`],
-    ['総ノーツ数', fmtNum(a.notes)],
-    ['天井スコア', `${fmtNum(a.ceiling)}${a.hasRoll ? ' + 連打' : ''}`],
-    ['BPM', bpm],
-    ['ドン : カッ', `${pct(donAll)}% : ${pct(kaAll)}%<br><small>ドン ${donAll}（大 ${a.bigDon}）・カッ ${kaAll}（大 ${a.bigKa}）</small>`],
-    ['平均密度', `${a.density.toFixed(2)} 打/秒`],
-    ['演奏時間', fmtSec3(a.playTime) + (A.length > 0 ? `<br><small>曲の長さ ${fmtSec3(A.length)}</small>` : '')],
-    ['連打', rollText],
-    ['風船', balloonText],
-  ];
-  const rate = settings.rollRate;
+  const tabs = chart.courses.map((c, i) => `<button data-an-course="${i}" class="an-tab hd-${esc(c.name.toLowerCase())} ${i === ci ? 'on' : ''}"><span>${esc(COURSE_JA[c.name] ?? c.name)}</span><b>★${c.level}</b></button>`).join('');
+  const tile = (k: string, v: string, s = '', cls = '') => `<div class="an-tile ${cls}"><span class="an-k">${k}</span><b class="an-v">${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+  const rollList = a.rolls.length
+    ? `<div class="an-eq">${a.rolls.map((r) => `<span>${r.sec.toFixed(3)}</span>`).join('<i>+</i>')}<i>=</i><b>${sum(a.rolls.map((r) => r.sec)).toFixed(3)} 秒</b></div>`
+    : '<div class="an-none">なし</div>';
+  const balloonList = a.balloons.length
+    ? `<div class="an-eq">${a.balloons.map((b) => `<span>${b.hits}</span>`).join('<i>+</i>')}<i>=</i><b>${sum(a.balloons.map((b) => b.hits))} 打</b></div>`
+    : '<div class="an-none">なし</div>';
   body.innerHTML = `
-    <div class="an-tabs">${tabs}</div>
-    <dl class="an-list">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
-    <h3>密度の推移</h3>
-    ${densitySvg(a)}
+    <div class="an-head">
+      <div class="an-title"><h1>${esc(chart.title || '（無題）')}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>
+      <div class="an-tabs">${tabs}</div>
+    </div>
+    <div class="an-tiles">
+      ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
+      ${tile('天井スコア', fmtNum(a.ceiling), a.hasRoll ? '＋ 連打' : '連打なし')}
+      ${tile('BPM', bpmMain, bpmRange || '変化なし')}
+      ${tile('平均密度', a.density.toFixed(2), `打/秒・最大 ${peak.toFixed(1)}`)}
+      ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `曲の長さ ${fmtSec3(A.length)}` : '音源なし')}
+      <div class="an-tile an-ratio">
+        <span class="an-k">ドン : カッ</span>
+        <b class="an-v"><em class="don">${donPct.toFixed(1)}%</em> : <em class="ka">${(100 - donPct).toFixed(1)}%</em></b>
+        <div class="an-bar"><i style="width:${donPct.toFixed(2)}%"></i></div>
+        <small>ドン ${donAll}（大 ${a.bigDon}）・カッ ${kaAll}（大 ${a.bigKa}）</small>
+      </div>
+    </div>
+    <div class="an-cards">
+      <section class="an-card"><h3><span class="dot roll"></span>連打 <small>${a.rolls.length} 本</small></h3>${rollList}</section>
+      <section class="an-card"><h3><span class="dot balloon"></span>風船 <small>${a.balloons.length} 本</small></h3>${balloonList}</section>
+    </div>
     ${a.rolls.length || a.balloons.length ? `
-    <h3>連打・風船のシミュレーション</h3>
-    <label class="field"><span>秒速（打/秒）</span><input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${rate}"></label>
-    <div class="an-sim" id="anSim"></div>` : ''}`;
+    <section class="an-card an-simcard">
+      <h3>連打・風船のシミュレーション</h3>
+      <div class="an-rate">
+        <span>秒速</span>
+        <button data-rate="-1" aria-label="秒速を下げる">−</button>
+        <input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${settings.rollRate}">
+        <button data-rate="1" aria-label="秒速を上げる">＋</button>
+        <span>打/秒</span>
+      </div>
+      <div class="an-sim" id="anSim"></div>
+    </section>` : ''}
+    <section class="an-card">
+      <h3>譜面の流れ <small>上: 譜面 ／ 下: 密度（打/秒）</small></h3>
+      <div class="an-timeline" id="anTimeline"></div>
+    </section>
+    <section class="an-card">
+      <h3>譜面画像</h3>
+      <div class="an-img" id="anImg"><p class="note">作っています…</p></div>
+      <div class="btns"><button data-an-img="save" class="primary">画像を保存</button><button data-an-img="open">大きく見る</button></div>
+    </section>`;
+
   const paintSim = () => {
     const el = document.getElementById('anSim');
     if (!el) return;
-    const r = settings.rollRate;
-    const s = simulateRolls(a, r);
-    const lines: string[] = [];
-    if (a.rolls.length) lines.push(`連打 ${s.roll.join('+')}=<b>${s.rollHits}</b> 打`);
-    if (a.balloons.length) lines.push(`風船 ${s.balloon.join('+')}=<b>${s.balloonHits}</b> 打（割れる ${s.popped}/${a.balloons.length}）`);
-    lines.push(`合計 <b>${fmtNum(s.total)}</b> 打`);
-    lines.push(`スコア（全良） <b>${fmtNum(a.ceiling - s.balloonLoss + s.rollScore)}</b>`);
-    el.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    const s = simulateRolls(a, settings.rollRate);
+    const parts: string[] = [];
+    if (a.rolls.length) parts.push(`<div class="an-simrow"><span class="an-k">連打</span><span class="an-eq small">${s.roll.join('<i>+</i>')}<i>=</i><b>${s.rollHits} 打</b></span></div>`);
+    if (a.balloons.length) parts.push(`<div class="an-simrow"><span class="an-k">風船</span><span class="an-eq small">${s.balloon.map((h, i) => `<span class="${h >= a.balloons[i].hits ? 'pop' : 'miss'}">${h}</span>`).join('<i>+</i>')}<i>=</i><b>${s.balloonHits} 打</b></span><small>割れる ${s.popped}/${a.balloons.length}</small></div>`);
+    parts.push(`<div class="an-simsum"><div><span class="an-k">合計</span><b>${fmtNum(s.total)} 打</b></div><div><span class="an-k">スコア（全良）</span><b>${fmtNum(a.ceiling - s.balloonLoss + s.rollScore)}</b></div></div>`);
+    el.innerHTML = parts.join('');
   };
   paintSim();
-  body.querySelector<HTMLInputElement>('#anRate')?.addEventListener('input', (e) => {
-    const v = Number((e.target as HTMLInputElement).value);
+  const rateIn = body.querySelector<HTMLInputElement>('#anRate');
+  const setRate = (v: number) => {
     if (!(v > 0)) return;
-    settings.rollRate = v;
+    settings.rollRate = Math.round(Math.min(60, v) * 10) / 10;
     saveSettings();
     paintSim();
-  });
+  };
+  rateIn?.addEventListener('input', () => setRate(Number(rateIn.value)));
+  body.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((b) => b.addEventListener('click', () => {
+    setRate(Math.max(1, settings.rollRate + Number(b.dataset.rate)));
+    if (rateIn) rateIn.value = String(settings.rollRate);
+  }));
   body.querySelectorAll<HTMLButtonElement>('[data-an-course]').forEach((b) => b.addEventListener('click', () => {
     A.course = Number(b.dataset.anCourse);
     renderAnalysisSheet(body);
   }));
-}
 
-/** 密度の推移の折れ線（横 = 演奏の最初からの秒、縦 = 打/秒）。平均密度は点線 */
-function densitySvg(a: Analysis) {
-  const c = a.curve;
-  if (c.length < 2) return '<p class="note">音符が少ないため表示できません</p>';
-  const W = 600;
-  const H = 120;
-  const maxT = c[c.length - 1].t || 1;
-  const peak = c.reduce((m, p) => (p.v > m.v ? p : m), c[0]);
-  const top = Math.max(1, Math.ceil(peak.v));
-  const x = (t: number) => (t / maxT) * W;
-  const y = (v: number) => H - (v / top) * (H - 8);
-  const pts = c.map((p) => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
-  const area = `0,${H} ${pts} ${W},${H}`;
-  return `<div class="an-graph">
-    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="密度の推移">
-      <polygon points="${area}" class="an-area"/>
-      <polyline points="${pts}" class="an-line"/>
-      <line x1="0" x2="${W}" y1="${y(a.density).toFixed(1)}" y2="${y(a.density).toFixed(1)}" class="an-avg"/>
-    </svg>
-    <div class="an-axis"><span>0:00</span><span>最大 ${peak.v.toFixed(1)} 打/秒（${fmtSec3(peak.t).replace(/\.\d+$/, '')} 付近）・点線は平均</span><span>${fmtSec3(maxT).replace(/\.\d+$/, '')}</span></div>
-  </div>`;
+  // 譜面の流れ（横のレーンと密度。時刻の位置をそろえる）
+  disposeTimeline = mountTimeline(body.querySelector<HTMLElement>('#anTimeline')!, {
+    course: toPlayable(chart, course), curve: a.curve, density: a.density, firstTime: a.firstTime, lastTime: a.lastTime,
+  });
+
+  // 譜面画像（重いので、画面を出してから作る）
+  if (analysisBlob) URL.revokeObjectURL(analysisBlob);
+  analysisBlob = '';
+  let blobUrl = '';
+  const name = `${(chart.title || 'chart').replace(/[\\/:*?"<>|]/g, '_')}_${course.name}.png`;
+  setTimeout(() => {
+    const host = document.getElementById('anImg');
+    if (!host || sheet !== 'analysis') return;
+    const cv = drawChartImage(chart, course);
+    cv.toBlob((b) => {
+      releaseCanvas(cv);
+      if (!b || !document.body.contains(host)) return;
+      blobUrl = analysisBlob = URL.createObjectURL(b);
+      host.innerHTML = `<img src="${blobUrl}" alt="譜面画像">`;
+    }, 'image/png');
+  }, 30);
+  body.querySelector('[data-an-img="save"]')!.addEventListener('click', async () => {
+    if (!blobUrl) return;
+    const b = await (await fetch(blobUrl)).blob();
+    const file = new File([b], name, { type: 'image/png' });
+    // スマホは共有（写真に保存など）、パソコンはダウンロード
+    const nav = navigator as Navigator & { canShare?: (d: object) => boolean };
+    if (nav.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return; } catch { /* やめた */ return; }
+    }
+    const a2 = document.createElement('a');
+    a2.href = blobUrl;
+    a2.download = name;
+    a2.click();
+  });
+  body.querySelector('[data-an-img="open"]')!.addEventListener('click', () => {
+    if (blobUrl) window.open(blobUrl, '_blank');
+  });
 }
 
 /** グラデのつなぎ目（始点・終点）をタップしたときの選択肢 */
@@ -909,6 +961,8 @@ function openSheet(kind: SheetKind) {
   $('sheet').classList.toggle('grad', kind === 'grad');
   // BPM・OFFSET の画面は画面いっぱい
   $('sheet').classList.toggle('tempo', kind === 'tempo' || kind === 'cut');
+  // 譜面情報は縦いっぱい・横広め
+  $('sheet').classList.toggle('info', kind === 'analysis');
   document.body.classList.toggle('tja-open', kind === 'events');
   renderSheet();
 }
@@ -938,6 +992,8 @@ function closeSheet() {
   if (sheet === 'cut') arrSources = [];
   // 閉じた画面のキャンバスも空ける
   $('sheetBody').querySelectorAll('canvas').forEach(releaseCanvas);
+  disposeTimeline?.();
+  disposeTimeline = null;
   sheet = null;
   document.body.classList.remove('tja-open');
   $('sheet').classList.add('hidden');
