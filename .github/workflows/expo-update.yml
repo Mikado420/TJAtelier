@@ -32,7 +32,7 @@ jobs:
       - name: Expo SDK 58 と、それに合う版のライブラリを入れる
         run: |
           npm install
-          npx expo install react react-native react-native-webview expo-screen-orientation expo-status-bar react-native-gesture-handler expo-dev-menu
+          npx expo install react react-native react-native-webview expo-screen-orientation expo-status-bar react-native-gesture-handler expo-dev-menu expo-file-system expo-sharing
           npx expo install --fix || true
           npx expo install --check || true
 

@@ -1,3 +1,4 @@
+import { canNativeSave, nativeSave } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
 import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent } from './chart/model';
@@ -829,6 +830,7 @@ function renderAnalysisSheet(body: HTMLElement) {
   body.querySelector('[data-an-img="save"]')!.addEventListener('click', async () => {
     if (!blobUrl) return;
     const b = await (await fetch(blobUrl)).blob();
+    if (canNativeSave()) { void nativeSave(b, name, 'image/png'); return; }
     const file = new File([b], name, { type: 'image/png' });
     // スマホは共有（写真に保存など）、パソコンはダウンロード
     const nav = navigator as Navigator & { canShare?: (d: object) => boolean };
@@ -1563,6 +1565,10 @@ async function applyAudioOnly(a: AudioFile) {
 }
 
 function download(blob: Blob, name: string) {
+  if (canNativeSave()) {
+    void nativeSave(blob, name).catch(() => toast('書き出せませんでした'));
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

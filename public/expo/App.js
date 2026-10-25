@@ -18,6 +18,8 @@ import { WebView } from 'react-native-webview';
 import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as GH from 'react-native-gesture-handler';
+import * as Sharing from 'expo-sharing';
+import { File, Paths } from 'expo-file-system';
 
 const { GestureDetector, GestureHandlerRootView } = GH;
 /** gesture-handler 3 系の書き方（useManualGesture）が使えるか。なければ 2 系の Gesture.Manual() */
@@ -54,6 +56,38 @@ function ManualRN({ onDown, children }) {
 
 const Manual = HAS_V2 ? ManualV2 : HAS_V3 ? ManualV3 : ManualRN;
 
+/** base64 → バイト列 */
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64I = new Uint8Array(128);
+for (let i = 0; i < B64.length; i++) B64I[B64.charCodeAt(i)] = i;
+function fromBase64(s) {
+  const len = s.length;
+  const pad = s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0;
+  const out = new Uint8Array((len / 4) * 3 - pad);
+  let o = 0;
+  for (let i = 0; i < len; i += 4) {
+    const n = (B64I[s.charCodeAt(i)] << 18) | (B64I[s.charCodeAt(i + 1)] << 12) | (B64I[s.charCodeAt(i + 2)] << 6) | B64I[s.charCodeAt(i + 3)];
+    if (o < out.length) out[o++] = (n >> 16) & 255;
+    if (o < out.length) out[o++] = (n >> 8) & 255;
+    if (o < out.length) out[o++] = n & 255;
+  }
+  return out;
+}
+
+/** Web 版から届いたファイルを保存して、共有シート（「ファイルに保存」など）を開く */
+async function saveAndShare(name, mime, b64) {
+  const safe = String(name || 'file').replace(/[\\/:*?"<>|]+/g, '_');
+  const file = new File(Paths.cache, safe);
+  try {
+    if (file.exists) file.delete();
+  } catch {
+    // 消せなくても上書きを試す
+  }
+  file.create();
+  file.write(fromBase64(b64));
+  await Sharing.shareAsync(file.uri, { mimeType: mime, dialogTitle: safe });
+}
+
 const URL = 'https://mikado420.github.io/TJAtelier/';
 
 export default function App() {
@@ -72,9 +106,24 @@ export default function App() {
     }
   }, []);
 
+  /** 分けて届くファイル（id ごと） */
+  const files = useRef({});
+
   const onMessage = useCallback((e) => {
     try {
       const m = JSON.parse(e.nativeEvent.data);
+      if (m.type === 'file') {
+        const f = (files.current[m.id] ||= { parts: [], got: 0 });
+        if (f.parts[m.part] === undefined) f.got += 1;
+        f.parts[m.part] = m.data;
+        if (f.got >= m.total) {
+          delete files.current[m.id];
+          saveAndShare(m.name, m.mime, f.parts.join('')).catch((err) => {
+            web.current?.injectJavaScript(`window.__nativeSaveError&&window.__nativeSaveError(${JSON.stringify(String(err && err.message || err))});true;`);
+          });
+        }
+        return;
+      }
       if (m.type === 'play') {
         setPlaying(!!m.active);
         if (m.active) seq.current = 0;
