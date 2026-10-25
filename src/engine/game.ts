@@ -3,14 +3,14 @@ import { isDon, isHitNote, type Note } from '../chart/types';
 export type Judge = 'good' | 'ok' | 'bad';
 export type HitKind = 'don' | 'ka';
 
-/** 判定幅（秒）。片側の幅。本家と同じ 良 ±25ms / 可 ±75ms / 不可 ±114ms */
+/** 判定幅（秒）。片側の幅。良 ±32ms / 可 ±75ms / 不可 ±114ms（良を広げた分、可は 32〜75ms に狭まる。外側の 114ms は同じ） */
 /** 浮動小数点の誤差の吸収（0.001ms） */
 const EPS = 1e-6;
 
 /** 大音符の両手打ちを待つ時間（秒）。TNDE の BigNotesWaitTime と同じ 50ms */
 export const BIG_WAIT = 0.05;
 
-export const WINDOW = { good: 0.025, ok: 0.075, bad: 0.114 } as const;
+export const WINDOW = { good: 0.032, ok: 0.075, bad: 0.114 } as const;
 
 /**
  * 見逃し（不可）にするまでの猶予（秒）。
@@ -247,7 +247,7 @@ export class Game {
     }
 
     const delta = now - best.note.time;
-    // 境界ちょうど（例: 25ms）が浮動小数点の誤差で外れないよう、わずかに余裕を持たせる
+    // 境界ちょうど（例: 32ms）が浮動小数点の誤差で外れないよう、わずかに余裕を持たせる
     const ad = Math.abs(delta) - EPS;
     const judge: Judge = ad <= WINDOW.good ? 'good' : ad <= WINDOW.ok ? 'ok' : 'bad';
     this.deltas.push(delta);

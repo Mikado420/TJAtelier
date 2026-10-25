@@ -181,13 +181,13 @@ describe('Game 判定', () => {
     expect([g.stats.good, g.stats.bad]).toEqual([2, 0]);
   });
 
-  it('判定幅は 良 25ms / 可 75ms / 不可 114ms', () => {
+  it('判定幅は 良 32ms / 可 75ms / 不可 114ms', () => {
     const one = (delta: number) => {
       const g = new Game([{ type: 'don', time: 1, bpm: 120, scroll: 1, gogo: false }]);
       g.hit('don', 1 + delta);
       return g.stats.good ? 'good' : g.stats.ok ? 'ok' : g.stats.bad ? 'bad' : 'none';
     };
-    expect([0.025, -0.025, 0.026, 0.075, -0.075, 0.076, 0.114, -0.114, 0.115, -0.115].map(one)).toEqual([
+    expect([0.032, -0.032, 0.033, 0.075, -0.075, 0.076, 0.114, -0.114, 0.115, -0.115].map(one)).toEqual([
       'good', 'good', 'ok', 'ok', 'ok', 'bad', 'bad', 'bad', 'none', 'none',
     ]);
   });
