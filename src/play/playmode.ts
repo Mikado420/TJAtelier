@@ -2,7 +2,7 @@ import type { AudioEngine } from '../audio/audio';
 import type { Course } from '../chart/types';
 import { Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
-import { Renderer } from '../render/renderer';
+import { Renderer, type Opponent } from '../render/renderer';
 import { BUILD_ID } from '../update';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
@@ -42,6 +42,18 @@ export interface PlaySettings {
   pointerInput?: boolean;
 }
 
+/** オンライン対戦のプレイ（PlayMode.startOnline に渡す） */
+export interface OnlineHooks {
+  /** 自分の様子をサーバーへ送る */
+  send(m: object): void;
+  /** 相手（届いた様子で書き換わる） */
+  opponents: Opponent[];
+  /** 曲が終わった（成績） */
+  onFinish(stats: { score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }): void;
+  /** 途中でやめた */
+  onQuit(): void;
+}
+
 /**
  * テストプレイ画面。エディタの上に重ねて表示する。
  */
@@ -76,7 +88,7 @@ export class PlayMode {
       },
       (kind, side, at, pt) => {
         // オートのときは叩いた入力を受け付けない
-        if (!this.active || this.paused || !this.game || this.settings.auto) return;
+        if (!this.active || this.paused || !this.game || this.auto) return;
         // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）
         if (this.hitOn) this.audio.playHit(kind);
         this.renderer.pushHit(kind, side);
@@ -102,15 +114,120 @@ export class PlayMode {
       () => !!this.settings.passiveTouch,
     );
     window.addEventListener('keydown', (e) => {
-      if (this.active && e.code === 'Escape') {
+      if (this.active && e.code === 'Escape' && !this.online) {
         if (this.paused) void this.resume();
         else this.pause();
       }
     });
     // 別のタブ・アプリへ移ったら、裏で流し続けずにポーズする
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.pause();
+      if (document.hidden && !this.online) this.pause();
     });
+  }
+
+  /** オートで叩くか（オンライン対戦では自分で叩く） */
+  private get auto() {
+    return !!this.settings.auto && !this.online;
+  }
+
+  /** オンライン対戦中なら、そのやりとり */
+  private online: OnlineHooks | null = null;
+  /** オンライン: まだ送っていない判定 [音符の番号, 0 良 / 1 可 / 2 不可] */
+  private outbox: [number, number][] = [];
+  private lastSent = 0;
+  private lastSentKey = '';
+
+  get isOnline() {
+    return !!this.online;
+  }
+
+  /**
+   * オンライン対戦: 曲の 0 秒が performance.now() の zeroPerf（ms）になるように始める（全員が同じ時刻に始まる）。
+   * 途中から入っても、その時刻の位置から流れる
+   */
+  async startOnline(course: Course, info: { title: string; course: string; level: number; genre?: string }, zeroPerf: number, hooks: OnlineHooks) {
+    this.online = hooks;
+    this.outbox = [];
+    this.lastSent = 0;
+    this.lastSentKey = '';
+    this.calibrating = false;
+    this.lastArgs = null;
+    this.hidePause();
+    const game = new Game(course.notes);
+    const index = new Map(game.states.map((st, i) => [st.note, i]));
+    const CODE = { good: 0, ok: 1, bad: 2 } as const;
+    game.onJudge = (e) => {
+      this.renderer.pushJudge(e);
+      const i = index.get(e.note);
+      if (i !== undefined) this.outbox.push([i, CODE[e.judge]]);
+    };
+    game.onRoll = (st) => this.renderer.pushRoll(st);
+    this.renderer.reset();
+    this.renderer.opponents = hooks.opponents;
+    this.renderer.donWidth = this.settings.donWidth ?? 0.6;
+    this.applyInputMode();
+    this.input.refresh();
+    resetTouchStats();
+    this.raw = [];
+    this.game = game;
+    this.root.classList.remove('hidden');
+    this.root.classList.add('online');
+    document.body.classList.add('playing');
+    this.result.classList.add('hidden');
+    this.renderer.resize();
+    this.renderer.speed = this.settings.speed;
+    this.active = true;
+    postNative({ type: 'play', active: true });
+    // 音が出るまでの 30ms を足して、今の再生位置から始める
+    const pos = (performance.now() + 30 - zeroPerf) / 1000;
+    await this.audio.startAt(pos, 1);
+    const lastTime = Math.max(0, ...course.notes.map((n) => n.endTime ?? n.time));
+    const music = this.audio.musicDuration;
+    const endAt = music > 0 ? Math.max(music + 1, lastTime + 1.5) : lastTime + 2;
+    this.autoEvents = [];
+    this.autoIdx = 0;
+    this.soundIdx = 0;
+    this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
+    this.cur = { course, info, endAt, clicks: [] };
+    this.timeFloor = -Infinity;
+    this.runLoop();
+  }
+
+  /** オンライン: 自分の様子を 0.1 秒ごとに送る */
+  private sendOnline(game: Game, force = false) {
+    const o = this.online;
+    if (!o) return;
+    const t = performance.now();
+    if (!force && t - this.lastSent < 100) return;
+    const st = game.stats;
+    const key = `${st.score}|${st.combo}|${Math.round(st.gauge)}`;
+    if (!this.outbox.length && key === this.lastSentKey && t - this.lastSent < 2000) return;
+    this.lastSent = t;
+    this.lastSentKey = key;
+    o.send({ t: 'st', s: st.score, c: st.combo, g: Math.round(st.gauge * 10) / 10, j: this.outbox.splice(0, 200) });
+  }
+
+  /** オンライン: 途中でやめる */
+  quitOnline() {
+    const o = this.online;
+    if (!o) return;
+    this.online = null;
+    this.hidePause();
+    this.active = false;
+    postNative({ type: 'play', active: false });
+    cancelAnimationFrame(this.raf);
+    this.audio.stop();
+    this.renderer.opponents = [];
+    this.leaveScreen();
+    o.onQuit();
+  }
+
+  /** プレイ画面を閉じる（結果画面は出さない） */
+  private leaveScreen() {
+    this.root.classList.add('hidden');
+    this.root.classList.remove('online');
+    document.body.classList.remove('playing');
+    this.result.classList.add('hidden');
   }
 
   /** プレイで打音を鳴らすか */
@@ -226,11 +343,12 @@ export class PlayMode {
       P.last = t0;
       // 続けた直後は音が出るまで時計が少し戻ることがあるので、止めた時刻より前には戻さない
       const now = Math.max(this.time(), this.timeFloor);
-      if (this.settings.auto && !this.calibrating) {
+      if (this.auto && !this.calibrating) {
         this.scheduleSounds(now);
         this.autoPlay(game, now);
       }
       game.update(now);
+      if (this.online) this.sendOnline(game);
       this.renderer.draw(game, course, now, info);
       const w = performance.now() - t0;
       P.frames++;
@@ -249,9 +367,9 @@ export class PlayMode {
   private applyInputMode() {
     // Expo Go のアプリの中ではアプリが指を受け取るので、指置きはいらない（Safari などでは設定のとおり）
     const coarse = isNativeHost() || matchMedia('(pointer: coarse)').matches;
-    const restZone = !isNativeHost() && coarse && !!this.settings.restZone && !this.settings.auto;
+    const restZone = !isNativeHost() && coarse && !!this.settings.restZone && !this.auto;
     // オートのときは叩かないので、タッチ用の太鼓も出さない
-    const touch = coarse && !this.settings.auto;
+    const touch = coarse && !this.auto;
     const padVisible = this.settings.padVisible !== false;
     const R = this.renderer;
     const changed = R.restZone !== restZone || R.touch !== touch || R.padVisible !== padVisible;
@@ -299,6 +417,12 @@ export class PlayMode {
   /** ポーズ（曲を止めて、ポーズのメニューを出す） */
   pause() {
     if (!this.active || this.paused) return;
+    if (this.online) {
+      // オンライン対戦は止められない（メニューだけ出す。曲は流れ続ける）
+      this.onPauseOpen();
+      this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
+      return;
+    }
     this.paused = true;
     this.pausedAt = this.audio.now();
     this.timeFloor = this.time();
@@ -311,6 +435,10 @@ export class PlayMode {
 
   /** 止めた所から続ける */
   async resume() {
+    if (this.online) {
+      this.hidePause();
+      return;
+    }
     if (!this.active || !this.paused || !this.cur) return;
     this.hidePause();
     const at = this.pausedAt;
@@ -370,6 +498,16 @@ export class PlayMode {
     this.audio.stop();
     const g = this.game;
     if (!g) return;
+    if (this.online) {
+      const o = this.online;
+      this.sendOnline(g, true);
+      this.online = null;
+      this.renderer.opponents = [];
+      this.leaveScreen();
+      const s = g.stats;
+      o.onFinish({ score: s.score, good: s.good, ok: s.ok, bad: s.bad, maxCombo: s.maxCombo, rolls: s.rolls });
+      return;
+    }
     if (this.calibrating) {
       this.showCalibration(g);
       return;
@@ -390,7 +528,7 @@ export class PlayMode {
     // 判定幅の外だった打撃も含めて中央値を取るので、端末の音の遅れが 114ms より大きくても調整できる
     const calib = this.result.querySelector<HTMLElement>('.calib')!;
     calib.classList.add('hidden');
-    if (!this.settings.auto) {
+    if (!this.auto) {
       const T = g.taps;
       const all = [...g.deltas, ...g.outside].sort((a, b) => a - b);
       rows.push(['叩いた回数', `${T.total}（判定 ${T.judged}・連打 ${T.roll + T.big}）`]);
@@ -421,7 +559,7 @@ export class PlayMode {
       }
     }
     // 見逃しの内訳（その音符の前後 114ms に何が起きていたか）
-    if (!this.settings.auto) {
+    if (!this.auto) {
       const taps = g.log.filter((x) => x.e === 'tap') as Extract<typeof g.log[number], { e: 'tap' }>[];
       const misses = g.log.filter((x) => x.e === 'miss') as Extract<typeof g.log[number], { e: 'miss' }>[];
       if (misses.length) {
@@ -475,7 +613,7 @@ export class PlayMode {
     this.lastLog = this.logText(g);
     // 叩いた位置から、ドンの帯のちょうどいい幅を提案する
     const cur = this.settings.donWidth ?? 0.6;
-    const sug = this.settings.auto ? null : suggestDonWidth(zoneSamples(g.log, cur), cur);
+    const sug = this.auto ? null : suggestDonWidth(zoneSamples(g.log, cur), cur);
     this.suggestedDonWidth = sug ? sug.width : null;
     const hint = this.result.querySelector<HTMLElement>('.edgehint');
     if (hint) {

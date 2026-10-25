@@ -15,6 +15,8 @@ export interface HomeHost {
   /** 新しい譜面を作って開く */
   create(folder: string): Promise<void>;
   settings(): void;
+  /** オンライン対戦の画面を開く */
+  online(): void;
   /** 譜面情報を出す */
   analyze(id: string): void;
   toast(msg: string): void;
@@ -292,6 +294,7 @@ export class Home {
   private async action(a: string) {
     if (a === 'import') this.host.importFiles();
     else if (a === 'settings') this.host.settings();
+    else if (a === 'online') { this.stopPreview(); this.host.online(); }
     else if (a === 'new') { this.stopPreview(); await this.host.create(this.folder ?? ''); }
     else if (a === 'folder') {
       const name = prompt('新しいフォルダの名前')?.trim();

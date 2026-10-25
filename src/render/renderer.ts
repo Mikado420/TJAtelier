@@ -71,6 +71,20 @@ export interface Layout {
   restBottom: number;
 }
 
+/** オンライン対戦の相手（小さいレーンで下に並べる） */
+export interface Opponent {
+  id: string;
+  name: string;
+  score: number;
+  combo: number;
+  gauge: number;
+  /** 音符ごとの判定（0 まだ / 1 良 / 2 可 / 3 不可） */
+  marks: Uint8Array;
+  /** 最後に判定したとき */
+  fx: { j: number; t: number } | null;
+  status: '' | 'fin' | 'quit' | 'lost';
+}
+
 /** ゲージが満タンのときの虹色（毎フレーム色の文字列を作らないよう前もって作っておく） */
 const RAINBOW = Array.from({ length: 360 }, (_, h) => `hsl(${h},90%,58%)`);
 
@@ -88,6 +102,8 @@ export class Renderer {
   touch = matchMedia('(pointer: coarse)').matches;
   /** タッチ用の太鼓を（半透明で）描くか。描かなくても叩ける */
   padVisible = true;
+  /** オンライン対戦の相手（いなければ空） */
+  opponents: Opponent[] = [];
 
   private dpr = 1;
   private s = 1;
@@ -483,6 +499,7 @@ export class Renderer {
     this.drawBottom(V, wall);
     this.drawFireworks(wall);
     this.drawLane(V, game, bars, now, gogo, wall);
+    if (this.opponents.length) this.drawOpponents(V, game, bars, now, wall);
     this.drawBursts(wall);
     this.drawPanel(st.score, st.combo, info, wall);
     this.drawGauge(st.gauge, wall);
@@ -640,6 +657,93 @@ export class Renderer {
       }
     }
     ctx.restore();
+  }
+
+  /**
+   * オンライン対戦の相手のレーン（自分のレーンの下に小さく並べる）。
+   * 音符の位置は自分のレーンと同じ（同じ時刻に同じ所を流れる）で、相手が叩いた音符は消える
+   */
+  private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, wall: number) {
+    const ctx = this.ctx;
+    const opps = this.opponents;
+    const top0 = TEXT_BOTTOM + 26;
+    const gap = 14;
+    const H = Math.min(170, (REF_H - top0 - 16) / opps.length - gap);
+    const r = Math.min(NR * 0.62, H * 0.36);
+    const right = V.x1;
+    const states = game.states;
+    for (let k = 0; k < opps.length; k++) {
+      const o = opps[k];
+      const top = top0 + k * (H + gap);
+      const cy = top + H / 2;
+      // 枠
+      ctx.fillStyle = 'rgba(0,0,0,0.78)';
+      ctx.fillRect(0, top - 4, right, H + 8);
+      ctx.fillStyle = '#262626';
+      ctx.fillRect(LANE_X, top, right - LANE_X, H);
+      // 判定枠
+      ctx.beginPath();
+      ctx.arc(this.jx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#1b1b1b';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#5e5e5e';
+      ctx.stroke();
+      // 判定の光
+      if (o.fx && wall - o.fx.t < 260) {
+        const a = 1 - (wall - o.fx.t) / 260;
+        ctx.beginPath();
+        ctx.arc(this.jx, cy, r * (1.05 + 0.3 * (1 - a)), 0, Math.PI * 2);
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = o.fx.j === 1 ? `rgba(255,214,80,${a})` : o.fx.j === 2 ? `rgba(255,255,255,${a * 0.8})` : `rgba(90,140,255,${a * 0.7})`;
+        ctx.stroke();
+      }
+      // 小節線
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      for (const b of bars) {
+        const x = this.xOf(b.time, b.beat, b, now);
+        if (x < LANE_X || x > right) continue;
+        ctx.fillRect(x - 1, top, 2, H);
+      }
+      // 音符
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(LANE_X, top, right - LANE_X, H);
+      ctx.clip();
+      for (let i = states.length - 1; i >= 0; i--) {
+        const n = states[i].note;
+        const m = o.marks[i] ?? 0;
+        const isRoll = n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon';
+        if (!isRoll && (m === 1 || m === 2)) continue;
+        const x = this.xOf(n.time, n.beat, n, now);
+        const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
+        if (endX < LANE_X - 60 || x > right + 60) continue;
+        if (n.type === 'balloon' && now > (n.endTime ?? n.time)) continue;
+        const rr = isBig(n.type) ? r * BIG_SCALE : r;
+        if (n.type === 'balloon') drawBalloon(ctx, now >= n.time ? this.jx : x, cy, rr, null);
+        else drawAny(ctx, n.type, x, cy, rr, endX);
+      }
+      ctx.restore();
+      // 左: 名前・点数・コンボ
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 34px ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(o.name, 30, top + H * 0.26, LANE_X - 60);
+      ctx.font = `900 40px ${FONT}`;
+      ctx.fillStyle = '#ffe9a8';
+      ctx.fillText(String(o.score).padStart(7, ' '), 30, top + H * 0.62);
+      ctx.font = `800 26px ${FONT}`;
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillText(o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '切断' : `${o.combo} コンボ`, 250, top + H * 0.62);
+      // ゲージ（下の細い帯）
+      const gw = LANE_X - 60;
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fillRect(30, top + H * 0.86, gw, 8);
+      ctx.fillStyle = o.gauge >= CLEAR_LINE ? '#ffd23f' : '#e5533d';
+      ctx.fillRect(30, top + H * 0.86, gw * Math.max(0, Math.min(1, o.gauge / 100)), 8);
+      ctx.textAlign = 'center';
+    }
   }
 
   /** 音符の下の文字（ドン / ド / コ / カッ / カ / 連打 / ふうせん） */

@@ -1,3 +1,4 @@
+import { OnlineScreen } from './online/online';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
@@ -1745,8 +1746,11 @@ $('pauseResume').addEventListener('click', () => void play.resume());
 $('pauseRetry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : play.retry()));
 // ポーズの画面の設定（変えたら今のプレイにすぐ反映）
 play.onPauseOpen = () => {
+  // オンライン対戦: 曲は止まらない。やりなおし・オートは無く、「やめる」で部屋に戻る
+  $('pauseBack').textContent = play.isOnline ? 'やめる' : 'エディタへ';
+  $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー（曲は止まりません）' : 'ポーズ';
   $('pauseSettings').innerHTML = `
-    <div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>
+    ${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}
     ${playSettingRows()}
     ${volumeRows()}`;
 };
@@ -1764,7 +1768,7 @@ $('pauseSettings').addEventListener('input', (e) => onPauseSetting(e, false));
 $('pauseSettings').addEventListener('change', (e) => onPauseSetting(e, true));
 play.onSettingsChange = saveSettings;
 $('pauseRestart').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest(true)));
-$('pauseBack').addEventListener('click', () => play.close());
+$('pauseBack').addEventListener('click', () => (play.isOnline ? play.quitOnline() : play.close()));
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
 play.onExit = () => view.invalidate();
 
@@ -1859,12 +1863,24 @@ async function createSong(chart: EChart, folder = '') {
   await openSong(id, 'edit');
 }
 
+const online = new OnlineScreen({
+  audio,
+  play,
+  toast,
+  // オンラインで読み込んだ音源から、開いていた曲の音源に戻す
+  closed: () => void (async () => {
+    const a = currentSongId ? await loadSongAudio(currentSongId) : null;
+    await audio.loadMusic(a ? a.data.slice(0) : null).catch(() => {});
+  })(),
+});
+
 const home = new Home({
   audio,
   open: openSong,
   importFiles: () => pickFiles('any'),
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
+  online: () => online.open(),
   analyze: (id) => void (async () => {
     const d = await loadSongData(id);
     if (!d) { toast('譜面を読み込めませんでした'); return; }
