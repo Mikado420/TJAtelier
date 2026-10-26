@@ -1931,3 +1931,53 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home .hdf-card.none { background: linear-gradient(#4a4f55, #2c3035) !important; color: rgba(255, 255, 255, 0.45) !important; opacity: 0.6; cursor: default; }
 .home .hdf-card.none svg { opacity: 0.35; }
 .home-diff .hdf-cards { grid-auto-columns: minmax(0, 1fr); justify-content: stretch; }
+
+/* ---------- 曲えらび: フォルダの帯（案2 アコーディオン） ---------- */
+.home .hr.hfb { min-height: 46px; padding-left: 26px; gap: 10px; font-weight: 900; background: linear-gradient(90deg, var(--fc) 0 16px, #2c3238 16px); box-shadow: inset 0 -3px 0 var(--fc); }
+.hfb-ic { width: 20px; height: 20px; flex: none; fill: none; stroke: var(--fc); stroke-width: 2.2; stroke-linejoin: round; }
+.hfb-n { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hfb small { font: 800 15px var(--fd); opacity: 0.85; white-space: nowrap; }
+.hfb small span { font: 700 11px system-ui, sans-serif; }
+.hfb-ar { width: 9px; height: 9px; flex: none; border: solid currentColor; border-width: 0 2.5px 2.5px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.25s; opacity: 0.8; }
+.home .hr.hfb.open .hfb-ar { transform: translateY(2px) rotate(-135deg); }
+.home .hr.hfb.open { box-shadow: inset 0 -3px 0 var(--fc), 0 0 0 0; }
+/* 選んでいるフォルダの帯: その色で大きく */
+.home .hr.hfb.on { min-height: 70px; background: var(--stripes), var(--fc); color: #fff; padding-left: 30px; }
+.home .hr.hfb.on::before { background: #fff; }
+.home .hr.hfb.on .hfb-ic { stroke: #fff; width: 26px; height: 26px; }
+.home .hr.hfb.on .hfb-n { font-size: 22px; }
+.home .hr.hfb.on small { opacity: 1; font-size: 18px; }
+.home .hr.hfb-add { background: transparent; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18); color: var(--accent-hi); min-height: 40px; }
+.home .hr.hfb-add .hfb-n { font-size: 13px; }
+/* 開いたフォルダの中の曲: 字下げして、左にフォルダの色の線 */
+.home .hr.in { margin-left: calc(40px + var(--d) * 26px); box-shadow: inset 14px 0 0 var(--fc); padding-left: 26px; }
+.home .hr.in.on { box-shadow: none; padding-left: 34px; }
+.hr-empty.in { margin: 6px 14px 6px 46px; padding: 12px 18px; border-left: 4px solid var(--fc); color: var(--sub); font-size: 13px; }
+.home-list.picking .hr.in { margin-left: 40px; }
+.hr-mk.cr-allgood { background: #ff8fd0; border-color: #fff; }
+.hr-mk.cr-fc { background: #ffd23f; border-color: #fff; }
+.hr-mk.cr-clear { background: #fff; border-color: #fff; }
+.hp-dim { color: var(--sub); font-weight: 700; }
+
+/* 左: 集めた王冠 */
+.home-folders { display: flex; flex-direction: column; justify-content: center; }
+.hst { display: flex; flex-direction: column; gap: 8px; padding: 6px 12px 6px 14px; }
+.hst-h { font-size: 11px; font-weight: 800; color: var(--sub); letter-spacing: 0.06em; }
+.hst-r { display: grid; grid-template-columns: 16px 1fr auto auto; align-items: baseline; column-gap: 6px; row-gap: 3px; font-size: 12px; font-weight: 800; }
+.hst-r i { width: 13px; height: 13px; align-self: center; clip-path: polygon(0 100%, 8% 25%, 30% 55%, 50% 0, 70% 55%, 92% 25%, 100% 100%); background: var(--crc); }
+.hst-r b { font: 800 18px var(--fd); }
+.hst-r small { font: 700 12px var(--fd); color: var(--sub); }
+.hst-r em { grid-column: 1 / -1; height: 4px; background: rgba(255, 255, 255, 0.1); position: relative; }
+.hst-r em::after { content: ''; position: absolute; inset: 0 auto 0 0; width: calc(var(--p) * 100%); background: var(--crc); }
+.cr-allgood { --crc: #ff8fd0; }
+.cr-fc { --crc: #ffd23f; }
+.cr-clear { --crc: #e9f2f6; }
+
+/* 右: フォルダを選んでいるとき */
+.hfx-cr { position: relative; display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.5); font-size: 12px; font-weight: 800; }
+.hfx-cr span { display: flex; align-items: center; gap: 6px; }
+.hfx-cr i { width: 12px; height: 12px; clip-path: polygon(0 100%, 8% 25%, 30% 55%, 50% 0, 70% 55%, 92% 25%, 100% 100%); background: var(--crc); }
+.hfx-cr b { margin-left: auto; font: 800 15px var(--fd); }
+.hdx-acts .hdx-play svg { fill: none; stroke: #000; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.hdx-acts .hdx-bad { color: #ffd0d0 !important; }
+.hst-r span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }

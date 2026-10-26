@@ -1,6 +1,6 @@
 /**
- * 最初の画面（曲選択）。左にロゴとフォルダ、真ん中に曲の縦の一覧、右の青い面に選んだ曲
- * （BPM・長さ・難易度・試聴・「プレイ」「編集」）。
+ * 最初の画面（曲選択）。左にロゴと集めた王冠、真ん中にフォルダの帯（タップで下に中の曲が開く）、
+ * 右の青い面に選んだフォルダの操作か、選んだ曲（BPM・試聴・「この曲にする」「編集」）。
  */
 import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, openCurtain } from '../ui/curtain';
@@ -79,6 +79,29 @@ function jacket(e: SongEntry) {
 
 /** 「未分類」（どのフォルダにも入っていない曲）を表す、フォルダ名には使えない値 */
 const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文字（\u0000 は属性に入れると別の文字に置き換わる）
+/** 「すべて」の帯を表す値 */
+const ALL = '\uE000all';
+const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
+/** フォルダごとの色（すべては青、未分類は灰色、ほかは名前から決まる） */
+function folderColor(key: string) {
+  if (key === ALL) return '#4d9fbe';
+  if (key === UNCAT) return '#5a6670';
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return FOLDER_COLORS[h % FOLDER_COLORS.length];
+}
+/** 曲のいちばん良い王冠（どの難易度でも） */
+function songCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | null {
+  let best: Crown | null = null;
+  for (const c of s.courses) {
+    const r = m[`${s.id}:${c.name}`];
+    if (r && (!best || CROWN_RANK[r.crown] > CROWN_RANK[best])) best = r.crown;
+  }
+  return best;
+}
+function bestMap(): Record<string, { score: number; crown: Crown }> {
+  try { return JSON.parse(localStorage.getItem(BEST) ?? '{}'); } catch { return {}; }
+}
 
 const ICON = {
   folder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg>',
@@ -93,8 +116,14 @@ export class Home {
   private readonly foldersEl: HTMLElement;
   private songs: SongEntry[] = [];
   private folders: string[] = [];
-  /** 今見ているフォルダ（null は「すべて」、UNCAT は「未分類」） */
+  /** 中の曲を見ているフォルダ（null は「すべて」、UNCAT は「未分類」） */
   private folder: string | null = null;
+  /** folder の帯を開いて、下に曲を並べているか */
+  private open = false;
+  /** 選んでいる帯（フォルダの帯なら 'folder'、曲なら 'song'） */
+  private focus: 'folder' | 'song' = 'folder';
+  /** 選んでいるフォルダの帯（ALL・UNCAT・フォルダ名） */
+  private fbar = ALL;
   /** 曲を選んでまとめてフォルダに入れる・外すとき（選んでいる曲） */
   private picking: Set<string> | null = null;
   /** 自動で鳴らせなかったので、次のタップで鳴らす */
@@ -154,6 +183,7 @@ export class Home {
       if (e) {
         if (!this.inView(e)) this.folder = null;
         this.sel = e.id;
+        this.openOn();
       }
     }
     this.render(true);
@@ -184,9 +214,23 @@ export class Home {
     if (e) {
       if (!this.inView(e)) this.folder = null;
       this.sel = id;
+      this.openOn();
     }
     this.render(true);
     if (e) void this.startPreview(e);
+  }
+
+  /** 今のフォルダを開いて、その曲を選んだ状態にする */
+  private openOn() {
+    this.open = true;
+    this.focus = 'song';
+    this.fbar = this.folder === null ? ALL : this.folder;
+  }
+
+  private keyOf(f: string | null) { return f === null ? ALL : f; }
+  private folderName(key: string) { return key === ALL ? 'すべて' : key === UNCAT ? '未分類' : key; }
+  private folderSongs(key: string) {
+    return key === ALL ? this.songs : key === UNCAT ? this.songs.filter((x) => !x.folders.length) : this.songs.filter((x) => x.folders.includes(key));
   }
 
   private sorted(list: SongEntry[]) {
@@ -208,32 +252,49 @@ export class Home {
 
   private render(scrollToSel = false, listToo = true) {
     const songs = this.shown();
-    // 左: フォルダ（選んでいるフォルダには「…」で名前の変更・削除）
-    const uncat = this.songs.filter((x) => !x.folders.length).length;
-    const fl = [
-      `<button class="hf ${this.folder === null && !this.query ? 'on' : ''}" data-folder=""><span>すべて</span><small>${this.songs.length}</small></button>`,
-      `<button class="hf hf-uncat ${this.folder === UNCAT && !this.query ? 'on' : ''}" data-folder="${UNCAT}"><span>未分類</span><small>${uncat}</small></button>`,
-    ];
-    for (const f of [...this.folders].sort((a, b) => a.localeCompare(b, 'ja'))) {
-      const n = this.songs.filter((x) => x.folders.includes(f)).length;
-      const on = this.folder === f && !this.query;
-      fl.push(`<div class="hf ${on ? 'on' : ''}" data-folder="${esc(f)}"><span>${esc(f)}</span><small>${n}</small><button class="hf-more" data-fmore="${esc(f)}" aria-label="フォルダの操作">${ICON.more}</button></div>`);
+    // 左: 集めた王冠の数
+    const bm = bestMap();
+    const cnt: Record<Crown, number> = { allgood: 0, fc: 0, clear: 0, fail: 0 };
+    for (const x of this.songs) {
+      const c = songCrown(bm, x);
+      // 全良はフルコンボでもクリアでもある
+      if (c === 'allgood') { cnt.allgood++; cnt.fc++; cnt.clear++; } else if (c === 'fc') { cnt.fc++; cnt.clear++; } else if (c === 'clear') cnt.clear++;
     }
-    fl.push(`<button class="hf hf-add" data-h="folder"><span>＋ 新しいフォルダ</span></button>`);
-    this.foldersEl.innerHTML = fl.join('');
+    const total = this.songs.length;
+    const stat = (k: Crown, label: string) => `<div class="hst-r cr-${k}"><i aria-hidden="true"></i><span>${label}</span><b>${cnt[k]}</b><small>/${total}</small><em style="--p:${total ? cnt[k] / total : 0}"></em></div>`;
+    this.foldersEl.innerHTML = `<div class="hst"><small class="hst-h">あつめた王冠</small>${stat('allgood', '全良')}${stat('fc', 'フルコンボ')}${stat('clear', 'クリア')}</div>`;
 
     const pk = this.picking;
     if (listToo) {
-      // 真ん中: 曲の縦の一覧
       const tags = (s: SongEntry) => (this.folder === null || this.query ? s.folders : s.folders.filter((f) => f !== this.folder));
-      const rows = songs.map((s) => {
+      const songRow = (s: SongEntry, inner: string) => {
         const cs = sortCourses(s.courses);
         const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
         const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
-        return `<div class="hr ${s.id === this.sel && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}">${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : '<i class="hr-mk"></i>'}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
-      });
-      if (!rows.length) {
-        rows.push(`<div class="hr-empty">${this.query ? '見つかりませんでした' : this.folder === UNCAT ? '未分類の曲はありません' : this.folder !== null ? 'このフォルダには曲がありません' : 'まだ曲がありません'}</div>`);
+        const cr = songCrown(bm, s);
+        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : `<i class="hr-mk ${cr ? `cr-${cr}` : ''}"></i>`}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
+      };
+      const rows: string[] = [];
+      if (this.query) {
+        // 検索中: フォルダの帯は出さず、見つかった曲だけ
+        for (const x of songs) rows.push(songRow(x, ''));
+        if (!rows.length) rows.push('<div class="hr-empty">見つかりませんでした</div>');
+      } else {
+        // フォルダの帯（すべて・未分類・作ったフォルダ）。開いている帯の下に、中の曲
+        const keys = [ALL, UNCAT, ...[...this.folders].sort((a, b) => a.localeCompare(b, 'ja'))];
+        const openKey = this.open ? this.keyOf(this.folder) : '';
+        for (const k of keys) {
+          const n = this.folderSongs(k).length;
+          const col = folderColor(k);
+          const isOpen = k === openKey;
+          const on = this.focus === 'folder' && k === this.fbar && !pk;
+          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small><i class="hfb-ar" aria-hidden="true"></i></div>`);
+          if (isOpen) {
+            for (const x of songs) rows.push(songRow(x, col));
+            if (!songs.length) rows.push(`<div class="hr-empty in" style="--fc:${col}">${k === UNCAT ? '未分類の曲はありません' : k === ALL ? 'まだ曲がありません' : 'このフォルダには曲がありません'}</div>`);
+          }
+        }
+        if (!pk) rows.push('<div class="hr hfb hfb-add" data-h="folder"><span class="hfb-n">＋ 新しいフォルダ</span></div>');
       }
       this.list.innerHTML = rows.join('');
       this.list.classList.toggle('picking', !!pk);
@@ -254,9 +315,28 @@ export class Home {
     pb.classList.toggle('on', !!pk);
     pb.querySelector('small')!.textContent = pk ? '完了' : '選択';
 
-    // 右: 選んでいる曲
-    const s = this.songs.find((x) => x.id === this.sel && songs.includes(x));
-    if (pk) {
+    // 右: 選んでいる曲（フォルダの帯を選んでいるときは、そのフォルダ）
+    const s = this.focus === 'song' && (this.open || this.query) ? this.songs.find((x) => x.id === this.sel && songs.includes(x)) : undefined;
+    const fpanel = !pk && !this.query && this.focus === 'folder';
+    if (fpanel) this.detail.style.setProperty('--accent', folderColor(this.fbar));
+    else this.detail.style.removeProperty('--accent');
+    if (fpanel) {
+      const k = this.fbar;
+      const list = this.folderSongs(k);
+      const c: Record<Crown, number> = { allgood: 0, fc: 0, clear: 0, fail: 0 };
+      for (const x of list) { const r = songCrown(bm, x); if (r) c[r]++; }
+      const isOpen = this.open && this.keyOf(this.folder) === k;
+      const user = k !== ALL && k !== UNCAT;
+      this.detail.innerHTML = `
+        <div class="hdx-top"><small>フォルダ</small></div>
+        <h1 class="hdx-title">${esc(this.folderName(k))}</h1>
+        <div class="hdx-bpm">${list.length}<small>曲</small></div>
+        <div class="hfx-cr"><span class="cr-allgood"><i></i>全良 <b>${c.allgood}</b></span><span class="cr-fc"><i></i>フルコンボ <b>${c.fc}</b></span><span class="cr-clear"><i></i>クリア <b>${c.clear}</b></span></div>
+        <div class="hdx-acts">
+          <button class="hdx-play" data-fopen="${esc(k)}"><svg viewBox="0 0 24 24" aria-hidden="true">${isOpen ? '<path d="M5 15.5 12 8.5l7 7"/>' : '<path d="M5 8.5 12 15.5l7-7"/>'}</svg>${isOpen ? 'とじる' : 'ひらく'}</button>
+          ${user ? `<button class="hdx-edit" data-frename="${esc(k)}">名前を変える</button><button class="hdx-an hdx-bad" data-fdel="${esc(k)}">フォルダを消す</button>` : `<button class="hdx-edit" data-h="new">ここに新しい譜面</button>`}
+        </div>`;
+    } else if (pk) {
       const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
       const picked = this.songs.filter((x) => pk.has(x.id));
       const off = pk.size ? '' : 'disabled';
@@ -289,8 +369,11 @@ export class Home {
     }
 
     (document.getElementById('homeSort') as HTMLElement).textContent = SORT_LABEL[this.sort];
-    (document.getElementById('homePath') as HTMLElement).textContent = this.query ? `「${this.query}」` : this.folder === UNCAT ? '未分類' : this.folder ?? 'すべて';
-    (document.getElementById('homeCount') as HTMLElement).textContent = `${songs.length} 曲`;
+    const path = document.getElementById('homePath') as HTMLElement;
+    if (this.query) path.textContent = `「${this.query}」`;
+    else if (this.open) path.innerHTML = `<span class="hp-dim">フォルダ ›</span> ${esc(this.folderName(this.keyOf(this.folder)))}`;
+    else path.textContent = 'フォルダ';
+    (document.getElementById('homeCount') as HTMLElement).textContent = this.query || this.open ? `${songs.length} 曲` : `${this.folders.length + 2} フォルダ`;
     // 端の曲もまんなかまで来られるよう、上下に余白
     const pad = `${Math.max(0, this.list.clientHeight / 2 - 26)}px`;
     this.list.style.paddingTop = pad;
@@ -325,12 +408,14 @@ export class Home {
       const mid = this.list.scrollTop + this.list.clientHeight / 2;
       let best: HTMLElement | null = null;
       let bd = Infinity;
-      for (const r of Array.from(this.list.querySelectorAll<HTMLElement>('.hr'))) {
+      for (const r of Array.from(this.list.querySelectorAll<HTMLElement>('.hr[data-song], .hr[data-fbar]'))) {
         const d = Math.abs(r.offsetTop + r.offsetHeight / 2 - mid);
         if (d < bd) { bd = d; best = r; }
       }
       const id = best?.dataset.song;
-      if (id && id !== this.sel) this.selectRow(id, false);
+      const fb = best?.dataset.fbar;
+      if (id && (id !== this.sel || this.focus !== 'song')) this.selectRow(id, false);
+      else if (fb && (fb !== this.fbar || this.focus !== 'folder')) this.selectBar(fb, false);
     }, 140);
   }
 
@@ -349,6 +434,7 @@ export class Home {
   /** 曲を選ぶ（一覧を作り直さずに、選んでいる帯と右の面だけ変える） */
   private selectRow(id: string, scroll: boolean) {
     this.sel = id;
+    this.focus = 'song';
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
     this.list.querySelector(`[data-song="${id}"]`)?.classList.add('on');
     this.render(false, false);
@@ -357,6 +443,41 @@ export class Home {
     else requestAnimationFrame(() => this.centerSel(true));
     const s = this.songs.find((q) => q.id === id);
     if (s) void this.startPreview(s);
+  }
+
+  /** フォルダの帯を選ぶ（開け閉めはしない） */
+  private selectBar(key: string, scroll: boolean) {
+    this.fbar = key;
+    this.focus = 'folder';
+    this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
+    this.list.querySelector(`[data-fbar="${CSS.escape(key)}"]`)?.classList.add('on');
+    this.render(false, false);
+    if (scroll) this.centerSel(true);
+    else requestAnimationFrame(() => this.centerSel(true));
+  }
+
+  /** フォルダの帯を開く・閉じる（ほかの帯は閉じる） */
+  private toggleFolder(key: string) {
+    const isOpen = this.open && this.keyOf(this.folder) === key;
+    this.fbar = key;
+    this.focus = 'folder';
+    if (isOpen) this.open = false;
+    else {
+      this.folder = key === ALL ? null : key;
+      this.open = true;
+    }
+    this.render(false);
+    this.centerSel(true);
+  }
+
+  private async deleteFolderAsk(name: string) {
+    if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は消えず、このフォルダから外れるだけです）`)) return;
+    await deleteFolder(name);
+    if (this.folder === name) { this.folder = null; this.open = false; }
+    this.fbar = ALL;
+    this.focus = 'folder';
+    await this.reload();
+    this.render(true);
   }
 
   // ---------- 難易度えらび ----------
@@ -543,19 +664,12 @@ export class Home {
     if ((x = d('[data-edit]'))) { this.stopPreview(); void this.host.open(x.dataset.edit!, 'edit'); return; }
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
-    if ((x = d('[data-fmore]'))) { this.folderMenu(x.dataset.fmore!, x); return; }
+    if ((x = d('[data-fopen]'))) { this.toggleFolder(x.dataset.fopen!); return; }
+    if ((x = d('[data-frename]'))) { void this.renameFolderAsk(x.dataset.frename!); return; }
+    if ((x = d('[data-fdel]'))) { void this.deleteFolderAsk(x.dataset.fdel!); return; }
     if ((x = d('[data-pk]'))) { void this.pickAction(x.dataset.pk!, x); return; }
     if ((x = d('[data-h]'))) { void this.action(x.dataset.h!); return; }
-    if ((x = d('[data-folder]'))) {
-      const f = x.dataset.folder!;
-      this.folder = f || null;
-      this.query = '';
-      const q = document.getElementById('homeQuery') as HTMLInputElement;
-      q.value = '';
-      document.getElementById('homeSearch')!.classList.add('hidden');
-      this.render(true);
-      return;
-    }
+    if ((x = d('[data-fbar]'))) { this.toggleFolder(x.dataset.fbar!); return; }
     if ((x = d('[data-song]'))) {
       const id = x.dataset.song!;
       // 選んでいるとき: タップで選ぶ・外す
@@ -566,7 +680,7 @@ export class Home {
         return;
       }
       // まんなかの曲をもう一度タップで難易度えらび
-      if (this.sel === id) { this.openDiff(id); return; }
+      if (this.sel === id && this.focus === 'song') { this.openDiff(id); return; }
       this.selectRow(id, true);
     }
   }
@@ -582,8 +696,13 @@ export class Home {
       await addFolder(name);
       await this.reload();
       this.folder = name;
-      this.render();
+      this.fbar = name;
+      this.focus = 'folder';
+      this.open = false;
+      this.render(true);
     } else if (a === 'pick') {
+      // 曲を選ぶので、選んでいるフォルダを開いておく
+      if (!this.picking && !this.open && !this.query) { this.folder = this.fbar === ALL ? null : this.fbar; this.open = true; }
       this.picking = this.picking ? null : new Set();
       this.render(!this.picking);
     } else if (a === 'sort') {
@@ -831,20 +950,9 @@ export class Home {
     if (this.folders.includes(to) && !confirm(`「${to}」はすでにあります。2 つのフォルダをまとめますか？`)) return;
     await renameFolder(from, to);
     if (this.folder === from) this.folder = to;
+    if (this.fbar === from) this.fbar = to;
     await this.reload();
     this.render();
     this.host.toast(`フォルダの名前を「${to}」にしました`);
-  }
-
-  private folderMenu(name: string, anchor: HTMLElement) {
-    this.popup(anchor, [
-      ['名前を変える', () => this.renameFolderAsk(name)],
-      ['フォルダを消す（曲は残す）', async () => {
-        if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は消えず、このフォルダから外れるだけです）`)) return;
-        await deleteFolder(name);
-        await this.reload();
-        this.render();
-      }, true],
-    ]);
   }
 }
