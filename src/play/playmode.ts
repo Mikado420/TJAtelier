@@ -199,7 +199,8 @@ export class PlayMode {
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
     (window as unknown as { __playPerf?: unknown }).__playPerf = this.perf;
-    this.cur = { course, info, endAt, clicks: [], lastNote: lastTime };
+    // 終わりの帯は、音源と譜面がどちらも終わってから
+    this.cur = { course, info, endAt, clicks: [], lastNote: Math.max(lastTime, music > 0 ? music : 0) };
     this.endWall = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
@@ -328,14 +329,15 @@ export class PlayMode {
     this.autoIdx = 0;
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
-    this.cur = { course, info, endAt, clicks: clicks ?? [], lastNote: lastTime };
+    // 終わりの帯は、音源と譜面がどちらも終わってから
+    this.cur = { course, info, endAt, clicks: clicks ?? [], lastNote: Math.max(lastTime, music > 0 && !this.calibrating ? music : 0) };
     this.endWall = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
   }
 
   /** 今のプレイの内容（ポーズから続けるときに使う） */
-  private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[]; lastNote?: number } | null = null;
+  private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[]; /** 音源と譜面の、遅いほうの終わり（秒） */ lastNote?: number } | null = null;
   /** 曲の終わりの帯を出した時刻（performance.now()。0 = まだ） */
   private endWall = 0;
   private endHold = 3000;
@@ -372,7 +374,7 @@ export class PlayMode {
       P.work += w;
       if (w > P.workMax) P.workMax = w;
       // 最後の音符が終わったら、クリア・フルコンボなどの帯を出し、少し見せてから結果へ
-      if (!this.calibrating && !this.spectating && !this.endWall && now > (this.cur?.lastNote ?? Infinity) + 0.6) {
+      if (!this.calibrating && !this.spectating && !this.endWall && now > (this.cur?.lastNote ?? Infinity) + 0.4) {
         this.endWall = performance.now();
         const st = game.stats;
         const fc = st.bad === 0 && game.totalHitNotes > 0;
@@ -675,11 +677,16 @@ export class PlayMode {
     const badge = R.querySelector<HTMLElement>('.res-course')!;
     badge.textContent = `${cl} ★${info.level}`;
     badge.style.setProperty('--cc', cc);
-    R.querySelector<HTMLElement>('.res-gauge i')!.style.width = `${Math.max(0, Math.min(100, s.gauge))}%`;
+    // ゲージ: プレイ中と同じく、クリアまでは青・クリアからは黄色（満タンは虹色）
+    const gv = Math.max(0, Math.min(100, s.gauge));
+    const gi = R.querySelector<HTMLElement>('.res-gauge i')!;
+    gi.style.width = `${gv}%`;
+    gi.style.backgroundSize = gv > 0 ? `${10000 / gv}% 100%` : '';
+    gi.classList.toggle('full', gv >= 100);
+    const ge = R.querySelector<HTMLElement>('.res-gauge');
+    ge?.style.setProperty('--cl', `${CLEAR_LINE}%`);
     R.querySelector<HTMLElement>('.res-gauge em')!.style.left = `${CLEAR_LINE}%`;
     R.querySelector('.res-acc')!.textContent = `精度 ${acc.toFixed(2)}%`;
-    R.querySelector('.res-bubble')!.textContent = { allgood: 'カンペキ！', fc: 'フルコンボ、すごい！', clear: 'クリア！その調子！', fail: 'おしい！もう一回！' }[rank];
-    R.querySelector('.res-ribbon')!.textContent = { allgood: '全良 達成！', fc: 'フルコンボ 達成！', clear: '', fail: '' }[rank];
     R.querySelector('.res-detail')?.removeAttribute('open');
     const targets: [HTMLElement, number][] = [[R.querySelector<HTMLElement>('#resScore')!, s.score]];
     for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);

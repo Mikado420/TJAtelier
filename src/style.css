@@ -1981,3 +1981,26 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hdx-acts .hdx-play svg { fill: none; stroke: #000; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .hdx-acts .hdx-bad { color: #ffd0d0 !important; }
 .hst-r span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+
+/* ---------- 結果画面: 背景の大きな太鼓の面（富士山の代わり）・ゲージ ---------- */
+.res-obj { position: absolute; right: -4%; bottom: 0; width: 78%; height: 92%; }
+.res-obj .m1 { stop-color: var(--m1); transition: stop-color 0.6s; }
+.res-obj .m2 { stop-color: var(--m2); transition: stop-color 0.6s; }
+.res-obj .shaft path { fill: rgba(147, 205, 226, 0.07); }
+.res.go:not(.r-fail) .res-obj .shaft path { fill: rgba(147, 205, 226, 0.13); }
+.res-obj .orbit circle { fill: none; stroke: rgba(147, 205, 226, 0.28); stroke-width: 3; stroke-dasharray: 26 18; transform-box: view-box; transform-origin: 760px 470px; animation: resSpin 60s linear infinite; }
+.res-obj .orbit .o2 { stroke-width: 2; stroke-dasharray: 6 22; animation-direction: reverse; animation-duration: 90s; }
+.res-obj .rim { fill: #0d1418; stroke: rgba(147, 205, 226, 0.35); stroke-width: 4; }
+.res-obj .studs circle { fill: rgba(230, 243, 248, 0.55); }
+.res-obj .face { fill: url(#resM); }
+.res-obj .hl { fill: url(#resF); }
+.res-obj .ring { fill: none; stroke: rgba(255, 255, 255, 0.28); stroke-width: 6; }
+.res-obj .ring.r2 { stroke-width: 2; stroke: rgba(255, 255, 255, 0.18); }
+@keyframes resSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .res-obj .orbit circle { animation: none; } }
+.res .res-gauge { height: 16px; background: linear-gradient(90deg, #1d3442 0 var(--cl, 80%), #3d3a1e var(--cl, 80%) 100%); }
+.res .res-gauge i, .res.r-clear .res-gauge i, .res.r-fc .res-gauge i, .res.r-allgood .res-gauge i { background: linear-gradient(90deg, #5ab4d6 0 var(--cl, 80%), #ffd21f var(--cl, 80%) 100%) left / 100% 100% no-repeat; }
+.res .res-gauge i.full { background: linear-gradient(90deg, #ff5a7a, #ffb13a, #ffe94a, #5ee07a, #4ac8ff, #9a7bff) !important; background-size: 100% 100% !important; }
+/* プレイ中と同じ区切り（50 こま） */
+.res .res-gauge::after { content: ''; position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(90deg, transparent 0 calc(2% - 2px), #14181b calc(2% - 2px) 2%); pointer-events: none; }
+.res .res-gauge em { z-index: 2; }

@@ -171,14 +171,22 @@
 
     <div id="result" class="res hidden">
       <div class="res-bg" aria-hidden="true">
-        <svg class="res-mtn" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMax slice">
+        <svg class="res-obj" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMax slice">
           <defs>
             <linearGradient id="resM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="m1"/><stop offset="1" class="m2"/></linearGradient>
+            <radialGradient id="resF" cx="0.42" cy="0.35" r="0.75"><stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
           </defs>
-          <path class="mtn" d="M330 560 L560 170 Q590 130 620 170 L860 560 Z"/>
-          <path class="snow" d="M560 170 Q590 130 620 170 L655 230 L630 214 L606 240 L584 212 L560 238 L540 222 Z"/>
-          <g class="cloud"><rect x="420" y="380" width="420" height="44" rx="22"/><rect x="560" y="430" width="440" height="44" rx="22"/><rect x="300" y="470" width="360" height="40" rx="20"/></g>
-          <g class="cloud c2"><rect x="-40" y="300" width="300" height="40" rx="20"/><rect x="40" y="350" width="260" height="40" rx="20"/></g>
+          <!-- 斜めの光の柱 -->
+          <g class="shaft"><path d="M380 0 h90 l-80 560 h-90 z"/><path d="M520 0 h40 l-80 560 h-40 z"/><path d="M930 0 h120 l-80 560 h-120 z"/></g>
+          <!-- まわる輪 -->
+          <g class="orbit"><circle cx="760" cy="470" r="372"/><circle class="o2" cx="760" cy="470" r="430"/></g>
+          <!-- 大きな太鼓の面 -->
+          <circle class="rim" cx="760" cy="470" r="300"/>
+          <g class="studs"><circle cx="1032.0" cy="470.0" r="7"/><circle cx="1022.7" cy="540.4" r="7"/><circle cx="995.6" cy="606.0" r="7"/><circle cx="952.3" cy="662.3" r="7"/><circle cx="896.0" cy="705.6" r="7"/><circle cx="830.4" cy="732.7" r="7"/><circle cx="760.0" cy="742.0" r="7"/><circle cx="689.6" cy="732.7" r="7"/><circle cx="624.0" cy="705.6" r="7"/><circle cx="567.7" cy="662.3" r="7"/><circle cx="524.4" cy="606.0" r="7"/><circle cx="497.3" cy="540.4" r="7"/><circle cx="488.0" cy="470.0" r="7"/><circle cx="497.3" cy="399.6" r="7"/><circle cx="524.4" cy="334.0" r="7"/><circle cx="567.7" cy="277.7" r="7"/><circle cx="624.0" cy="234.4" r="7"/><circle cx="689.6" cy="207.3" r="7"/><circle cx="760.0" cy="198.0" r="7"/><circle cx="830.4" cy="207.3" r="7"/><circle cx="896.0" cy="234.4" r="7"/><circle cx="952.3" cy="277.7" r="7"/><circle cx="995.6" cy="334.0" r="7"/><circle cx="1022.7" cy="399.6" r="7"/></g>
+          <circle class="face" cx="760" cy="470" r="246"/>
+          <circle class="hl" cx="760" cy="470" r="246"/>
+          <circle class="ring" cx="760" cy="470" r="150"/>
+          <circle class="ring r2" cx="760" cy="470" r="196"/>
         </svg>
         <div class="res-fw"><i></i><i></i><i></i><i></i></div>
       </div>
@@ -199,7 +207,6 @@
               <li><span>最大コンボ数</span><b data-c="maxCombo">0</b></li>
             </ul>
           </div>
-          <div class="res-foot"><span class="res-bubble"></span><span class="res-ribbon"></span></div>
         </section>
         <section class="res-side">
           <h2 class="res-h">結果</h2>
