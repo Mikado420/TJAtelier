@@ -99,6 +99,17 @@ function songCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | n
   }
   return best;
 }
+/** 曲の行に出す王冠: 王冠のある難易度のうち、いちばん難しいもの（かんたん→ふつう→むずかしい→おに→裏おに） */
+function topCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | null {
+  let r: Crown | null = null;
+  for (const c of sortCourses(s.courses)) {
+    const b = m[`${s.id}:${c.name}`];
+    if (b && b.crown !== 'fail') r = b.crown;
+  }
+  return r;
+}
+/** 王冠の印（全良は虹色、フルコンボは金、クリアは銀） */
+const crownIcon = (c: Crown | null | undefined, cls = '') => (c && c !== 'fail' ? `<i class="crn cr-${c} ${cls}" aria-label="${c === 'allgood' ? '全良' : c === 'fc' ? 'フルコンボ' : 'クリア'}"></i>` : '');
 function bestMap(): Record<string, { score: number; crown: Crown }> {
   try { return JSON.parse(localStorage.getItem(BEST) ?? '{}'); } catch { return {}; }
 }
@@ -261,7 +272,7 @@ export class Home {
       if (c === 'allgood') { cnt.allgood++; cnt.fc++; cnt.clear++; } else if (c === 'fc') { cnt.fc++; cnt.clear++; } else if (c === 'clear') cnt.clear++;
     }
     const total = this.songs.length;
-    const stat = (k: Crown, label: string) => `<div class="hst-r cr-${k}"><i aria-hidden="true"></i><span>${label}</span><b>${cnt[k]}</b><small>/${total}</small><em style="--p:${total ? cnt[k] / total : 0}"></em></div>`;
+    const stat = (k: Crown, label: string) => `<div class="hst-r cr-${k}"><i aria-hidden="true"></i><span>${label}</span><b>${cnt[k]}<small>/${total}</small></b><em style="--p:${total ? cnt[k] / total : 0}"></em></div>`;
     this.foldersEl.innerHTML = `<div class="hst"><small class="hst-h">あつめた王冠</small>${stat('allgood', '全良')}${stat('fc', 'フルコンボ')}${stat('clear', 'クリア')}</div>`;
 
     const pk = this.picking;
@@ -270,9 +281,9 @@ export class Home {
       const songRow = (s: SongEntry, inner: string) => {
         const cs = sortCourses(s.courses);
         const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
-        const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
-        const cr = songCrown(bm, s);
-        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : `<i class="hr-mk ${cr ? `cr-${cr}` : ''}"></i>`}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
+        const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
+        const cr = topCrown(bm, s);
+        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -544,11 +555,13 @@ export class Home {
       const on = !none && c.name === this.diffCourse;
       const meter = Array.from({ length: 10 }, (_, k) => `<i class="${k < c.level ? 'on' : ''}"></i>`).join('');
       const label = c.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[c.name] ?? c.name;
+      const cb = none ? null : loadBest(s.id, c.name);
       return `<button class="hdf-card ${on ? 'on' : ''} ${none ? 'none' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
         <svg viewBox="0 0 48 48" aria-hidden="true">${ICON_D[c.name] ?? ''}</svg>
         <span>${esc(label)}</span><b>★${none ? '-' : c.level}</b><em class="hdf-meter">${meter}</em>
         ${c.slot === 'Oni' && canUra && c.name !== 'Edit' ? '<small class="hdf-uraok">裏あり</small>' : ''}
         ${c.name === 'Edit' ? '<small class="hdf-urab">裏</small>' : ''}
+        ${crownIcon(cb?.crown, 'hdf-crn')}
         ${on ? '<u>1P</u>' : ''}</button>`;
     }).join('');
     const best = sel ? loadBest(s.id, sel.name) : null;

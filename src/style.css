@@ -2004,3 +2004,25 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 /* プレイ中と同じ区切り（50 こま） */
 .res .res-gauge::after { content: ''; position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(90deg, transparent 0 calc(2% - 2px), #14181b calc(2% - 2px) 2%); pointer-events: none; }
 .res .res-gauge em { z-index: 2; }
+
+/* ---------- 王冠の印・幅の調整 ---------- */
+.home { grid-template-columns: calc(clamp(100px, 13%, 150px) + var(--safe-l)) minmax(0, 1fr) calc(clamp(170px, 21%, 250px) + var(--det-sk) + var(--safe-r)); }
+.crn { display: inline-block; flex: none; width: 18px; height: 15px; background: var(--crc); clip-path: polygon(0 100%, 6% 22%, 30% 52%, 50% 0, 70% 52%, 94% 22%, 100% 100%); }
+.crn.cr-allgood { background: linear-gradient(135deg, #ff6fb4, #ffd23f 35%, #6fe0a0 65%, #5ab4ff); }
+.crn.cr-fc { background: linear-gradient(#fff3a0, #ffc21a); }
+.crn.cr-clear { background: linear-gradient(#ffffff, #b9c8d2); }
+.hr-crn { width: 20px; height: 17px; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6)); }
+.home .hr.on .hr-crn { position: absolute; right: 26px; top: 12px; width: 30px; height: 25px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5)); }
+.hc .crn { width: 13px; height: 11px; margin-right: 3px; align-self: center; }
+.hdf-crn { position: absolute; top: 8px; right: 8px; width: 28px; height: 23px; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6)); }
+.hst { padding: 6px 8px 6px 10px; }
+.hst-r { grid-template-columns: 14px 1fr auto auto; column-gap: 4px; }
+.hst-r b { font-size: 16px; }
+.home-navb { gap: 4px; padding: 8px 6px 10px; }
+.hdf-card .hdf-crn { position: absolute; top: 8px; left: 8px; right: auto; width: 28px; height: 23px; align-self: auto; padding: 0; }
+.home .hr.on .hr-crn { filter: drop-shadow(0 0 1px #2a3640) drop-shadow(0 1px 0 #2a3640); }
+.hst-r span { grid-column: 2 / -1; }
+.hst-r b { grid-column: 2; justify-self: start; line-height: 1; }
+.hst-r small { grid-column: 3 / -1; justify-self: end; }
+.hst-r b { grid-column: 2 / -1; }
+.hst-r b small { margin-left: 4px; }
