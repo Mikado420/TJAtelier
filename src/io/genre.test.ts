@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from 'vitest';
 import { loadFiles } from './load';
 import { writeZip } from './zip';
 
