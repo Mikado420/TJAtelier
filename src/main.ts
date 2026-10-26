@@ -174,7 +174,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!t || !t.closest) return;
   const play = document.getElementById('play');
   if (play && !play.classList.contains('hidden') && play.contains(t) && !t.closest('.pause-menu, #playPause')) return;
-  if (t.closest('[data-fbar], [data-fopen], .hfb-add')) { if (t.closest('.hfb-add')) audio.playUi('tap'); return; }
+  if (t.closest('[data-fbar]') && !t.closest('.hfb-acts button')) return;
   if (!t.closest(TAP_SEL)) return;
   audio.playUi('tap');
 }, true);

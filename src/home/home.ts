@@ -1,6 +1,6 @@
 /**
- * 最初の画面（曲選択）。左にロゴと集めた王冠、真ん中にフォルダの帯（タップで下に中の曲が開く）、
- * 右の青い面に選んだフォルダの操作か、選んだ曲（BPM・試聴・「この曲にする」「編集」）。
+ * 最初の画面（曲選択）。左にロゴと集めた王冠、真ん中にフォルダの帯（タップで下に中の曲が開く）。
+ * 選んだフォルダの帯には名前の変更・削除、選んだ曲の帯には試聴・エディタ・譜面情報・「この曲にする」。
  */
 import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
@@ -67,16 +67,6 @@ function rememberCourse(id: string, c: string) {
   } catch { /* 保存できない */ }
 }
 
-/** 曲名から決まる、ジャケットの代わりの斜線の模様（傾きは CSS の --tilt と同じ 8°。曲ごとに変わるのは太さ・間隔・色） */
-function jacket(e: SongEntry) {
-  let h = 0;
-  for (const ch of e.title) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const w = 5 + (h % 5);
-  const gap = 8 + ((h >> 4) % 10);
-  const bands = Array.from({ length: 14 }, (_, k) => `<rect x="${-60 + k * (w + gap)}" y="-40" width="${w}" height="200" fill="${k % 3 === (h >> 8) % 3 ? '#fff' : '#1d2023'}" opacity="${k % 3 === (h >> 8) % 3 ? 0.9 : 0.55}"/>`).join('');
-  return `<svg class="hj" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g transform="rotate(8 50 50)">${bands}</g></svg>`;
-}
-
 /** 「未分類」（どのフォルダにも入っていない曲）を表す、フォルダ名には使えない値 */
 const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文字（\u0000 は属性に入れると別の文字に置き換わる）
 /** 「すべて」の帯を表す値 */
@@ -123,7 +113,6 @@ const ICON = {
 export class Home {
   private readonly el: HTMLElement;
   private readonly list: HTMLElement;
-  private readonly detail: HTMLElement;
   private readonly foldersEl: HTMLElement;
   private songs: SongEntry[] = [];
   private folders: string[] = [];
@@ -151,7 +140,6 @@ export class Home {
   constructor(private readonly host: HomeHost) {
     this.el = document.getElementById('home')!;
     this.list = document.getElementById('homeList')!;
-    this.detail = document.getElementById('homeDetail')!;
     this.foldersEl = document.getElementById('homeFolders')!;
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
@@ -283,7 +271,9 @@ export class Home {
         const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
         const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
         const cr = topCrown(bm, s);
-        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
+        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${pk ? '' : `<span class="hr-acts">
+          <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
+          <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`}</div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -299,7 +289,7 @@ export class Home {
           const col = folderColor(k);
           const isOpen = k === openKey;
           const on = this.focus === 'folder' && k === this.fbar && !pk;
-          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small><i class="hfb-ar" aria-hidden="true"></i></div>`);
+          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${pk ? '' : `<span class="hfb-acts">${k === ALL || k === UNCAT ? '<button data-h="new" aria-label="ここに新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><small>新しい譜面</small></button>' : `<button data-h="new" aria-label="ここに新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button data-frename="${esc(k)}" aria-label="名前を変える"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg><small>消す</small></button>`}</span>`}<i class="hfb-ar" aria-hidden="true"></i></div>`);
           if (isOpen) {
             for (const x of songs) rows.push(songRow(x, col));
             if (!songs.length) rows.push(`<div class="hr-empty in" style="--fc:${col}">${k === UNCAT ? '未分類の曲はありません' : k === ALL ? 'まだ曲がありません' : 'このフォルダには曲がありません'}</div>`);
@@ -316,68 +306,20 @@ export class Home {
     bar.classList.toggle('hidden', !pk);
     if (pk) {
       const allOn = songs.length > 0 && songs.every((x) => pk.has(x.id));
+      const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
+      const off = pk.size ? '' : 'disabled';
       bar.innerHTML = `
         <button data-pk="all" class="pk-all ${allOn ? 'on' : ''}"><i class="hr-ck">${allOn ? '✓' : ''}</i>${allOn ? '選択を解除' : 'すべて選択'}</button>
-        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲を選択中` : ''}</span>
+        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲` : '曲をタップして選ぶ'}</span>
+        <button data-pk="add" ${off}>フォルダに入れる</button>
+        ${inFolder ? `<button data-pk="move" ${off}>移す</button><button data-pk="remove" ${off}>外す</button>` : `<button data-pk="clear" ${off}>未分類に戻す</button>`}
+        <button data-pk="delete" class="bad" ${off}>削除</button>
         <button data-pk="done" class="pk-done">完了</button>`;
     }
     this.el.classList.toggle('home-picking', !!pk);
     const pb = document.getElementById('homePickBtn') as HTMLElement;
     pb.classList.toggle('on', !!pk);
     pb.querySelector('small')!.textContent = pk ? '完了' : '選択';
-
-    // 右: 選んでいる曲（フォルダの帯を選んでいるときは、そのフォルダ）
-    const s = this.focus === 'song' && (this.open || this.query) ? this.songs.find((x) => x.id === this.sel && songs.includes(x)) : undefined;
-    const fpanel = !pk && !this.query && this.focus === 'folder';
-    if (fpanel) this.detail.style.setProperty('--accent', folderColor(this.fbar));
-    else this.detail.style.removeProperty('--accent');
-    if (fpanel) {
-      const k = this.fbar;
-      const list = this.folderSongs(k);
-      const c: Record<Crown, number> = { allgood: 0, fc: 0, clear: 0, fail: 0 };
-      for (const x of list) { const r = songCrown(bm, x); if (r) c[r]++; }
-      const isOpen = this.open && this.keyOf(this.folder) === k;
-      const user = k !== ALL && k !== UNCAT;
-      this.detail.innerHTML = `
-        <div class="hdx-top"><small>フォルダ</small></div>
-        <h1 class="hdx-title">${esc(this.folderName(k))}</h1>
-        <div class="hdx-bpm">${list.length}<small>曲</small></div>
-        <div class="hfx-cr"><span class="cr-allgood"><i></i>全良 <b>${c.allgood}</b></span><span class="cr-fc"><i></i>フルコンボ <b>${c.fc}</b></span><span class="cr-clear"><i></i>クリア <b>${c.clear}</b></span></div>
-        <div class="hdx-acts">
-          <button class="hdx-play" data-fopen="${esc(k)}"><svg viewBox="0 0 24 24" aria-hidden="true">${isOpen ? '<path d="M5 15.5 12 8.5l7 7"/>' : '<path d="M5 8.5 12 15.5l7-7"/>'}</svg>${isOpen ? 'とじる' : 'ひらく'}</button>
-          ${user ? `<button class="hdx-edit" data-frename="${esc(k)}">名前を変える</button><button class="hdx-an hdx-bad" data-fdel="${esc(k)}">フォルダを消す</button>` : `<button class="hdx-edit" data-h="new">ここに新しい譜面</button>`}
-        </div>`;
-    } else if (pk) {
-      const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
-      const picked = this.songs.filter((x) => pk.has(x.id));
-      const off = pk.size ? '' : 'disabled';
-      const act = (k: string, icon: string, label: string, sub: string, cls = '') =>
-        `<button data-pk="${k}" class="pk-act ${cls}" ${off}><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span></button>`;
-      this.detail.innerHTML = `
-        <div class="pk-panel">
-          <div class="pk-head"><small>選択中</small><b>${pk.size}<span>曲</span></b></div>
-          <div class="pk-list">${picked.map((x) => `<div class="pk-item"><b>${esc(x.title)}</b>${x.subtitle ? `<small>${esc(x.subtitle)}</small>` : ''}</div>`).join('')}</div>
-          <div class="pk-acts">
-            ${act('add', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M12 11.5v5M9.5 14h5"/>', 'フォルダに入れる', '')}
-            ${inFolder ? act('move', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9 14h6M13 11.5l2.5 2.5-2.5 2.5"/>', '別のフォルダへ移す', '') : ''}
-            ${inFolder ? act('remove', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9.5 14h5"/>', 'このフォルダから外す', '') : act('clear', '<path d="M3 6.5h6l2 2h10v10H3z"/><path d="M9.5 11.5l5 5M14.5 11.5l-5 5"/>', '未分類に戻す', '')}
-            ${act('delete', '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>', '削除する', '', 'bad')}
-          </div>
-        </div>`;
-    } else if (s) {
-      this.detail.innerHTML = `
-        <div class="hdx-jk">${jacket(s)}</div>
-        <div class="hdx-top"><small>試聴</small><span class="hdx-pv"><button data-h="prev" aria-label="前の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/></svg></button><button data-h="pp" aria-label="試聴"></button><button data-h="next" aria-label="次の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button></span><button class="hdx-more" data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></div>
-        <h1 class="hdx-title">${esc(s.title)}</h1>
-        <div class="hdx-bpm">${fmtBpm(s)}<small>BPM</small></div>
-        <div class="hdx-acts">
-          <button class="hdx-play" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button>
-          <button class="hdx-edit" data-edit="${s.id}">エディタで開く</button>
-          <button class="hdx-an" data-analyze="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>譜面情報</button>
-        </div>`;
-    } else {
-      this.detail.innerHTML = `<div class="hdx-empty"><b>曲を選んでください</b><button class="hdx-play" data-h="import">読み込む</button></div>`;
-    }
 
     (document.getElementById('homeSort') as HTMLElement).textContent = SORT_LABEL[this.sort];
     const path = document.getElementById('homePath') as HTMLElement;
@@ -705,7 +647,11 @@ export class Home {
     if (a === 'import') this.host.importFiles();
     else if (a === 'settings') this.host.settings();
     else if (a === 'online') { this.stopPreview(); this.host.online(); }
-    else if (a === 'new') { this.stopPreview(); await this.host.create(this.folder ?? ''); }
+    else if (a === 'new') {
+      this.stopPreview();
+      const f = this.focus === 'folder' && !this.query ? this.fbar : this.folder ?? '';
+      await this.host.create(f === ALL || f === UNCAT ? '' : f);
+    }
     else if (a === 'folder') {
       const name = await this.askName('新しいフォルダ', '', '作る');
       if (!name) return;
@@ -794,10 +740,10 @@ export class Home {
   }
 
   private paintPlayer() {
-    const b = this.el.querySelector<HTMLElement>('[data-h="pp"]');
-    if (b) b.innerHTML = this.playing
+    const html = this.playing
       ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>'
       : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>';
+    this.el.querySelectorAll<HTMLElement>('[data-h="pp"]').forEach((b) => { b.innerHTML = `${html}<small>試聴</small>`; });
     this.el.classList.toggle('home-playing', this.playing);
   }
 

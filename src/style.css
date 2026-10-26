@@ -2030,3 +2030,38 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home { grid-template-columns: calc(clamp(124px, 15.5%, 176px) + var(--safe-l)) minmax(0, 1fr) calc(clamp(170px, 21%, 250px) + var(--det-sk) + var(--safe-r)); }
 .home-navb { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 10px 10px; }
 .home-navb button { max-width: none; height: clamp(38px, 11vh, 46px); }
+
+/* ---------- 曲えらび: 右の面をなくして 2 列に。操作は選んだ帯の中 ---------- */
+.home { grid-template-columns: calc(clamp(196px, 23%, 250px) + var(--safe-l)) minmax(0, 1fr); }
+.home-mid { padding-right: var(--safe-r); }
+.home-navb { display: flex; gap: 6px; padding: 8px 12px 12px; }
+.home-navb button { flex: 1; max-width: none; height: clamp(40px, 12vh, 48px); }
+/* 選んだ曲: 右に操作 */
+.hr-acts { display: none; }
+.home .hr.on .hr-acts { position: relative; z-index: 1; flex: none; display: flex; flex-direction: column; gap: 6px; width: clamp(200px, 34%, 290px); margin: 10px 0; }
+.home .hr.on .hr-bpm { display: none; }
+.hr-ib { display: grid; grid-template-columns: repeat(3, 1fr) 40px; gap: 4px; }
+.hr-ib button { height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: #dfe7ec !important; color: #14181b; }
+.hr-ib button:active { background: #c9d6de !important; }
+.hr-ib svg { width: 18px; height: 18px; fill: none; stroke: #14181b; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.hr-ib [data-h="pp"] svg { fill: #14181b; stroke: none; }
+.hr-ib [data-smore] svg { fill: #14181b; }
+.hr-ib small { font-size: 9px; font-weight: 800; line-height: 1; color: #3b4650; }
+.hr-go { height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 16px; font-weight: 900; color: #fff !important; background: var(--accent) !important; --sk: calc(44px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
+.hr-go svg { width: 15px; height: 15px; fill: #fff; }
+.home .hr.on .hr-crn { right: auto; left: auto; position: static; margin-left: 4px; align-self: flex-start; margin-top: 14px; }
+/* 選んだフォルダの帯: 新しい譜面・名前・消す */
+.hfb-acts { display: none; }
+.home .hr.hfb.on .hfb-acts { display: flex; gap: 4px; flex: none; }
+.hfb-acts button { min-width: 44px; height: 44px; padding: 0 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: rgba(0, 0, 0, 0.28) !important; }
+.hfb-acts svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.hfb-acts small { font: 800 9px system-ui, sans-serif !important; line-height: 1; opacity: 1 !important; }
+/* まとめて操作のバー */
+.home-pick { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.home-pick::-webkit-scrollbar { display: none; }
+.home-pick button { flex: none; }
+.home-pick .pk-hint { flex: 1 1 auto; min-width: 40px; }
+/* 左が広くなったので王冠の数は 1 行に */
+.hst-r { grid-template-columns: 16px 1fr auto; column-gap: 6px; }
+.hst-r span { grid-column: 2; font-size: 12px; }
+.hst-r b { grid-column: 3; }
