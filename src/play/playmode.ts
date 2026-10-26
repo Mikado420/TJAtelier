@@ -1,6 +1,6 @@
 import type { AudioEngine } from '../audio/audio';
 import type { Course } from '../chart/types';
-import { Game } from '../engine/game';
+import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
 import { BUILD_ID } from '../update';
@@ -197,7 +197,8 @@ export class PlayMode {
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
     (window as unknown as { __playPerf?: unknown }).__playPerf = this.perf;
-    this.cur = { course, info, endAt, clicks: [] };
+    this.cur = { course, info, endAt, clicks: [], lastNote: lastTime };
+    this.endWall = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
   }
@@ -325,13 +326,16 @@ export class PlayMode {
     this.autoIdx = 0;
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
-    this.cur = { course, info, endAt, clicks: clicks ?? [] };
+    this.cur = { course, info, endAt, clicks: clicks ?? [], lastNote: lastTime };
+    this.endWall = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
   }
 
   /** 今のプレイの内容（ポーズから続けるときに使う） */
-  private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[] } | null = null;
+  private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[]; lastNote?: number } | null = null;
+  /** 曲の終わりの帯を出した時刻（performance.now()。0 = まだ） */
+  private endWall = 0;
   private paused = false;
   private pausedAt = 0;
   private timeFloor = -Infinity;
@@ -364,7 +368,14 @@ export class PlayMode {
       P.frames++;
       P.work += w;
       if (w > P.workMax) P.workMax = w;
-      if (now > endAt) {
+      // 最後の音符が終わったら、クリア・フルコンボなどの帯を出し、少し見せてから結果へ
+      if (!this.calibrating && !this.spectating && !this.endWall && now > (this.cur?.lastNote ?? Infinity) + 0.6) {
+        this.endWall = performance.now();
+        const st = game.stats;
+        const fc = st.bad === 0 && game.totalHitNotes > 0;
+        this.renderer.showEnd(fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail');
+      }
+      if (now > endAt || (this.endWall && performance.now() - this.endWall > 3000)) {
         this.finish();
         return;
       }
@@ -533,15 +544,8 @@ export class PlayMode {
     const s = g.stats;
     const total = g.totalHitNotes || 1;
     const acc = ((s.good + s.ok * 0.5) / total) * 100;
-    const rows: [string, string][] = [
-      ['スコア', String(s.score)],
-      ['良', String(s.good)],
-      ['可', String(s.ok)],
-      ['不可', String(s.bad)],
-      ['最大コンボ', String(s.maxCombo)],
-      ['連打', String(s.rolls)],
-      ['精度', `${acc.toFixed(2)}%`],
-    ];
+    // スコア・良可不可などは結果のカードに出す。ここ（くわしい記録）には調べるための情報だけ
+    const rows: [string, string][] = [];
     // 叩いたタイミングのずれ（オートのときは出さない）。
     // 判定幅の外だった打撃も含めて中央値を取るので、端末の音の遅れが 114ms より大きくても調整できる
     const calib = this.result.querySelector<HTMLElement>('.calib')!;
@@ -643,7 +647,50 @@ export class PlayMode {
     }
     this.result.querySelector('h2')!.textContent = '結果';
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-    this.result.classList.remove('hidden');
+    this.showResultCard(g, acc);
+  }
+
+  /** 結果のカード（スコア・良可不可・王冠など）を出して、数を数え上げる */
+  private showResultCard(g: Game, acc: number) {
+    const R = this.result;
+    const s = g.stats;
+    const info = this.cur?.info ?? { title: '', course: '', level: 0 };
+    const cleared = s.gauge >= CLEAR_LINE;
+    const fc = s.bad === 0 && g.totalHitNotes > 0;
+    const allGood = fc && s.ok === 0;
+    const rank = allGood ? 'allgood' : fc ? 'fc' : cleared ? 'clear' : 'fail';
+    const COURSE: Record<string, [string, string]> = {
+      Easy: ['かんたん', 'var(--c-easy)'], Normal: ['ふつう', 'var(--c-normal)'], Hard: ['むずかしい', 'var(--c-hard)'], Oni: ['おに', 'var(--c-oni)'], Edit: ['おに（裏）', 'var(--c-edit)'],
+    };
+    const [cl, cc] = COURSE[info.course] ?? [info.course, 'var(--btn)'];
+    R.classList.remove('res-calib', 'go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
+    R.classList.add(`r-${rank}`);
+    R.querySelector('.res-title')!.textContent = info.title;
+    R.querySelector('.res-sub')!.textContent = `${cl} ★${info.level}`;
+    const badge = R.querySelector<HTMLElement>('.res-course')!;
+    badge.textContent = `${cl} ★${info.level}`;
+    badge.style.setProperty('--cc', cc);
+    R.querySelector<HTMLElement>('.res-gauge i')!.style.width = `${Math.max(0, Math.min(100, s.gauge))}%`;
+    R.querySelector<HTMLElement>('.res-gauge em')!.style.left = `${CLEAR_LINE}%`;
+    R.querySelector('.res-acc')!.textContent = `精度 ${acc.toFixed(2)}%`;
+    R.querySelector('.res-bubble')!.textContent = { allgood: 'カンペキ！', fc: 'フルコンボ、すごい！', clear: 'クリア！その調子！', fail: 'おしい！もう一回！' }[rank];
+    R.querySelector('.res-ribbon')!.textContent = { allgood: '全良 達成！', fc: 'フルコンボ 達成！', clear: '', fail: '' }[rank];
+    R.querySelector('.res-detail')?.removeAttribute('open');
+    const targets: [HTMLElement, number][] = [[R.querySelector<HTMLElement>('#resScore')!, s.score]];
+    for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);
+    for (const [el] of targets) el.textContent = '0';
+    R.classList.remove('hidden');
+    // 数え上げ（0.35 秒後から 0.8 秒かけて）→ 背景が明るくなり、王冠と吹き出しが出る（CSS）
+    const t0 = performance.now() + 350;
+    const step = () => {
+      if (R.classList.contains('hidden')) return;
+      const k = Math.max(0, Math.min(1, (performance.now() - t0) / 800));
+      const e = 1 - (1 - k) * (1 - k);
+      for (const [el, v] of targets) el.textContent = String(Math.round(v * e));
+      if (k < 1) requestAnimationFrame(step);
+      else R.classList.add('go');
+    };
+    requestAnimationFrame(step);
   }
 
   /** 結果画面で提案する判定調整の値（ms） */
@@ -701,6 +748,11 @@ export class PlayMode {
     const c = this.audio.clockInfo();
     rows.push(['音の遅れ（推定）', `${c.latencyMs}ms（${c.mode === 'outputTimestamp' ? '再生位置から' : '端末の申告値'}）`]);
     rows.push(['バージョン', BUILD_ID.slice(0, 7)]);
+    this.result.classList.remove('go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
+    this.result.classList.add('res-calib');
+    this.result.querySelector('.res-title')!.textContent = 'タイミング調整';
+    this.result.querySelector('.res-sub')!.textContent = '';
+    this.result.querySelector('.res-detail')?.setAttribute('open', '');
     this.result.querySelector('h2')!.textContent = 'タイミング調整の結果';
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     this.result.classList.remove('hidden');

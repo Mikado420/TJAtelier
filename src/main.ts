@@ -46,6 +46,9 @@ const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platfo
 /** Expo Go で開くリンク（EAS Update で配信。.github/workflows/expo-update.yml） */
 const EXPO_LINK = 'exp://u.expo.dev/66852881-5978-446f-9869-8169b13ab3c3?runtime-version=exposdk:58.0.0&channel-name=main';
 
+/** 太鼓の大きさ 100% のときの、面の横幅（画面の幅に対する割合） */
+const DRUM_BASE = 0.605;
+
 const settings = {
   /** 前の版の「1 拍を何分割」（読み込みの引き継ぎ用） */
   divisor: 0,
@@ -73,6 +76,8 @@ const settings = {
   rollRate: 30,
   /** タッチ用の中央のドンの帯の幅 */
   donWidth: 0.6,
+  /** タッチ用の太鼓の大きさ（%、75〜125）。100% の面の横幅は画面の幅の DRUM_BASE。donWidth はここから決まる */
+  drumSize: 0,
   /** TJA のテキストを太字で表示する */
   tjaBold: false,
   /** 音量の比率（自動で揃えた後に掛ける）。音源 : 打音 : メトロノーム */
@@ -101,6 +106,11 @@ try {
     if (settings.rollRate === 15) settings.rollRate = 30;
     localStorage.setItem('malody-web:rollRate30', '1');
   }
+  // 太鼓の大きさ（%）: 前の版の「ドンの幅」から引き継ぐ
+  if (!settings.drumSize) {
+    settings.drumSize = settings.donWidth === 0.6 ? 100 : Math.max(75, Math.min(125, Math.round((settings.donWidth / DRUM_BASE) * 100)));
+  }
+  settings.donWidth = (DRUM_BASE * settings.drumSize) / 100;
   if (!localStorage.getItem('malody-web:manualPlay')) {
     settings.auto = false;
     localStorage.setItem('malody-web:manualPlay', '1');
@@ -1313,7 +1323,7 @@ function playSettingRows() {
     ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
     ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
     ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
-    ${stRange('donWidth', 'ドンの幅', 0.3, 0.9, 0.01, settings.donWidth, 100, '%')}
+    ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
     ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}`;
 }
 function volumeRows() {
@@ -1339,6 +1349,7 @@ function onSettingInput(el: HTMLInputElement, commit: boolean): boolean {
     let v = Number(raw) / scale;
     if (key === 'speed') v = Math.max(0.1, Math.min(10, v));
     else if (key === 'donWidth') v = Math.max(0.1, Math.min(0.95, v));
+    else if (key === 'drumSize') v = Math.max(75, Math.min(125, Math.round(v)));
     else if (key.startsWith('vol')) v = Math.max(0, Math.min(4, v));
     (settings[key] as number) = v;
     // 同じ行のスライダーと数字の欄をそろえる
@@ -1347,6 +1358,7 @@ function onSettingInput(el: HTMLInputElement, commit: boolean): boolean {
       o.value = o.type === 'range' ? String(v) : String(Number((v * Number(o.dataset.scale || 1)).toFixed(3)));
     });
   }
+  if (key === 'drumSize') settings.donWidth = (DRUM_BASE * settings.drumSize) / 100;
   saveSettings();
   if (key.startsWith('vol')) applyMix();
   if (key === 'speed') applyPlayZoom();
@@ -1713,10 +1725,11 @@ async function startTest(fromStart = lastTestFromStart) {
 
 $('growFace').addEventListener('click', () => {
   if (play.suggestedDonWidth == null) return;
-  settings.donWidth = play.suggestedDonWidth;
+  settings.drumSize = Math.max(75, Math.min(125, Math.round((play.suggestedDonWidth / DRUM_BASE) * 100)));
+  settings.donWidth = (DRUM_BASE * settings.drumSize) / 100;
   saveSettings();
   $('growFace').closest('.edgehint')!.classList.add('hidden');
-  toast(`ドンの幅を ${Math.round(settings.donWidth * 100)}% にしました`);
+  toast(`太鼓の大きさを ${settings.drumSize}% にしました`);
 });
 $('copyLog').addEventListener('click', async () => {
   try {
