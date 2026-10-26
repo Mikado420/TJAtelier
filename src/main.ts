@@ -1969,7 +1969,16 @@ $('btnHome').addEventListener('click', async () => {
   await persist();
   await home.show(currentSongId);
 });
-void boot();
+// 起動のロゴ: 曲えらびの準備ができて、ロゴを 2 秒見せたら消す（読み込みに失敗しても消す）
+const splashAt = performance.now();
+void boot().finally(() => {
+  const el = document.getElementById('splash');
+  if (!el) return;
+  setTimeout(() => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 1000);
+  }, Math.max(0, 2000 - (performance.now() - splashAt)));
+});
 
 // 動作確認用（URL に ?debug を付けたときだけ）
 if (new URLSearchParams(location.search).has('debug')) {

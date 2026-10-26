@@ -18,10 +18,21 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+      <!-- CSS が届く前から暗い背景にして、起動ロゴの前に白く光らないように -->
+    <style>html, body { background: #14181b; }</style>
   </head>
   <body>
     <!-- 縦向きのときは #root ごと 90° 回転させて横画面で表示する（src/orient.ts） -->
     <div id="root">
+    <!-- 起動のロゴ（読み込み中にエディタが見えないよう、最初から全体を覆う。曲えらびの準備ができたら帯が駆け抜けて消える） -->
+    <div id="splash" class="splash" aria-hidden="true">
+      <div class="spl-base"><i class="spl-st"></i>
+        <div class="spl-bands"><i></i><i></i><i></i><i></i><i></i></div>
+        <img class="spl-logo" src="logo.png" alt="" draggable="false"><i class="spl-line"></i>
+        <div class="spl-glint" style="-webkit-mask-image:url(logo.png);mask-image:url(logo.png)"><i></i></div>
+      </div>
+      <div class="spl-exit"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
     <div id="app">
       <div class="stage">
         <canvas id="editor"></canvas>
