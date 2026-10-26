@@ -1969,14 +1969,42 @@ $('btnHome').addEventListener('click', async () => {
   await persist();
   await home.show(currentSongId);
 });
-// 起動のロゴ: 曲えらびの準備ができて、ロゴを 2 秒見せたら消す（読み込みに失敗しても消す）
-const splashAt = performance.now();
-void boot().finally(() => {
-  const el = document.getElementById('splash');
-  if (!el) return;
+// 起動のロゴ: 効果音を読み込んでから、音と動きをそろえて始める。
+// 曲えらびの準備ができて、ロゴを 2 秒見せたら、もう一つの効果音とともに帯が駆け抜けて消える。
+// 効果音が鳴っているあいだは試聴（曲の音）を鳴らさない
+const splashEl = document.getElementById('splash');
+const logoSound = (name: string) => {
+  const a = new Audio(`sfx/${name}.mp3`);
+  a.preload = 'auto';
+  a.volume = Math.max(0, Math.min(1, 0.8 * (settings.volUi ?? 1)));
+  return a;
+};
+const sIn = logoSound('logo-in');
+const sOut = logoSound('logo-out');
+/** 鳴らす（自動で鳴らせない環境では鳴らさない） */
+const playLogo = (a: HTMLAudioElement) => { if ((settings.volUi ?? 1) > 0) a.play().catch(() => {}); };
+const ready = (a: HTMLAudioElement) => new Promise<void>((r) => {
+  if (a.readyState >= 3) return r();
+  a.addEventListener('canplaythrough', () => r(), { once: true });
+  a.addEventListener('error', () => r(), { once: true });
+});
+let splashAt = performance.now();
+// 起動の効果音（約 2 秒）と、消えるときの効果音（約 2 秒）が終わるまでは試聴しない
+home.holdPreview(splashAt + 5000);
+void Promise.race([Promise.all([ready(sIn), ready(sOut)]), new Promise((r) => setTimeout(r, 500))]).then(() => {
+  splashAt = performance.now();
+  splashEl?.classList.add('go');
+  playLogo(sIn);
+});
+void boot().finally(async () => {
+  if (!splashEl) return;
+  // ロゴの動きが始まってから 2 秒見せる
+  while (!splashEl.classList.contains('go')) await new Promise((r) => setTimeout(r, 50));
   setTimeout(() => {
-    el.classList.add('out');
-    setTimeout(() => el.remove(), 1000);
+    splashEl.classList.add('out');
+    playLogo(sOut);
+    home.holdPreview(performance.now() + 2000);
+    setTimeout(() => splashEl.remove(), 1000);
   }, Math.max(0, 2000 - (performance.now() - splashAt)));
 });
 

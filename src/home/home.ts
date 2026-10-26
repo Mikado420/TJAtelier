@@ -782,6 +782,12 @@ export class Home {
   // ---------- 試聴 ----------
 
   /** 試聴を流す（from を省くと DEMOSTART から） */
+  /** この時刻（performance.now()）までは試聴を鳴らさない（起動のロゴの効果音のあいだ） */
+  private previewHold = 0;
+  holdPreview(until: number) {
+    this.previewHold = until;
+  }
+
   private async startPreview(s: SongEntry, from?: number) {
     const id = s.id;
     const A = this.host.audio;
@@ -806,6 +812,12 @@ export class Home {
       if ((A.ctx.state as string) !== 'running') { this.pendingPreview = true; return; }
     }
     if (this.previewId !== id || !this.visible) return;
+    // 起動のロゴの効果音が終わるまで待つ
+    const hold = this.previewHold - performance.now();
+    if (hold > 0) {
+      await new Promise((r) => setTimeout(r, hold));
+      if (this.previewId !== id || !this.visible || this.playing) return;
+    }
     A.previewStart(id, from ?? start, start);
     this.playing = true;
     this.paintPlayer();

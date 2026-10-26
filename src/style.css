@@ -2126,6 +2126,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 
 /* ---------- 起動のロゴ（案1: 斜めの帯が駆け抜けてロゴ） ---------- */
 .splash { position: absolute; inset: 0; z-index: 9999; overflow: hidden; pointer-events: auto; }
+/* 効果音の準備ができるまで動きを止めておく（音と動きをそろえる） */
+.splash:not(.go) * { animation-play-state: paused !important; }
 .spl-base { position: absolute; inset: 0; background: #14181b; overflow: hidden; }
 .spl-st { position: absolute; inset: 0; background: repeating-linear-gradient(-82deg, rgba(77, 159, 190, 0.1) 0 2px, transparent 2px 22px); }
 .spl-bands i, .spl-exit i { position: absolute; top: -10%; bottom: -10%; left: 0; transform: skewX(-8deg) translateX(110vw); }
