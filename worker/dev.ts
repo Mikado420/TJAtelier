@@ -8,7 +8,7 @@ const lobby = new LobbyCore();
 const rooms = new Map<string, RoomCore>();
 const CORS = { 'Access-Control-Allow-Origin': '*' };
 
-type Data = { id: string; q: URLSearchParams; player?: unknown; core?: RoomCore };
+type Data = { id: string; q: URLSearchParams; player?: unknown; core?: RoomCore; conn?: Conn };
 
 Bun.serve<Data, undefined>({
   port: Number(process.env.PORT ?? 8787),
@@ -36,7 +36,7 @@ Bun.serve<Data, undefined>({
         send: (d) => { ws.send(d); },
         close: (c, r) => ws.close(c, r),
       };
-      const p = core.join(conn, { name: q.get('name') ?? '', create: q.get('create') === '1', title: q.get('title') ?? '', pass: q.get('pass') ?? '' });
+      const p = core.join(conn, { name: q.get('name') ?? '', create: q.get('create') === '1', title: q.get('title') ?? '', pass: q.get('pass') ?? '', cid: q.get('cid') ?? '' });
       if (typeof p === 'string') {
         ws.send(JSON.stringify({ t: 'denied', msg: p }));
         ws.close(4003, 'denied');
@@ -45,6 +45,7 @@ Bun.serve<Data, undefined>({
       }
       ws.data.player = p;
       ws.data.core = core;
+      ws.data.conn = conn;
     },
     message(ws, msg) {
       const { core, player } = ws.data;
@@ -53,8 +54,8 @@ Bun.serve<Data, undefined>({
       core.message(player as never, data);
     },
     close(ws) {
-      const { core, player } = ws.data;
-      if (core && player) core.leave(player as never);
+      const { core, player, conn } = ws.data;
+      if (core && player && conn) core.disconnect(player as never, conn);
     },
   },
 });

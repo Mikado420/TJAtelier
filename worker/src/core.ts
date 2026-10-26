@@ -2,10 +2,12 @@
  * オンライン対戦の部屋（Cloudflare の Durable Object とローカルの確認用サーバーの両方で使う中身）。
  *
  * 部屋に入った人（最大 4 人）のつながりを持ち、
- * - 部屋主が送った曲（譜面の TJA と音源）を預かって、ほかの人へ配る（後から入った人にも）
- * - 全員が曲を受け取ったら、部屋主の「スタート」で同じ時刻に始める（時刻はサーバーの時計）
+ * - 予約された曲を、部屋の設定（部屋主だけ・全員・順番・ランダム）に従って 1 曲ずつ「今の曲」にする
+ * - 今の曲の音源を持っていない人がいれば、予約した人に送ってもらって配る（持っている人には送らない）
+ * - 全員が受け取って「準備OK」なら、カウントダウンして同じ時刻に始める（部屋主はすぐ始めることもできる）
  * - プレイ中は、それぞれの判定・点数をほかの人へ中継する
- * - 全員が終わったら（または時間切れで）順位を配る
+ * - 全員が終わったら（または時間切れで）順位を配り、部屋の通算成績に足す
+ * - 通信が切れても 20 秒は席を残し、同じ端末（cid）が入り直したら元の席に戻す
  */
 
 export interface Conn {
@@ -27,10 +29,19 @@ export interface LobbyInfo {
 
 interface Player {
   id: string;
+  /** 端末ごとの値（入り直したときに同じ人だと分かるように） */
+  cid: string;
   name: string;
-  conn: Conn;
+  /** つながり（切れて入り直しを待っているあいだは null） */
+  conn: Conn | null;
+  /** 切れてから席を消すまでのタイマー */
+  awayTimer?: ReturnType<typeof setTimeout>;
   /** 今の曲を受け取って、遊べる状態か */
   ready: boolean;
+  /** 準備OK を押したか */
+  ok: boolean;
+  /** 遊ぶ難易度（今の曲の中から各自で選ぶ） */
+  course: string;
   /** 今のプレイに参加しているか */
   inGame: boolean;
   /** 届いたメッセージの数（荒らし対策: 1 秒ごとに数え直す） */
@@ -43,10 +54,11 @@ interface Player {
 }
 
 export interface SongMeta {
-  /** 曲を見分ける値（部屋主が決める） */
+  /** 今の曲を見分ける値（サーバーが決める） */
   key: string;
   title: string;
   subtitle: string;
+  /** 予約した人が選んだ難易度（各自で変えられる） */
   course: string;
   level: number;
   /** 譜面（TJA の文字） */
@@ -55,7 +67,24 @@ export interface SongMeta {
   size: number;
   /** 音源のファイル名 */
   audioName: string;
+  /** 音源の中身から作った値（同じ音源を持っている人には送らない） */
+  hash: string;
+  /** 予約した人の曲の一覧での番号（予約した人だけが使う） */
+  lib: string;
 }
+
+interface QItem { qid: string; by: string; byName: string; meta: Omit<SongMeta, 'key'> }
+
+export interface RoomSettings {
+  /** 曲を選べる人: 部屋主だけ・全員・全員（順番に）・全員（ランダム） */
+  pick: 'host' | 'all' | 'turn' | 'random';
+  /** 1 人が予約できる曲の数 */
+  limit: number;
+  /** 全員が準備OK なら自動で始める */
+  auto: boolean;
+}
+
+interface Result { name: string; course: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }
 
 export const MAX_PLAYERS = 4;
 /** 音源の上限（バイト） */
@@ -66,6 +95,12 @@ const MAX_TJA = 2 * 1024 * 1024;
 const RATE = 60;
 /** スタートの合図から曲の 0 秒までの時間（ms）。そのあいだに各端末が準備する */
 const LEAD_MS = 4500;
+/** 全員が準備OK になってから始めるまで（ms） */
+const COUNTDOWN_MS = 3000;
+/** 通信が切れてから席を消すまで（ms） */
+const AWAY_MS = 20000;
+/** 予約できる曲の数（部屋全体） */
+const MAX_QUEUE = 30;
 
 /** 名前・部屋名から、制御文字などを取り除いて長さを決める */
 export function clean(s: unknown, max: number) {
@@ -80,19 +115,29 @@ export class RoomCore {
   private hostId = '';
   private title = '';
   private pass = '';
-  private song: SongMeta | null = null;
-  private chunks: ArrayBuffer[] = [];
-  private received = 0;
-  private songDone = false;
+  private settings: RoomSettings = { pick: 'all', limit: 2, auto: true };
+  private queue: QItem[] = [];
+  /** 今の曲（予約から 1 曲ずつ。音源は持っていない人にだけ配る） */
+  private current: { item: QItem; key: string; uploading: boolean; done: boolean; chunks: ArrayBuffer[]; received: number; need: Set<string> } | null = null;
+  /** 最後に遊んだ曲（「もう一回」用） */
+  private last: QItem | null = null;
+  /** 順番に選ぶとき: 最後に選ばれた人 */
+  private lastBy = '';
+  private countdown: { at: number; timer: ReturnType<typeof setTimeout> } | null = null;
   private phase: 'wait' | 'play' = 'wait';
   private zero = 0;
-  private results = new Map<string, { name: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }>();
+  private results = new Map<string, Result>();
   private finishTimer: ReturnType<typeof setTimeout> | null = null;
   /** 今のプレイに参加した人の様子（途中から入った人が観戦できるように、判定をためておく） */
-  private round = new Map<string, { name: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }>();
+  private round = new Map<string, { name: string; course: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }>();
   private seq = 0;
+  private qseq = 0;
   /** チャット（新しい 40 件。後から入った人にも送る） */
   private chatLog: { p: string; name: string; x: string; at: number }[] = [];
+  /** 部屋の通算成績（端末ごと） */
+  private standings = new Map<string, { name: string; total: number; wins: number; plays: number }>();
+  /** 遊んだ曲と順位（新しい 20 曲） */
+  private history: { title: string; course: string; level: number; at: number; list: (Result & { p: string })[] }[] = [];
 
   constructor(
     readonly id: string,
@@ -105,61 +150,97 @@ export class RoomCore {
     return this.players.size === 0;
   }
 
-  /** 入る。だめなら理由（文字）を返す */
-  join(conn: Conn, q: { name: string; create: boolean; title: string; pass: string }): Player | string {
+  /** 入る。だめなら理由（文字）を返す。cid が同じ人が席にいれば、その席に戻る */
+  join(conn: Conn, q: { name: string; create: boolean; title: string; pass: string; cid?: string }): Player | string {
     const name = clean(q.name, 12) || 'ななし';
+    const cid = clean(q.cid, 40) || `x${++this.seq}`;
+    const back = [...this.players.values()].find((o) => o.cid === cid);
+    if (back) {
+      // 入り直し: 前のつながりは閉じて、同じ席に戻す
+      if (this.pass && q.pass !== this.pass) return 'あいことばが違います';
+      if (back.awayTimer) clearTimeout(back.awayTimer);
+      back.awayTimer = undefined;
+      try { back.conn?.close(4002, 'replaced'); } catch { /* 閉じ済み */ }
+      back.conn = conn;
+      back.name = name;
+      this.welcome(back);
+      return back;
+    }
     if (this.players.size === 0) {
       if (!q.create) return 'この部屋はもうありません';
       this.title = clean(q.title, 24) || `${name} の部屋`;
       this.pass = clean(q.pass, 16);
-      this.song = null;
-      this.chunks = [];
-      this.songDone = false;
-      this.phase = 'wait';
+      this.reset();
     } else {
       if (q.create) return '同じ部屋がすでにあります';
       if (this.pass && q.pass !== this.pass) return 'あいことばが違います';
       if (this.players.size >= MAX_PLAYERS) return '満員です';
     }
-    const p: Player = { id: `p${++this.seq}`, name, conn, ready: false, inGame: false, rate: 0, rateAt: this.now() };
+    const p: Player = { id: `p${++this.seq}`, cid, name, conn, ready: false, ok: false, course: '', inGame: false, rate: 0, rateAt: this.now() };
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
-    this.sendTo(p, { t: 'hello', you: p.id, room: { id: this.id, title: this.title, locked: !!this.pass }, max: MAX_PLAYERS });
-    // 曲があれば、後から入った人にも送る
-    if (this.song) {
-      this.sendTo(p, { t: 'song', meta: this.song, from: this.hostId });
-      if (this.songDone) {
-        for (const c of this.chunks) p.conn.send(c);
-        this.sendTo(p, { t: 'songEnd', key: this.song.key });
-      } else {
-        for (const c of this.chunks) p.conn.send(c);
-      }
-    }
-    if (p.id === this.hostId) p.ready = !!this.song;
-    if (this.chatLog.length) this.sendTo(p, { t: 'chatlog', list: this.chatLog });
-    this.roster();
+    this.welcome(p);
+    this.cancelCountdown();
     return p;
   }
 
+  private reset() {
+    this.queue = [];
+    this.current = null;
+    this.last = null;
+    this.phase = 'wait';
+    this.standings.clear();
+    this.history = [];
+    this.chatLog = [];
+  }
+
+  /** 入った（入り直した）人に、部屋の今の様子を送る */
+  private welcome(p: Player) {
+    this.sendTo(p, { t: 'hello', you: p.id, room: { id: this.id, title: this.title, locked: !!this.pass }, max: MAX_PLAYERS });
+    if (this.chatLog.length) this.sendTo(p, { t: 'chatlog', list: this.chatLog });
+    if (this.history.length) this.sendTo(p, { t: 'history', list: this.history });
+    // 今の曲: 持っているか聞く
+    if (this.current) {
+      p.ready = false;
+      if (!p.course) p.course = this.current.item.meta.course;
+      this.sendTo(p, { t: 'next', meta: { ...this.current.item.meta, key: this.current.key }, by: this.current.item.by });
+    }
+    this.roster();
+  }
+
+  /** つながりが切れた。少しのあいだ席を残して、入り直しを待つ */
+  disconnect(p: Player, conn: Conn) {
+    if (p.conn !== conn || !this.players.has(p.id)) return;
+    p.conn = null;
+    p.awayTimer = setTimeout(() => this.leave(p), AWAY_MS);
+    this.cancelCountdown();
+    this.roster();
+  }
+
   leave(p: Player) {
+    if (p.awayTimer) clearTimeout(p.awayTimer);
     if (!this.players.delete(p.id)) return;
     { const r = this.round.get(p.id); if (r && !r.status) r.status = 'lost'; }
-    this.results.delete(p.id);
+    // この人の予約は消す（音源を送れないので）
+    this.queue = this.queue.filter((x) => x.by !== p.id);
     if (this.hostId === p.id) {
-      // 部屋主が抜けたら、次に古い人が部屋主になる（曲はそのまま）
+      // 部屋主が抜けたら、次に古い人が部屋主になる
       this.hostId = this.players.keys().next().value ?? '';
-      const h = this.players.get(this.hostId);
-      if (h) h.ready = true;
     }
     if (this.players.size === 0) {
-      this.song = null;
-      this.chunks = [];
-      this.phase = 'wait';
+      this.reset();
+      this.cancelCountdown();
       if (this.finishTimer) clearTimeout(this.finishTimer);
       this.report(null);
       return;
     }
+    // 今の曲を予約した人が、音源を送りきる前に抜けた: その曲は飛ばす
+    if (this.current && this.current.item.by === p.id && !this.current.done && this.phase === 'wait') {
+      this.current = null;
+      this.advance();
+    }
     if (this.phase === 'play') this.maybeFinish();
+    this.maybeCountdown();
     this.roster();
   }
 
@@ -178,64 +259,137 @@ export class RoomCore {
       return;
     }
     const host = p.id === this.hostId;
+    const cur = this.current;
     switch (m.t) {
       case 'ping':
         this.sendTo(p, { t: 'pong', c: m.c, s: this.now() });
         break;
-      case 'song': {
-        if (!host || this.phase !== 'wait') return;
+      case 'reserve': {
+        // 曲を予約する
+        if (this.settings.pick === 'host' && !host) return this.sendTo(p, { t: 'err', msg: 'この部屋では、部屋主だけが曲を選べます' });
+        const mine = this.queue.filter((x) => x.by === p.id).length;
+        if (mine >= this.settings.limit) return this.sendTo(p, { t: 'err', msg: `予約できるのは 1 人 ${this.settings.limit} 曲までです` });
+        if (this.queue.length >= MAX_QUEUE) return this.sendTo(p, { t: 'err', msg: '予約がいっぱいです' });
         const meta = m.meta as SongMeta;
         if (!meta || typeof meta.tja !== 'string' || meta.tja.length > MAX_TJA) return this.sendTo(p, { t: 'err', msg: '譜面が大きすぎます' });
         const size = Math.max(0, Math.floor(Number(meta.size) || 0));
         if (size > MAX_AUDIO) return this.sendTo(p, { t: 'err', msg: '音源が大きすぎます（40MB まで）' });
-        this.song = {
-          key: clean(meta.key, 64),
-          title: clean(meta.title, 80),
-          subtitle: clean(meta.subtitle, 80),
-          course: clean(meta.course, 12),
-          level: Math.max(0, Math.min(20, Number(meta.level) || 0)),
-          tja: meta.tja,
-          size,
-          audioName: clean(meta.audioName, 80),
-        };
-        this.chunks = [];
-        this.received = 0;
-        this.songDone = size === 0;
-        for (const o of this.players.values()) o.ready = o.id === this.hostId;
-        this.broadcast({ t: 'song', meta: this.song, from: this.hostId }, p);
-        if (this.songDone) this.broadcast({ t: 'songEnd', key: this.song.key }, p);
+        this.queue.push({
+          qid: `q${++this.qseq}`,
+          by: p.id,
+          byName: p.name,
+          meta: {
+            title: clean(meta.title, 80),
+            subtitle: clean(meta.subtitle, 80),
+            course: clean(meta.course, 12),
+            level: Math.max(0, Math.min(20, Number(meta.level) || 0)),
+            tja: meta.tja,
+            size,
+            audioName: clean(meta.audioName, 80),
+            hash: clean(meta.hash, 80),
+            lib: clean(meta.lib, 40),
+          },
+        });
+        this.advance();
         this.roster();
-        this.lobby();
         break;
       }
-      case 'songEnd':
-        if (!host || !this.song || this.songDone) return;
-        if (this.received !== this.song.size) return this.sendTo(p, { t: 'err', msg: '音源を送りきれませんでした' });
-        this.songDone = true;
-        this.broadcast({ t: 'songEnd', key: this.song.key }, p);
+      case 'unreserve': {
+        const i = this.queue.findIndex((x) => x.qid === m.qid);
+        if (i < 0 || (!host && this.queue[i].by !== p.id)) return;
+        this.queue.splice(i, 1);
+        this.roster();
         break;
+      }
+      case 'move': {
+        // 部屋主: 予約の順番を変える
+        if (!host) return;
+        const i = this.queue.findIndex((x) => x.qid === m.qid);
+        const j = i + (Number(m.d) < 0 ? -1 : 1);
+        if (i < 0 || j < 0 || j >= this.queue.length) return;
+        [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+        this.roster();
+        break;
+      }
+      case 'settings': {
+        if (!host) return;
+        const s = (m.s ?? {}) as Partial<RoomSettings>;
+        if (s.pick === 'host' || s.pick === 'all' || s.pick === 'turn' || s.pick === 'random') this.settings.pick = s.pick;
+        if (s.limit !== undefined) this.settings.limit = Math.max(1, Math.min(5, Math.floor(Number(s.limit) || 1)));
+        if (s.auto !== undefined) this.settings.auto = !!s.auto;
+        this.maybeCountdown();
+        this.roster();
+        break;
+      }
+      case 'skip':
+        // 部屋主: 今の曲を飛ばす
+        if (!host || this.phase !== 'wait' || !cur) return;
+        this.current = null;
+        this.cancelCountdown();
+        this.advance();
+        this.roster();
+        break;
+      case 'again': {
+        // もう一回（部屋主か、その曲を予約した人）
+        const last = this.last;
+        if (this.phase !== 'wait' || !last || (!host && last.by !== p.id)) return;
+        if (cur && cur.item !== last) this.queue.unshift(cur.item);
+        this.current = null;
+        this.cancelCountdown();
+        this.advance({ ...last, qid: `q${++this.qseq}` });
+        this.roster();
+        break;
+      }
       case 'have':
-        // 曲を受け取って読み込めた
-        if (this.song && m.key === this.song.key) {
+        // 今の曲を読み込めた（音源を持っていた・受け取った）
+        if (cur && m.key === cur.key) {
           p.ready = true;
+          cur.need.delete(p.id);
+          this.maybeCountdown();
           this.roster();
         }
         break;
-      case 'start': {
-        if (!host || this.phase !== 'wait' || !this.song || !this.songDone) return;
-        const ready = [...this.players.values()].filter((o) => o.ready);
-        if (ready.length < this.players.size) return this.sendTo(p, { t: 'err', msg: '曲を受け取っていない人がいます' });
-        this.phase = 'play';
-        this.zero = this.now() + LEAD_MS;
-        this.results.clear();
-        this.round.clear();
-        for (const o of this.players.values()) this.round.set(o.id, { name: o.name, s: 0, c: 0, g: 0, j: [], status: '' });
-        for (const o of this.players.values()) { o.inGame = true; o.lastSt = this.zero; }
-        this.startWatchdog();
-        const list = [...this.players.values()].map((o) => ({ p: o.id, name: o.name }));
-        this.broadcast({ t: 'start', zero: this.zero, key: this.song.key, players: list });
+      case 'need':
+        // 今の曲の音源を持っていない: 予約した人に送ってもらう（もう届いていれば、ためてある分を送る）
+        if (!cur || m.key !== cur.key) return;
+        cur.need.add(p.id);
+        for (const c of cur.chunks) this.sendRaw(p, c);
+        if (cur.done) this.sendTo(p, { t: 'songEnd', key: cur.key });
+        else if (!cur.uploading) {
+          const by = this.players.get(cur.item.by);
+          if (!by) return;
+          cur.uploading = true;
+          this.sendTo(by, { t: 'upload', key: cur.key, lib: cur.item.meta.lib });
+        }
+        break;
+      case 'songEnd':
+        if (!cur || p.id !== cur.item.by || cur.done || m.key !== cur.key) return;
+        if (cur.received !== cur.item.meta.size) return this.sendTo(p, { t: 'err', msg: '音源を送りきれませんでした' });
+        cur.done = true;
+        for (const id of cur.need) { const o = this.players.get(id); if (o) this.sendTo(o, { t: 'songEnd', key: cur.key }); }
+        break;
+      case 'ok':
+        p.ok = !!m.on;
+        this.maybeCountdown();
         this.roster();
-        this.lobby();
+        break;
+      case 'course':
+        p.course = clean(m.c, 12);
+        this.roster();
+        break;
+      case 'start': {
+        // 部屋主: 準備OK を待たずに始める（全員が曲を受け取っていれば）
+        if (!host || this.phase !== 'wait' || !cur) return;
+        if ([...this.players.values()].some((o) => o.conn && !o.ready)) return this.sendTo(p, { t: 'err', msg: '曲を受け取っていない人がいます' });
+        this.startGame();
+        break;
+      }
+      case 'host': {
+        // 部屋主を渡す
+        const o = this.players.get(String(m.p));
+        if (!host || !o || o === p) return;
+        this.hostId = o.id;
+        this.roster();
         break;
       }
       case 'st':
@@ -256,18 +410,18 @@ export class RoomCore {
         break;
       case 'watch': {
         // 途中から入った人: 今のプレイを観戦する（曲の 0 秒の時刻と、ここまでの判定）
-        if (this.phase !== 'play' || !this.song || !this.songDone || p.inGame) return;
-        const players = [...this.round.entries()].map(([id, r]) => ({ p: id, name: r.name, s: r.s, c: r.c, g: r.g, j: r.j, status: r.status }));
-        this.sendTo(p, { t: 'watch', zero: this.zero, key: this.song.key, players });
+        if (this.phase !== 'play' || !cur || p.inGame) return;
+        const players = [...this.round.entries()].map(([id, r]) => ({ p: id, name: r.name, course: r.course, s: r.s, c: r.c, g: r.g, j: r.j, status: r.status }));
+        this.sendTo(p, { t: 'watch', zero: this.zero, key: cur.key, players });
         break;
       }
       case 'fin': {
         if (this.phase !== 'play' || !p.inGame) return;
         const r = (m.r ?? {}) as Record<string, number>;
         const n = (k: string) => Math.max(0, Math.floor(Number(r[k]) || 0));
-        this.results.set(p.id, { name: p.name, score: n('score'), good: n('good'), ok: n('ok'), bad: n('bad'), maxCombo: n('maxCombo'), rolls: n('rolls') });
+        this.results.set(p.id, { name: p.name, course: p.course, score: n('score'), good: n('good'), ok: n('ok'), bad: n('bad'), maxCombo: n('maxCombo'), rolls: n('rolls') });
         p.inGame = false;
-        { const r = this.round.get(p.id); if (r) r.status = 'fin'; }
+        { const x = this.round.get(p.id); if (x) x.status = 'fin'; }
         this.broadcast({ t: 'fin', p: p.id }, p);
         this.maybeFinish();
         break;
@@ -276,7 +430,7 @@ export class RoomCore {
         // プレイの途中でやめた
         if (this.phase !== 'play' || !p.inGame) return;
         p.inGame = false;
-        { const r = this.round.get(p.id); if (r) r.status = 'quit'; }
+        { const x = this.round.get(p.id); if (x) x.status = 'quit'; }
         this.broadcast({ t: 'quit', p: p.id }, p);
         this.maybeFinish();
         break;
@@ -285,7 +439,7 @@ export class RoomCore {
         const o = this.players.get(String(m.p));
         if (!o || o.id === p.id) return;
         this.sendTo(o, { t: 'kicked' });
-        o.conn.close(4001, 'kicked');
+        o.conn?.close(4001, 'kicked');
         this.leave(o);
         break;
       }
@@ -305,16 +459,78 @@ export class RoomCore {
     }
   }
 
-  /** 部屋主から届いた音源のかけら */
+  /** 予約から次の曲を決めて、全員に「持っているか」聞く */
+  private advance(force?: QItem) {
+    if (this.phase !== 'wait' || this.current) return;
+    let item = force;
+    if (!item) {
+      if (!this.queue.length) return;
+      let i = 0;
+      if (this.settings.pick === 'random') i = Math.floor(Math.random() * this.queue.length);
+      else if (this.settings.pick === 'turn') {
+        // 前に選ばれた人の次の人から順に、予約がある人
+        const ids = [...this.players.keys()];
+        const start = ids.indexOf(this.lastBy);
+        for (let k = 1; k <= ids.length; k++) {
+          const id = ids[(start + k + ids.length) % ids.length];
+          const j = this.queue.findIndex((x) => x.by === id);
+          if (j >= 0) { i = j; break; }
+        }
+      }
+      item = this.queue.splice(i, 1)[0];
+    } else this.queue = this.queue.filter((x) => x.qid !== item!.qid);
+    this.lastBy = item.by;
+    const key = `${item.qid}-${this.now().toString(36)}`;
+    this.current = { item, key, uploading: false, done: item.meta.size === 0, chunks: [], received: 0, need: new Set() };
+    for (const o of this.players.values()) { o.ready = false; o.ok = false; o.course = item.meta.course; }
+    this.broadcast({ t: 'next', meta: { ...item.meta, key }, by: item.by });
+    this.roster();
+  }
+
+  /** 予約した人から届いた音源のかけら（持っていない人にだけ配る。後から入った人のためにためておく） */
   private audioChunk(p: Player, data: ArrayBuffer) {
-    if (p.id !== this.hostId || !this.song || this.songDone || this.phase !== 'wait') return;
-    if (this.received + data.byteLength > this.song.size) {
+    const cur = this.current;
+    if (!cur || p.id !== cur.item.by || cur.done || this.phase !== 'wait') return;
+    if (cur.received + data.byteLength > cur.item.meta.size) {
       this.sendTo(p, { t: 'err', msg: '音源の大きさが合いません' });
       return;
     }
-    this.chunks.push(data);
-    this.received += data.byteLength;
-    for (const o of this.players.values()) if (o !== p) o.conn.send(data);
+    cur.chunks.push(data);
+    cur.received += data.byteLength;
+    for (const id of cur.need) { const o = this.players.get(id); if (o) this.sendRaw(o, data); }
+  }
+
+  /** 全員が曲を受け取って準備OK なら、カウントダウンして始める（だれかが取り消したらやめる） */
+  private maybeCountdown() {
+    const ps = [...this.players.values()].filter((o) => o.conn);
+    const go = this.settings.auto && this.phase === 'wait' && !!this.current && ps.length > 0 && ps.every((o) => o.ready && o.ok);
+    if (go && !this.countdown) {
+      const at = this.now() + COUNTDOWN_MS;
+      this.countdown = { at, timer: setTimeout(() => { this.countdown = null; this.startGame(); }, COUNTDOWN_MS) };
+    } else if (!go) this.cancelCountdown();
+  }
+
+  private cancelCountdown() {
+    if (!this.countdown) return;
+    clearTimeout(this.countdown.timer);
+    this.countdown = null;
+  }
+
+  private startGame() {
+    const cur = this.current;
+    if (this.phase !== 'wait' || !cur) return;
+    this.cancelCountdown();
+    this.phase = 'play';
+    this.zero = this.now() + LEAD_MS;
+    this.results.clear();
+    this.round.clear();
+    const ps = [...this.players.values()].filter((o) => o.conn && o.ready);
+    for (const o of ps) this.round.set(o.id, { name: o.name, course: o.course, s: 0, c: 0, g: 0, j: [], status: '' });
+    for (const o of ps) { o.inGame = true; o.lastSt = this.zero; }
+    this.startWatchdog();
+    const list = ps.map((o) => ({ p: o.id, name: o.name, course: o.course }));
+    this.broadcast({ t: 'start', zero: this.zero, key: cur.key, players: list });
+    this.roster();
   }
 
   private maybeFinish() {
@@ -357,16 +573,48 @@ export class RoomCore {
     this.finishTimer = null;
     if (this.phase !== 'play') return;
     this.phase = 'wait';
-    for (const o of this.players.values()) o.inGame = false;
+    for (const o of this.players.values()) { o.inGame = false; o.ready = false; o.ok = false; }
     const list = [...this.results.entries()].map(([p, r]) => ({ p, ...r })).sort((a, b) => b.score - a.score);
-    this.broadcast({ t: 'results', list });
+    // 通算成績（1 位は 1 回ずつ。同点はどちらも 1 位）
+    const top = list[0]?.score ?? -1;
+    for (const r of list) {
+      const o = this.players.get(r.p);
+      const key = o?.cid ?? r.p;
+      const s = this.standings.get(key) ?? { name: r.name, total: 0, wins: 0, plays: 0 };
+      s.name = r.name;
+      s.total += r.score;
+      s.plays++;
+      if (r.score === top && list.length > 1) s.wins++;
+      this.standings.set(key, s);
+    }
+    const cur = this.current;
+    if (cur) {
+      this.history.unshift({ title: cur.item.meta.title, course: cur.item.meta.course, level: cur.item.meta.level, at: this.now(), list });
+      if (this.history.length > 20) this.history.pop();
+      this.last = cur.item;
+    }
+    this.broadcast({ t: 'results', list, history: this.history });
+    this.current = null;
+    // 次の予約があれば、すぐに準備を始める（受け取りを待つ時間を減らす）
+    this.advance();
     this.roster();
-    this.lobby();
   }
 
   private roster() {
-    const players = [...this.players.values()].map((o) => ({ p: o.id, name: o.name, ready: o.ready, inGame: o.inGame }));
-    this.broadcast({ t: 'roster', host: this.hostId, players, phase: this.phase, song: this.song ? { key: this.song.key, title: this.song.title, course: this.song.course, level: this.song.level } : null });
+    const players = [...this.players.values()].map((o) => ({ p: o.id, name: o.name, ready: o.ready, ok: o.ok, inGame: o.inGame, course: o.course, away: !o.conn }));
+    const cur = this.current;
+    this.broadcast({
+      t: 'roster',
+      host: this.hostId,
+      players,
+      phase: this.phase,
+      settings: this.settings,
+      queue: this.queue.map((x) => ({ qid: x.qid, by: x.by, byName: x.byName, title: x.meta.title, subtitle: x.meta.subtitle, course: x.meta.course, level: x.meta.level })),
+      song: cur ? { key: cur.key, title: cur.item.meta.title, subtitle: cur.item.meta.subtitle, course: cur.item.meta.course, level: cur.item.meta.level, by: cur.item.by, byName: cur.item.byName } : null,
+      last: this.last ? { title: this.last.meta.title, by: this.last.by } : null,
+      countdown: this.countdown ? this.countdown.at : 0,
+      standings: [...this.standings.values()].sort((a, b) => b.total - a.total),
+    });
     this.lobby();
   }
 
@@ -380,14 +628,22 @@ export class RoomCore {
       max: MAX_PLAYERS,
       playing: this.phase === 'play',
       locked: !!this.pass,
-      song: this.song?.title ?? '',
+      song: this.current?.item.meta.title ?? '',
       updatedAt: this.now(),
     });
   }
 
   private sendTo(p: Player, m: object) {
     try {
-      p.conn.send(JSON.stringify(m));
+      p.conn?.send(JSON.stringify(m));
+    } catch {
+      // 切れている
+    }
+  }
+
+  private sendRaw(p: Player, d: ArrayBuffer) {
+    try {
+      p.conn?.send(d);
     } catch {
       // 切れている
     }
@@ -398,7 +654,7 @@ export class RoomCore {
     for (const o of this.players.values()) {
       if (o === except) continue;
       try {
-        o.conn.send(s);
+        o.conn?.send(s);
       } catch {
         // 切れている
       }

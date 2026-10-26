@@ -95,14 +95,15 @@ export class Room extends DurableObject<Env> {
       },
     };
     const q = url.searchParams;
-    const p = core.join(conn, { name: q.get('name') ?? '', create: q.get('create') === '1', title: q.get('title') ?? '', pass: q.get('pass') ?? '' });
+    const p = core.join(conn, { name: q.get('name') ?? '', create: q.get('create') === '1', title: q.get('title') ?? '', pass: q.get('pass') ?? '', cid: q.get('cid') ?? '' });
     if (typeof p === 'string') {
       server.send(JSON.stringify({ t: 'denied', msg: p }));
       server.close(4003, 'denied');
       return new Response(null, { status: 101, webSocket: client });
     }
     server.addEventListener('message', (e) => core.message(p, e.data as string | ArrayBuffer));
-    const bye = () => core.leave(p);
+    // 切れても少しのあいだ席を残す（入り直したら同じ席に戻る）
+    const bye = () => core.disconnect(p, conn);
     server.addEventListener('close', bye);
     server.addEventListener('error', bye);
     // 一覧から消えないよう、人がいるあいだは 2 分ごとに知らせ直す

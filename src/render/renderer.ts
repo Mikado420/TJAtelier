@@ -87,6 +87,10 @@ export interface Opponent {
   /** 最後に判定したとき */
   fx: { j: number; t: number; i: number } | null;
   status: '' | 'fin' | 'quit' | 'lost';
+  /** 遊んでいる難易度（パネルに出す。Easy / Normal / Hard / Oni / Edit） */
+  course?: string;
+  /** 自分と違う難易度で遊んでいるとき: その難易度の譜面（音符の位置はこれで求める） */
+  lane?: { game: Game; course: Course; vis: number[]; bars: number[] };
 }
 
 /** ゲージが満タンのときの虹色（毎フレーム色の文字列を作らないよう前もって作っておく） */
@@ -876,8 +880,26 @@ export class Renderer {
       ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, rowH);
       ctx.clip();
       // レーンの動かない部分は背景に、パネルは HUD に描いてある
-      this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
-      this.drawOppBurst(o, game, wall);
+      const L = o.lane;
+      if (L) {
+        // 違う難易度: その難易度の音符・小節線の位置を求めて描く（流れ方もその難易度のもの）
+        const keep = { vn: this.visNotes, vb: this.visBars, bn: this.beatNow, sm: this.scrollMode };
+        this.visNotes = L.vis;
+        this.visBars = L.bars;
+        this.beatNow = L.course.beatPoints?.length ? beatAt(L.course.beatPoints, now) : null;
+        this.scrollMode = this.beatNow !== null ? L.course.scrollMode : undefined;
+        this.computeVis(L.game, L.course.bars, now, right);
+        const lgogo = L.course.gogo.some(([a, b]) => now >= a && now < b);
+        this.drawLane({ ...V, x1: right }, L.game, L.course.bars, now, lgogo, wall, o);
+        this.drawOppBurst(o, L.game, wall);
+        this.visNotes = keep.vn;
+        this.visBars = keep.vb;
+        this.beatNow = keep.bn;
+        this.scrollMode = keep.sm;
+      } else {
+        this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
+        this.drawOppBurst(o, game, wall);
+      }
       ctx.restore();
       this.drawOppJudgeText(o, wall);
       ctx.restore();
@@ -993,6 +1015,17 @@ export class Renderer {
     ctx.fillRect(gx + 3 + (gw - 6) * (CLEAR_LINE / 100), LANE_TOP + 12, 3, 24);
     // 良・可・不可
     this.paintCounts(o.good, o.ok, o.bad);
+    // 難易度
+    if (o.course) {
+      const CN: Record<string, [string, string]> = { Easy: ['かんたん', '#e8603c'], Normal: ['ふつう', '#8cc63e'], Hard: ['むずかしい', '#1fa59a'], Oni: ['おに', '#c8337e'], Edit: ['うら', '#7b4bd0'] };
+      const [label, col] = CN[o.course] ?? [o.course, '#3b4045'];
+      ctx.fillStyle = col;
+      roundRect(ctx, 14, LANE_TOP + 92, 138, 36, 8);
+      ctx.fill();
+      ctx.font = `900 22px ${FONT}`;
+      ctx.textAlign = 'center';
+      outlinedText(ctx, label, 83, LANE_TOP + 111, '#fff', '#2a1208', 5);
+    }
     // コンボ太鼓
     this.paintComboDrum(o.combo, 1);
     // 名札（色の丸・状態の帯・名前の帯）
