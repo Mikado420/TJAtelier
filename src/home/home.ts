@@ -391,15 +391,16 @@ export class Home {
   /** 並べる枠（かんたん・ふつう・むずかしい・おに）。おにの枠は裏おにと入れ替わる */
   private diffSlots(s: SongEntry) {
     const has = (n: string) => s.courses.find((c) => c.name === n);
+    // 4 枚いつも並べる。無い難易度は灰色（level = -1）で、選べない
     const slots: { slot: string; name: string; level: number }[] = [];
     for (const n of ['Easy', 'Normal', 'Hard']) {
       const c = has(n);
-      if (c) slots.push({ slot: n, name: n, level: c.level });
+      slots.push({ slot: n, name: n, level: c ? c.level : -1 });
     }
     const oni = has('Oni');
     const ura = has('Edit');
     const show = this.diffUra && ura ? ura : oni ?? ura;
-    if (show) slots.push({ slot: 'Oni', name: show.name, level: show.level });
+    slots.push(show ? { slot: 'Oni', name: show.name, level: show.level } : { slot: 'Oni', name: 'Oni', level: -1 });
     return { slots, canUra: !!(oni && ura) };
   }
 
@@ -408,7 +409,7 @@ export class Home {
     if (!s) return;
     const o = this.host.playOpts();
     const { slots, canUra } = this.diffSlots(s);
-    const sel = slots.find((x) => x.name === this.diffCourse);
+    const sel = slots.find((x) => x.name === this.diffCourse && x.level >= 0);
     const bars = (n: number) => [0, 1, 2].map((k) => `<rect x="${8 + k * 12}" y="${30 - k * 9}" width="7" height="${10 + k * 9}" fill="${k < n ? '#fff' : 'rgba(255,255,255,0.3)'}"/>`).join('');
     const ICON_D: Record<string, string> = {
       Easy: bars(1), Normal: bars(2), Hard: bars(3),
@@ -417,12 +418,13 @@ export class Home {
     };
     const DARK: Record<string, string> = { Easy: '#9c3a20', Normal: '#4f7a1e', Hard: '#11615a', Oni: '#7a1a4a', Edit: '#2e1660' };
     const cards = slots.map((c) => {
-      const on = c.name === this.diffCourse;
+      const none = c.level < 0;
+      const on = !none && c.name === this.diffCourse;
       const meter = Array.from({ length: 10 }, (_, k) => `<i class="${k < c.level ? 'on' : ''}"></i>`).join('');
       const label = c.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[c.name] ?? c.name;
-      return `<button class="hdf-card ${on ? 'on' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
+      return `<button class="hdf-card ${on ? 'on' : ''} ${none ? 'none' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
         <svg viewBox="0 0 48 48" aria-hidden="true">${ICON_D[c.name] ?? ''}</svg>
-        <span>${esc(label)}</span><b>★${c.level}</b><em class="hdf-meter">${meter}</em>
+        <span>${esc(label)}</span><b>★${none ? '-' : c.level}</b><em class="hdf-meter">${meter}</em>
         ${c.slot === 'Oni' && canUra && c.name !== 'Edit' ? '<small class="hdf-uraok">裏あり</small>' : ''}
         ${c.name === 'Edit' ? '<small class="hdf-urab">裏</small>' : ''}
         ${on ? '<u>1P</u>' : ''}</button>`;
@@ -478,6 +480,7 @@ export class Home {
   private async onDiffClick(t: HTMLElement) {
     const card = t.closest<HTMLElement>('[data-dcourse]');
     if (card) {
+      if (card.classList.contains('none')) return; // 無い難易度
       const c = card.dataset.dcourse!;
       if (c === this.diffCourse) {
         // 選んでいるおにをもう一度: 裏おにがあれば入れ替える（無ければ何もしない）

@@ -1927,3 +1927,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   .home-diff .hdf-box, .home-diff .hdf-foot { left: 10px; }
 }
 .home-diff .hdf-cards { grid-auto-columns: minmax(0, 150px); justify-content: center; }
+/* 無い難易度: 灰色で、選べない */
+.home .hdf-card.none { background: linear-gradient(#4a4f55, #2c3035) !important; color: rgba(255, 255, 255, 0.45) !important; opacity: 0.6; cursor: default; }
+.home .hdf-card.none svg { opacity: 0.35; }
+.home-diff .hdf-cards { grid-auto-columns: minmax(0, 1fr); justify-content: stretch; }
