@@ -3,7 +3,7 @@
  * 右の青い面に選んだフォルダの操作か、選んだ曲（BPM・試聴・「この曲にする」「編集」）。
  */
 import type { AudioEngine } from '../audio/audio';
-import { closeCurtain, openCurtain } from '../ui/curtain';
+import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
@@ -461,6 +461,7 @@ export class Home {
     const isOpen = this.open && this.keyOf(this.folder) === key;
     this.fbar = key;
     this.focus = 'folder';
+    this.host.audio.playUi('folder');
     if (isOpen) this.open = false;
     else {
       this.folder = key === ALL ? null : key;
@@ -647,6 +648,8 @@ export class Home {
     try {
       await closeCurtain({ title: s.title, sub: s.subtitle, course: `${course === 'Edit' ? 'おに（裏）' : COURSE_SHORT[course] ?? course} ${lv}`, color: COURSE_COLOR[course] });
       this.closeDiff();
+      // 曲名を 3 秒見せてから始める
+      await holdCurtain(3000);
       await this.host.open(s.id, 'play', course);
     } finally {
       this.starting = false;

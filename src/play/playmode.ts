@@ -692,6 +692,7 @@ export class PlayMode {
     for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);
     for (const [el] of targets) el.textContent = '0';
     R.classList.remove('hidden');
+    this.audio.playUi('result');
     // 数え上げ（0.35 秒後から 0.8 秒かけて）→ 背景が明るくなり、王冠と吹き出しが出る（CSS）
     const t0 = performance.now() + 350;
     const step = () => {

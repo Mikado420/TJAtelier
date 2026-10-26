@@ -1,3 +1,4 @@
+import { setUiSound } from './ui/curtain';
 import { OnlineScreen } from './online/online';
 import { saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
@@ -85,6 +86,8 @@ const settings = {
   volMusic: 1,
   volHit: 0.8,
   volMetro: 1.2,
+  /** 画面の音（タップ・フォルダ・結果・曲名） */
+  volUi: 1,
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
@@ -145,7 +148,7 @@ view.playSpeed = settings.speed;
 settings.evShow = Object.assign({ bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true }, settings.evShow);
 view.evShow = settings.evShow;
 view.onEventTap = (items) => openEvents(items);
-const applyMix = () => audio.setMix({ music: settings.volMusic, hit: settings.volHit, metro: settings.volMetro });
+const applyMix = () => audio.setMix({ music: settings.volMusic, hit: settings.volHit, metro: settings.volMetro, ui: settings.volUi });
 /** ハイスピードを変えたら、自分で拡大率を変えていない限りエディタの間隔も合わせる */
 const applyPlayZoom = () => {
   view.playSpeed = settings.speed;
@@ -161,6 +164,20 @@ view.onResize = onViewResize;
 onViewResize();
 if (settings.zoomSet) view.zoom = Math.min(2400, Math.max(20, settings.zoom));
 applyMix();
+// 画面の音（タップ・フォルダの開け閉め・結果・曲名）
+for (const n of ['tap', 'folder', 'result', 'title']) void audio.loadUi(n, `sfx/${n}.mp3`);
+setUiSound((n) => audio.playUi(n));
+/** タップで鳴らすもの（プレイ中の太鼓は鳴らさない。フォルダの帯はフォルダの音） */
+const TAP_SEL = 'button, a[href], input, select, summary, label, [data-song], [data-h], [data-dcourse], [role="button"], .hr';
+document.addEventListener('pointerdown', (e) => {
+  const t = e.target as HTMLElement | null;
+  if (!t || !t.closest) return;
+  const play = document.getElementById('play');
+  if (play && !play.classList.contains('hidden') && play.contains(t) && !t.closest('.pause-menu, #playPause')) return;
+  if (t.closest('[data-fbar], [data-fopen], .hfb-add')) { if (t.closest('.hfb-add')) audio.playUi('tap'); return; }
+  if (!t.closest(TAP_SEL)) return;
+  audio.playUi('tap');
+}, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
 
 let playable: Note[] = [];
@@ -1331,7 +1348,8 @@ function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}
     ${stRange('volHit', '打音', 0, 2, 0.05, settings.volHit, 100, '%')}
-    ${stRange('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, 100, '%')}`;
+    ${stRange('volMetro', 'メトロノーム', 0, 2, 0.05, settings.volMetro, 100, '%')}
+    ${stRange('volUi', '画面の音', 0, 2, 0.05, settings.volUi, 100, '%')}`;
 }
 
 /** 設定の欄が変わったとき（スライダー・数字の欄・スイッチ）。変わったら true */

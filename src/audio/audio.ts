@@ -13,6 +13,8 @@ export class AudioEngine {
   private readonly musicGain = this.ctx.createGain();
   private readonly sfxGain = this.ctx.createGain();
   private readonly metroGain = this.ctx.createGain();
+  /** 画面の音（タップ・フォルダ・結果・曲名） */
+  private readonly uiGain = this.ctx.createGain();
   /** 音量を上げたときに音が割れないように、最後に通す（強い音だけ抑える） */
   private readonly limiter: DynamicsCompressorNode | null =
     typeof this.ctx.createDynamicsCompressor === 'function' ? this.ctx.createDynamicsCompressor() : null;
@@ -30,6 +32,7 @@ export class AudioEngine {
     this.musicGain.connect(out);
     this.sfxGain.connect(out);
     this.metroGain.connect(out);
+    this.uiGain.connect(out);
     this.applyMix();
   }
 
@@ -39,13 +42,34 @@ export class AudioEngine {
 
   /** 揃える先の大きさ（短い区間の RMS） */
   private static readonly TARGET = 0.2;
-  private mix = { music: 1, hit: 1, metro: 1.2 };
+  private mix = { music: 1, hit: 1, metro: 1.2, ui: 1 };
   private musicLevel = 0;
   private hitLevel: Record<HitSound, number> = { don: 0, ka: 0, balloon: 0 };
 
+  // ---------- 画面の音 ----------
+  private uiBufs = new Map<string, AudioBuffer>();
+  /** 画面の音を読み込む（失敗しても何もしない） */
+  async loadUi(name: string, url: string) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      this.uiBufs.set(name, await this.ctx.decodeAudioData(await res.arrayBuffer()));
+    } catch { /* 鳴らせない */ }
+  }
+  /** 画面の音を鳴らす */
+  playUi(name: string) {
+    const buf = this.uiBufs.get(name);
+    if (!buf || this.mix.ui <= 0) return;
+    if (this.ctx.state !== 'running') void this.ctx.resume();
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.uiGain);
+    src.start();
+  }
+
   /** 音量の比率（音源・打音・メトロノーム）を変える */
-  setMix(m: { music: number; hit: number; metro: number }) {
-    this.mix = { ...m };
+  setMix(m: { music: number; hit: number; metro: number; ui?: number }) {
+    this.mix = { ...m, ui: m.ui ?? this.mix.ui };
     this.applyMix();
   }
 
@@ -54,6 +78,7 @@ export class AudioEngine {
     const music = this.musicLevel > 0 ? Math.min(6, T / this.musicLevel) : 0.8;
     this.musicGain.gain.value = music * this.mix.music;
     this.sfxGain.gain.value = this.mix.hit;
+    this.uiGain.gain.value = 0.6 * this.mix.ui;
     // メトロノームの音の大きさは、音を作ったとき（初めて鳴らすとき）に測る
     this.metroGain.gain.value = this.mix.metro * (this.metroLv > 0 ? Math.min(20, T / this.metroLv) : 1);
   }

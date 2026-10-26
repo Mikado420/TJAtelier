@@ -15,6 +15,11 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let el: HTMLElement | null = null;
+/** 曲名が出た時刻 */
+let shownAt = 0;
+let sound: (name: string) => void = () => {};
+/** 曲名が出たときに鳴らす音 */
+export function setUiSound(f: (name: string) => void) { sound = f; }
 
 /** 幕を閉じる（閉じ終わったら解決） */
 export async function closeCurtain(info: { title: string; sub?: string; course?: string; color?: string }) {
@@ -28,7 +33,17 @@ export async function closeCurtain(info: { title: string; sub?: string; course?:
   el = c;
   void c.offsetWidth;
   c.classList.add('in');
-  await wait(700);
+  // 曲名の帯が出るところで音を鳴らす
+  await wait(450);
+  shownAt = performance.now();
+  sound('title');
+  await wait(250);
+}
+
+/** 曲名を出してから ms たつまで待つ */
+export async function holdCurtain(ms: number) {
+  const left = shownAt + ms - performance.now();
+  if (left > 0) await wait(left);
 }
 
 /** 幕を開ける（プレイ画面が見える） */
