@@ -1630,3 +1630,37 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home .ha-btns .ha-ok:disabled { opacity: 0.4; }
 .home .ha-in::selection { background: var(--accent); color: #fff; -webkit-text-fill-color: #fff; }
 .ha-err:empty { display: none; }
+
+/* ---------- ポーズ画面: 1 画面に詰め込まず、縦にスクロールしてゆったり見せる ---------- */
+.play .pause-menu {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  align-items: flex-start;
+  touch-action: pan-y;
+}
+.play .pause-menu * { touch-action: pan-y; }
+.play .pause-menu input[type=range] { touch-action: none; }
+.pause-menu .panel.pm {
+  height: auto;
+  max-height: none;
+  margin: auto;
+  overflow: visible;
+  grid-template-rows: auto;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.6fr);
+  width: min(900px, calc(100% - 24px));
+}
+.pm-main { position: sticky; top: 0; align-self: start; min-height: 0; overflow: visible; padding: 16px; gap: 8px; }
+.pause-menu .pm-main button:last-child { margin-top: 12px; }
+.pm-set { overflow: visible; padding: 8px 22px 24px; }
+.pm-set h3 { margin: 18px 0 4px; font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: var(--accent-hi); }
+.pm-set h3:first-child { margin-top: 8px; }
+.pause-menu .pm-set .st-row { min-height: 54px; gap: 14px; font-size: 15px; padding: 4px 0; }
+.pause-menu .pm-set .st-row > span { min-width: 104px; }
+.pause-menu .pm-set .st-seg button { height: 38px; font-size: 13px; }
+.pause-menu .pm-set input[type=range] { height: 32px; }
+.pause-menu .pm-set .st-num input { height: 36px; width: 72px; font-size: 15px; }
+@media (max-width: 640px) {
+  .pause-menu .panel.pm { grid-template-columns: 1fr; }
+  .pm-main { position: static; }
+}

@@ -9,7 +9,7 @@ import { writeTJA } from '../chart/tjaWrite';
 import { listSongs, loadSongAudio, loadSongData, type SongEntry } from '../io/library';
 import type { PlayMode } from '../play/playmode';
 import type { Opponent } from '../render/renderer';
-import { listRooms, newRoomId, OnlineClient, type ResultRow, type RoomInfo, type Roster, type SongMeta } from './net';
+import { listRooms, newRoomId, OnlineClient, type ResultRow, type RoomInfo, type Roster, type SongMeta, type WatchPlayer } from './net';
 
 export interface OnlineHost {
   audio: AudioEngine;
@@ -249,7 +249,7 @@ export class OnlineScreen {
       ${tr ? `<div class="ol-prog"><span>${esc(tr.label)} ${Math.round(tr.ratio * 100)}%</span><i style="width:${(tr.ratio * 100).toFixed(1)}%"></i></div>` : ''}
       <div class="ol-go">
         ${this.waiting ? '<p class="ol-wait">ほかの人が終わるのを待っています…</p>'
-          : R.phase === 'play' ? '<p class="ol-wait">プレイ中です。終わるまで待ってください</p>'
+          : R.phase === 'play' ? (this.song ? '<button class="ol-btn primary big" data-ol="watch">観戦する</button><small>いま遊んでいる人のプレイを見られます</small>' : '<p class="ol-wait">プレイ中です。曲を受け取っています…</p>')
           : amHost ? `<button class="ol-btn primary big" data-ol="start" ${s && allReady && !tr ? '' : 'disabled'}>スタート</button>${s && !allReady ? '<small>全員が曲を受け取るまで待ってください</small>' : ''}`
           : `<p class="ol-wait">${s ? (this.song ? '部屋主のスタートを待っています' : '曲を受け取っています…') : ''}</p>`}
       </div>
@@ -324,6 +324,7 @@ export class OnlineScreen {
     if (a === 'pickClose') { this.picking = null; this.renderSong(); return; }
     if (b.dataset.pick) { await this.chooseSong(b.dataset.pick, b.dataset.course!); return; }
     if (a === 'start') { this.client?.send({ t: 'start' }); return; }
+    if (a === 'watch') { this.client?.send({ t: 'watch' }); return; }
     if (a === 'resClose') { this.results = null; this.render(); return; }
   }
 
@@ -420,6 +421,7 @@ export class OnlineScreen {
       },
       songReady: (meta, bytes) => void this.receiveSong(meta, bytes),
       start: (zero, key, players) => void this.startGame(zero, key, players),
+      watch: (zero, key, players) => void this.startGame(zero, key, players, true),
       state: (s) => {
         const o = this.opponents.get(s.p);
         if (!o) return;
@@ -522,10 +524,10 @@ export class OnlineScreen {
   }
 
   /** 全員同時にスタート */
-  private async startGame(zero: number, key: string, players: { p: string; name: string }[]) {
+  private async startGame(zero: number, key: string, players: (Partial<WatchPlayer> & { p: string; name: string })[], spectate = false) {
     const c = this.client;
     if (!c || !this.song || this.song.meta.key !== key) {
-      this.host.toast('曲が届いていないので、今回は見学です');
+      this.host.toast(spectate ? '曲を受け取ってから観戦できます' : '曲が届いていないので、今回は見学です');
       return;
     }
     const { meta, chart } = this.song;
@@ -537,24 +539,34 @@ export class OnlineScreen {
     const opps: Opponent[] = [];
     for (const p of players) {
       if (p.p === c.me) continue;
-      const o: Opponent = { id: p.p, name: p.name, score: 0, combo: 0, gauge: 0, good: 0, ok: 0, bad: 0, marks: new Uint8Array(course.notes.length), fx: null, status: '' };
+      const o: Opponent = { id: p.p, name: p.name, score: p.s ?? 0, combo: p.c ?? 0, gauge: p.g ?? 0, good: 0, ok: 0, bad: 0, marks: new Uint8Array(course.notes.length), fx: null, status: p.status ?? '' };
+      // 観戦: ここまでの判定を入れておく
+      for (const [i, j] of p.j ?? []) {
+        if (!(i >= 0 && i < o.marks.length) || j < 0 || j > 2 || o.marks[i]) continue;
+        o.marks[i] = j + 1;
+        if (j === 0) o.good++;
+        else if (j === 1) o.ok++;
+        else o.bad++;
+      }
       this.opponents.set(p.p, o);
       opps.push(o);
     }
+    if (spectate && !opps.length) { this.host.toast('観戦できる人がいません'); return; }
     this.playingNow = true;
     this.hide();
     await this.host.play.startOnline(course, { title: meta.title, course: meta.course, level: meta.level }, c.toPerf(zero), {
-      send: (m) => c.send(m),
+      send: (m) => { if (!spectate) c.send(m); },
       opponents: opps,
+      spectate,
       onFinish: (stats) => {
         this.playingNow = false;
-        c.send({ t: 'fin', r: stats });
-        this.waiting = !this.results;
+        if (!spectate) c.send({ t: 'fin', r: stats });
+        this.waiting = !this.results && (!spectate || this.roster?.phase === 'play');
         this.open();
       },
       onQuit: () => {
         this.playingNow = false;
-        c.send({ t: 'quit' });
+        if (!spectate) c.send({ t: 'quit' });
         this.waiting = false;
         this.open();
       },

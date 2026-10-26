@@ -47,6 +47,8 @@ export interface ResultRow { p: string; name: string; score: number; good: numbe
 /** プレイ中に届くほかの人の様子。j = 新しく判定した音符 [音符の番号, 0 良 / 1 可 / 2 不可] */
 export interface PlayState { p: string; s: number; c: number; g: number; j: [number, number][] }
 
+export interface WatchPlayer { p: string; name: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }
+
 export interface Handlers {
   roster(r: Roster): void;
   /** 曲の受け取りが始まった（部屋主以外） */
@@ -56,6 +58,8 @@ export interface Handlers {
   /** 曲を全部受け取った */
   songReady(meta: SongMeta, audio: Uint8Array | null): void;
   start(zero: number, key: string, players: { p: string; name: string }[]): void;
+  /** 観戦: 今のプレイの曲の 0 秒の時刻と、参加している人のここまでの様子 */
+  watch(zero: number, key: string, players: WatchPlayer[]): void;
   state(s: PlayState): void;
   fin(p: string): void;
   quit(p: string): void;
@@ -204,6 +208,7 @@ export class OnlineClient {
         break;
       case 'start': this.on.start?.(Number(m.zero), String(m.key), m.players as { p: string; name: string }[]); break;
       case 'st': this.on.state?.(m as unknown as PlayState); break;
+      case 'watch': this.on.watch?.(Number(m.zero), String(m.key), m.players as WatchPlayer[]); break;
       case 'fin': this.on.fin?.(String(m.p)); break;
       case 'quit': this.on.quit?.(String(m.p)); break;
       case 'results': this.on.results?.(m.list as ResultRow[]); break;

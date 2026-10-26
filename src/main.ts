@@ -1750,8 +1750,10 @@ play.onPauseOpen = () => {
   $('pauseBack').textContent = play.isOnline ? 'やめる' : 'エディタへ';
   $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー（曲は止まりません）' : 'ポーズ';
   $('pauseSettings').innerHTML = `
+    <h3>プレイ</h3>
     ${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}
     ${playSettingRows()}
+    <h3>音量</h3>
     ${volumeRows()}`;
 };
 $('pauseSettings').addEventListener('click', (e) => {

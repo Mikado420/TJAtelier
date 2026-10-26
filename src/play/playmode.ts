@@ -52,6 +52,8 @@ export interface OnlineHooks {
   onFinish(stats: { score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }): void;
   /** 途中でやめた */
   onQuit(): void;
+  /** 観戦（自分は叩かず、参加している人のレーンだけを見る） */
+  spectate?: boolean;
 }
 
 /**
@@ -88,7 +90,7 @@ export class PlayMode {
       },
       (kind, side, at, pt) => {
         // オートのときは叩いた入力を受け付けない
-        if (!this.active || this.paused || !this.game || this.auto) return;
+        if (!this.active || this.paused || !this.game || this.auto || this.spectating) return;
         // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）
         if (this.hitOn) this.audio.playHit(kind);
         this.renderer.pushHit(kind, side);
@@ -137,6 +139,11 @@ export class PlayMode {
   private lastSent = 0;
   private lastSentKey = '';
 
+  /** オンライン対戦を観戦している */
+  private get spectating() {
+    return !!this.online?.spectate;
+  }
+
   get isOnline() {
     return !!this.online;
   }
@@ -163,6 +170,7 @@ export class PlayMode {
     };
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
+    this.renderer.spectate = !!hooks.spectate;
     this.renderer.setOpponents(hooks.opponents);
     this.renderer.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
@@ -218,6 +226,7 @@ export class PlayMode {
     postNative({ type: 'play', active: false });
     cancelAnimationFrame(this.raf);
     this.audio.stop();
+    this.renderer.spectate = false;
     this.renderer.setOpponents([]);
     this.leaveScreen();
     o.onQuit();
@@ -349,7 +358,7 @@ export class PlayMode {
         this.autoPlay(game, now);
       }
       game.update(now);
-      if (this.online) this.sendOnline(game);
+      if (this.online && !this.spectating) this.sendOnline(game);
       this.renderer.draw(game, course, now, info);
       const w = performance.now() - t0;
       P.frames++;
@@ -368,9 +377,9 @@ export class PlayMode {
   private applyInputMode() {
     // Expo Go のアプリの中ではアプリが指を受け取るので、指置きはいらない（Safari などでは設定のとおり）
     const coarse = isNativeHost() || matchMedia('(pointer: coarse)').matches;
-    const restZone = !isNativeHost() && coarse && !!this.settings.restZone && !this.auto;
+    const restZone = !isNativeHost() && coarse && !!this.settings.restZone && !this.auto && !this.spectating;
     // オートのときは叩かないので、タッチ用の太鼓も出さない
-    const touch = coarse && !this.auto;
+    const touch = coarse && !this.auto && !this.spectating;
     const padVisible = this.settings.padVisible !== false;
     const R = this.renderer;
     const changed = R.restZone !== restZone || R.touch !== touch || R.padVisible !== padVisible;
@@ -422,6 +431,8 @@ export class PlayMode {
       // オンライン対戦は止められない（メニューだけ出す。曲は流れ続ける）
       this.onPauseOpen();
       this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
+      // メニューの間は、アプリ（Expo Go）が指を横取りしないようにする（スライダーなどを触れるように）
+      postNative({ type: 'play', active: false });
       return;
     }
     this.paused = true;
@@ -429,6 +440,8 @@ export class PlayMode {
     this.timeFloor = this.time();
     cancelAnimationFrame(this.raf);
     this.audio.stop();
+    // メニューの間は、アプリ（Expo Go）が指を横取りしないようにする（スライダー・数字の欄・スイッチを触れるように）
+    postNative({ type: 'play', active: false });
     this.onPauseOpen();
     this.paintPauseMode();
     this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
@@ -454,8 +467,11 @@ export class PlayMode {
   }
 
   private hidePause() {
+    const wasOpen = !this.root.querySelector('#pauseMenu')?.classList.contains('hidden');
     this.paused = false;
     this.root.querySelector('#pauseMenu')?.classList.add('hidden');
+    // 続けるときは、またアプリが指を受け取る
+    if (wasOpen && this.active) postNative({ type: 'play', active: true });
   }
 
   /** 描画の重さの記録（結果画面の診断用） */
@@ -501,8 +517,9 @@ export class PlayMode {
     if (!g) return;
     if (this.online) {
       const o = this.online;
-      this.sendOnline(g, true);
+      if (!o.spectate) this.sendOnline(g, true);
       this.online = null;
+      this.renderer.spectate = false;
       this.renderer.setOpponents([]);
       this.leaveScreen();
       const s = g.stats;

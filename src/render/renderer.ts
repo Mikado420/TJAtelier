@@ -227,11 +227,35 @@ export class Renderer {
     this.hudKeys.clear();
   }
 
+  /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
+  spectate = false;
+
+  /** 観戦のとき: 画面に入る音符・小節線の位置だけ求める（自分のレーンは描かない） */
+  private computeVis(game: Game, bars: Course['bars'], now: number, right: number) {
+    const far = right * 1.5;
+    this.visBars.length = 0;
+    for (const b of bars) {
+      const x = this.xOf(b.time, b.beat, b, now);
+      if (x >= LANE_X && x <= far) this.visBars.push(x);
+    }
+    const vis = this.visNotes;
+    vis.length = 0;
+    const states = game.states;
+    for (let i = states.length - 1; i >= 0; i--) {
+      const n = states[i].note;
+      const x = this.xOf(n.time, n.beat, n, now);
+      const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
+      if (endX < LANE_X - 120 || x > far + 120) continue;
+      vis.push(i, x, endX);
+    }
+  }
+
   /** 相手の段の位置（上の端）と縮める割合 */
   private rowGeom(n: number) {
     const rowH = TEXT_BOTTOM - LANE_TOP + 12;
     const gap = 8;
-    const top0 = TEXT_BOTTOM + 12;
+    // 観戦のときは、自分のレーンの場所から並べる
+    const top0 = this.spectate ? LANE_TOP - 6 : TEXT_BOTTOM + 12;
     const k = Math.min(1, (REF_H - top0) / (this.opponents.length * (rowH + gap)));
     return { top: top0 + n * (rowH + gap) * k, k, rowH };
   }
@@ -243,7 +267,7 @@ export class Renderer {
     const hc = h.getContext('2d')!;
     for (let n = 0; n < this.opponents.length; n++) {
       const o = this.opponents[n];
-      const no = n + 2;
+      const no = this.spectate ? n + 1 : n + 2;
       const key = `${no}|${o.name}|${o.score}|${o.combo}|${o.good}|${o.ok}|${o.bad}|${Math.round(o.gauge)}|${o.status}`;
       if (this.hudKeys.get(o.id) === key) continue;
       this.hudKeys.set(o.id, key);
@@ -374,7 +398,7 @@ export class Renderer {
     c.restore();
     c.fillStyle = '#120c0a';
     c.fillRect(V.x0, V.y1 - 70, V.x1 - V.x0, 4);
-    this.paintLaneBase(c, V.x1);
+    if (!this.spectate) this.paintLaneBase(c, V.x1);
     // オンライン対戦の相手のレーンの動かない部分
     for (let n = 0; n < this.opponents.length; n++) {
       const { top, k } = this.rowGeom(n);
@@ -593,6 +617,18 @@ export class Renderer {
 
     this.drawTop(V, gogo, wall);
     this.drawTitle(info);
+    if (this.spectate) {
+      // 観戦: 自分のレーンは無く、参加している人のレーンを上から並べる
+      this.computeVis(game, bars, now, V.x1);
+      this.drawOpponents(V, game, bars, now, gogo, wall);
+      ctx.font = `900 40px ${FONT}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      outlinedText(ctx, '観戦中', 150, LANE_TOP - 70, '#fff', '#3a1300', 8);
+      ctx.restore();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      return;
+    }
     // オンライン対戦では下は相手のレーンなので、花びら・花火は描かない
     if (!this.opponents.length) {
       this.drawBottom(V, wall);
@@ -895,6 +931,7 @@ export class Renderer {
 
   /** 2P・3P・4P の色（パネルの上と下、名札の丸） */
   private static readonly PLAYER_COLOR: Record<number, [string, string, string]> = {
+    1: ['#e9452f', '#c9301f', '#e8352b'],
     2: ['#3f8be8', '#2563c4', '#1f5fd0'],
     3: ['#34b26f', '#1f8a52', '#1d9a5a'],
     4: ['#e8a032', '#c27c18', '#d98a10'],

@@ -122,7 +122,7 @@ export function bindInput(
 
   const onTouch = (e: TouchEvent) => {
     // 終了ボタンなどのボタンはふつうに押せるようにする
-    if (e.target instanceof Element && e.target.closest('button')) return;
+    if (e.target instanceof Element && e.target.closest('button, .pause-menu')) return;
     if (e.cancelable && !attached) e.preventDefault();
     if (e.type === 'touchcancel') touchStats.cancels++;
     const raw = (list: Touch[]) =>
@@ -169,12 +169,12 @@ export function bindInput(
   };
 
   const block = (e: Event) => {
-    if (e.target instanceof Element && e.target.closest('button')) return;
+    if (e.target instanceof Element && e.target.closest('button, .pause-menu')) return;
     e.preventDefault();
   };
 
   const onPointer = (e: PointerEvent) => {
-    if (e.target instanceof Element && e.target.closest('button')) return;
+    if (e.target instanceof Element && e.target.closest('button, .pause-menu')) return;
     if (e.pointerType === 'touch') {
       touchStats.pointers++;
       onRaw(`p-down ${e.pointerId % 1000}@${pos(e.clientX, e.clientY)} lag=${lag(e.timeStamp)}`, eventTime(e.timeStamp));

@@ -84,6 +84,8 @@ export class RoomCore {
   private zero = 0;
   private results = new Map<string, { name: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }>();
   private finishTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 今のプレイに参加した人の様子（途中から入った人が観戦できるように、判定をためておく） */
+  private round = new Map<string, { name: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }>();
   private seq = 0;
 
   constructor(
@@ -134,6 +136,7 @@ export class RoomCore {
 
   leave(p: Player) {
     if (!this.players.delete(p.id)) return;
+    { const r = this.round.get(p.id); if (r && !r.status) r.status = 'lost'; }
     this.results.delete(p.id);
     if (this.hostId === p.id) {
       // 部屋主が抜けたら、次に古い人が部屋主になる（曲はそのまま）
@@ -218,6 +221,8 @@ export class RoomCore {
         this.phase = 'play';
         this.zero = this.now() + LEAD_MS;
         this.results.clear();
+        this.round.clear();
+        for (const o of this.players.values()) this.round.set(o.id, { name: o.name, s: 0, c: 0, g: 0, j: [], status: '' });
         for (const o of this.players.values()) o.inGame = true;
         const list = [...this.players.values()].map((o) => ({ p: o.id, name: o.name }));
         this.broadcast({ t: 'start', zero: this.zero, key: this.song.key, players: list });
@@ -228,14 +233,32 @@ export class RoomCore {
       case 'st':
         // プレイ中の様子（点数・コンボ・ゲージと、新しく判定した音符）を中継する
         if (this.phase !== 'play' || !p.inGame) return;
-        this.broadcast({ t: 'st', p: p.id, s: m.s, c: m.c, g: m.g, j: Array.isArray(m.j) ? m.j.slice(0, 200) : [] }, p);
+        {
+          const j = Array.isArray(m.j) ? (m.j.slice(0, 200) as unknown[]).filter((x): x is [number, number] => Array.isArray(x) && x.length === 2).map(([a, b]) => [Math.floor(Number(a)) || 0, Math.floor(Number(b)) || 0] as [number, number]) : [];
+          const r = this.round.get(p.id);
+          if (r) {
+            r.s = Number(m.s) || 0;
+            r.c = Number(m.c) || 0;
+            r.g = Number(m.g) || 0;
+            if (r.j.length < 20000) r.j.push(...j);
+          }
+          this.broadcast({ t: 'st', p: p.id, s: r?.s ?? 0, c: r?.c ?? 0, g: r?.g ?? 0, j }, p);
+        }
         break;
+      case 'watch': {
+        // 途中から入った人: 今のプレイを観戦する（曲の 0 秒の時刻と、ここまでの判定）
+        if (this.phase !== 'play' || !this.song || !this.songDone || p.inGame) return;
+        const players = [...this.round.entries()].map(([id, r]) => ({ p: id, name: r.name, s: r.s, c: r.c, g: r.g, j: r.j, status: r.status }));
+        this.sendTo(p, { t: 'watch', zero: this.zero, key: this.song.key, players });
+        break;
+      }
       case 'fin': {
         if (this.phase !== 'play' || !p.inGame) return;
         const r = (m.r ?? {}) as Record<string, number>;
         const n = (k: string) => Math.max(0, Math.floor(Number(r[k]) || 0));
         this.results.set(p.id, { name: p.name, score: n('score'), good: n('good'), ok: n('ok'), bad: n('bad'), maxCombo: n('maxCombo'), rolls: n('rolls') });
         p.inGame = false;
+        { const r = this.round.get(p.id); if (r) r.status = 'fin'; }
         this.broadcast({ t: 'fin', p: p.id }, p);
         this.maybeFinish();
         break;
@@ -244,6 +267,7 @@ export class RoomCore {
         // プレイの途中でやめた
         if (this.phase !== 'play' || !p.inGame) return;
         p.inGame = false;
+        { const r = this.round.get(p.id); if (r) r.status = 'quit'; }
         this.broadcast({ t: 'quit', p: p.id }, p);
         this.maybeFinish();
         break;
