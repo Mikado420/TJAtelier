@@ -274,11 +274,11 @@ export class Home {
       const songRow = (s: SongEntry, inner: string) => {
         const cs = sortCourses(s.courses);
         const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
-        const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
         const cr = topCrown(bm, s);
-        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${pk ? '' : `<span class="hr-acts">
-          <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
-          <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`}</div>`;
+        // 詳しいところ（難易度・操作のボタン）は、選んでいる曲の帯にだけ入れる（曲が多くても軽いように）
+        const on = s.id === this.sel && this.focus === 'song' && !pk;
+        const d = on ? this.rowDetail(s, bm) : { x: '', acts: '' };
+        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -433,12 +433,27 @@ export class Home {
     const L = this.list;
     const mid = L.scrollTop + L.clientHeight / 2;
     const h = Math.max(1, L.clientHeight / 2);
-    for (const r of Array.from(L.querySelectorAll<HTMLElement>('.hr'))) {
+    // 先に位置を全部読んでから書く（読む・書くを交互にすると、そのたびに配置の計算が走って重い）
+    const rows = Array.from(L.querySelectorAll<HTMLElement>('.hr'));
+    const ds: [HTMLElement, string][] = [];
+    for (const r of rows) {
       const c = r.offsetTop + r.offsetHeight / 2;
       if (Math.abs(c - mid) > L.clientHeight) continue;
-      const d = Math.min(1.4, Math.abs(c - mid) / h);
-      r.style.setProperty('--d', d.toFixed(3));
+      ds.push([r, Math.min(1.4, Math.abs(c - mid) / h).toFixed(2)]);
     }
+    for (const [r, d] of ds) if (r.style.getPropertyValue('--d') !== d) r.style.setProperty('--d', d);
+  }
+
+  /** 選んでいる曲の帯に入れる、難易度のチップと操作のボタン */
+  private rowDetail(s: SongEntry, bm: Record<string, { crown: Crown }>) {
+    const cs = sortCourses(s.courses);
+    const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
+    return {
+      x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span>`,
+      acts: `<span class="hr-acts">
+          <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
+          <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`,
+    };
   }
 
   /** 曲を選ぶ（一覧を作り直さずに、選んでいる帯と右の面だけ変える） */
@@ -446,7 +461,15 @@ export class Home {
     this.sel = id;
     this.focus = 'song';
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
-    this.list.querySelector(`[data-song="${id}"]`)?.classList.add('on');
+    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
+    const row = this.list.querySelector<HTMLElement>(`[data-song="${id}"]`);
+    const s0 = this.songs.find((q) => q.id === id);
+    if (row && s0 && !this.picking) {
+      const d = this.rowDetail(s0, bestMap());
+      row.querySelector('.hr-t')?.insertAdjacentHTML('beforeend', d.x);
+      row.insertAdjacentHTML('beforeend', d.acts);
+    }
+    row?.classList.add('on');
     this.render(false, false);
     // 選んだ帯が広がるので、まんなかへ寄せ直す
     if (scroll) this.centerSel(true);
@@ -462,6 +485,7 @@ export class Home {
     // フォルダを選んでいるあいだは曲を鳴らさない
     this.stopPreview();
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
+    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
     this.list.querySelector(`[data-fbar="${CSS.escape(key)}"]`)?.classList.add('on');
     this.render(false, false);
     if (scroll) this.centerSel(true);

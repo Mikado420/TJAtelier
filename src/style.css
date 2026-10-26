@@ -2161,3 +2161,5 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .splash.out .spl-base { animation: splHide 0s 0.33s forwards; }
 @keyframes splHide { to { visibility: hidden; } }
 .splash.out { pointer-events: none; }
+/* 曲が多くても軽いように: 画面の外の帯は描かない */
+.home .hr:not(.on) { content-visibility: auto; contain-intrinsic-size: auto 44px; }

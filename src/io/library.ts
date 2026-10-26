@@ -139,3 +139,12 @@ export async function deleteFolder(name: string) {
   await dbPut(kFolders, fs.filter((f) => !inFolderTree(f, name)));
   await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, name)) ? { ...x, folders: x.folders.filter((f) => !inFolderTree(f, name)) } : x)));
 }
+
+/** バックアップから戻す: 曲を、同じ id のまま入れる（同じ id の曲があれば置き換える） */
+export async function restoreSong(entry: SongEntry, data: SongData, audio: AudioFile | null) {
+  await dbPut(kChart(entry.id), data);
+  if (audio) await dbPut(kAudio(entry.id), audio);
+  else await dbDel(kAudio(entry.id));
+  await writeIndex((list) => [...list.filter((x) => x.id !== entry.id), norm(entry)]);
+  for (const f of norm(entry).folders) await addFolder(f);
+}

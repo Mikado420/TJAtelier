@@ -1,0 +1,26 @@
+name: package-lock.json を作り直す
+
+# 手で動かす（依存を変えたとき）。npm の一覧を固定するファイルを作って、main にコミットする
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install --package-lock-only --no-audit --no-fund
+      - name: コミット
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git diff --cached --quiet && echo "変更なし" && exit 0
+          git commit -m "package-lock.json を作り直す"
+          git push

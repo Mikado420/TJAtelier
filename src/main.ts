@@ -30,7 +30,8 @@ import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
 import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, newId, saveSong, setCurrentId } from './io/library';
 import { Home } from './home/home';
-import { writeZip } from './io/zip';
+import { isZip, readZip, writeZip } from './io/zip';
+import { exportBackup, importBackup, isBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
 import { fitRoot, localPoint, typing } from './orient';
 import { BUILD_ID, startAutoUpdate } from './update';
@@ -1137,6 +1138,13 @@ function renderSheet() {
           <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>
         </section>
       </div>
+      <section class="an-card st-card st-data">
+        <h3>データ</h3>
+        <div class="st-btns">
+          <button data-act="backup">バックアップを書き出す</button>
+          <button data-act="restore">バックアップから戻す</button>
+        </div>
+      </section>
       <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
   } else if (sheet === 'cut') {
     renderCutSheet(body);
@@ -1544,6 +1552,32 @@ async function convertAudio(a: AudioFile, label = a.name): Promise<{ file: Audio
 /** 読み込み: .tja・.zip・音源を何でも。譜面は新しい曲として一覧に入れ、音源はすべて .ogg にする */
 async function importFiles(files: File[], mode: 'any' | 'audio') {
   busy('読み込んでいます…');
+  // バックアップの .zip は、曲の一覧に戻す
+  const rest: File[] = [];
+  let restored = 0;
+  for (const f of files) {
+    const buf = await f.arrayBuffer();
+    if (isZip(buf)) {
+      const entries = await readZip(buf);
+      if (isBackup(entries)) {
+        busy('バックアップから戻しています…');
+        restored += await importBackup(entries);
+        continue;
+      }
+    }
+    rest.push(f);
+  }
+  if (restored || !rest.length) {
+    if (!rest.length) {
+      busyEnd();
+      closeSheet();
+      toast(restored ? `バックアップから ${restored} 曲を戻しました` : '読み込めるファイルがありませんでした');
+      if (restored) await home.show(null);
+      return;
+    }
+    toast(`バックアップから ${restored} 曲を戻しました`);
+  }
+  files = rest;
   const r = await loadFiles(files);
   const folder = home.visible ? home.currentFolder : '';
   const added: string[] = [];
@@ -1704,6 +1738,22 @@ async function fileAction(act: string) {
     const name = COURSE_NAMES.find((n) => !used.has(n)) ?? 'Edit';
     ed.addCourse(name, act === 'dupCourse' ? ed.course.level : 1, act === 'dupCourse' ? ed.course : undefined);
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
+  } else if (act === 'backup') {
+    busy('バックアップを作っています…', 0);
+    try {
+      const r = await exportBackup(async (blob, name) => {
+        download(blob, name);
+        await new Promise((res) => setTimeout(res, 1500));
+      }, (p) => busy('バックアップを作っています…', p));
+      busyEnd();
+      toast(r.parts > 1 ? `${r.songs} 曲を ${r.parts} つのファイルに書き出しました（戻すときは全部選んでください）` : `${r.songs} 曲を書き出しました`);
+    } catch (err) {
+      busyEnd();
+      toast(`書き出せませんでした: ${(err as Error).message}`);
+    }
+  } else if (act === 'restore') {
+    closeSheet();
+    pickFiles('any');
   } else if (act === 'calibrate') {
     stopPlayback();
     closeSheet();
