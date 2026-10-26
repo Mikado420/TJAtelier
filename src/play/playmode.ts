@@ -338,6 +338,7 @@ export class PlayMode {
   private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[]; lastNote?: number } | null = null;
   /** 曲の終わりの帯を出した時刻（performance.now()。0 = まだ） */
   private endWall = 0;
+  private endHold = 3000;
   private paused = false;
   private pausedAt = 0;
   private timeFloor = -Infinity;
@@ -375,9 +376,10 @@ export class PlayMode {
         this.endWall = performance.now();
         const st = game.stats;
         const fc = st.bad === 0 && game.totalHitNotes > 0;
-        this.renderer.showEnd(fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail');
+        this.endHold = this.renderer.showEnd(fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail');
       }
-      if (now > endAt || (this.endWall && performance.now() - this.endWall > 3000)) {
+      // 帯を出したら、曲が終わっても帯を見せきってから結果へ
+      if (this.endWall ? performance.now() - this.endWall > this.endHold : now > endAt) {
         this.finish();
         return;
       }

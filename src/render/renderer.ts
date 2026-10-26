@@ -1,5 +1,6 @@
 import { beatAt, jposAt, scrollAhead, type Course, type Note } from '../chart/types';
 import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type NoteState } from '../engine/game';
+import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
 
 /**
@@ -250,81 +251,11 @@ export class Renderer {
     }
   }
 
-  /** 曲の終わりの帯（レーンの上に、ふくらみながら出る） */
+  /** 曲の終わりの帯（Failed... / Clear! / Fullcombo!! / Perfect!!!） */
   private drawEnd(V: Rect, wall: number) {
     const f = this.endFx;
     if (!f) return;
-    const ms = wall - f.t;
-    const ctx = this.ctx;
-    const x0 = LANE_X;
-    const x1 = V.x1;
-    const cy = (LANE_TOP + LANE_BOTTOM) / 2;
-    const h = LANE_BOTTOM - LANE_TOP + 20;
-    const open = ease(Math.min(1, ms / 220));
-    ctx.save();
-    // 帯
-    const cols: Record<typeof f.kind, [string, string]> = {
-      allgood: ['#fff3a8', '#ffb21a'],
-      fc: ['#ffe27a', '#e8901a'],
-      clear: ['#ff9a5a', '#d8402a'],
-      fail: ['#7d8aa8', '#3d4560'],
-    };
-    const [c1, c2] = cols[f.kind];
-    const g = ctx.createLinearGradient(0, cy - h / 2, 0, cy + h / 2);
-    g.addColorStop(0, c1);
-    g.addColorStop(1, c2);
-    ctx.globalAlpha = 0.95;
-    ctx.fillStyle = g;
-    ctx.fillRect(x0, cy - (h / 2) * open, x1 - x0, h * open);
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillRect(x0, cy - (h / 2) * open, x1 - x0, 6 * open);
-    ctx.fillRect(x0, cy + (h / 2) * open - 6, x1 - x0, 6 * open);
-    ctx.globalAlpha = 1;
-    if (ms > 120) {
-      const mid = (x0 + x1) / 2;
-      // 後ろで回る光の筋（全良・フルコンボ）
-      if (f.kind === 'allgood' || f.kind === 'fc') {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x0, cy - h / 2, x1 - x0, h);
-        ctx.clip();
-        ctx.translate(mid, cy);
-        ctx.rotate(ms / 1400);
-        ctx.fillStyle = 'rgba(255,255,255,0.28)';
-        for (let i = 0; i < 12; i++) {
-          ctx.rotate(Math.PI / 6);
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.lineTo(900, -60);
-          ctx.lineTo(900, 60);
-          ctx.closePath();
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-      // 文字（ぽんと大きくなってから落ち着く）
-      const k = Math.min(1, (ms - 120) / 180);
-      const pop = k < 1 ? 0.4 + 0.8 * ease(k) : 1.2 - 0.2 * Math.min(1, (ms - 300) / 160);
-      const text = { allgood: '全良！', fc: 'フルコンボ！', clear: 'クリア成功', fail: 'クリア失敗' }[f.kind];
-      ctx.translate(mid, cy + 4);
-      ctx.scale(pop, pop);
-      ctx.font = `900 112px ${FONT}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      let fill: string | CanvasGradient = '#fff';
-      if (f.kind === 'allgood') {
-        const r = ctx.createLinearGradient(-300, 0, 300, 0);
-        ['#ff5a7a', '#ffb13a', '#ffe94a', '#5ee07a', '#4ac8ff', '#9a7bff'].forEach((c, i, a) => r.addColorStop(i / (a.length - 1), c));
-        fill = r;
-      } else if (f.kind === 'fc') {
-        const r = ctx.createLinearGradient(0, -56, 0, 56);
-        r.addColorStop(0, '#fffbe0');
-        r.addColorStop(1, '#ffc21a');
-        fill = r;
-      } else if (f.kind === 'fail') fill = '#dfe6f5';
-      outlinedText(ctx, text, 0, 0, fill, f.kind === 'fail' ? '#1b2238' : '#5a1500', 16);
-    }
-    ctx.restore();
+    drawEndFx(this.ctx, f.kind, wall - f.t, { x0: LANE_X, x1: V.x1, top: LANE_TOP, bottom: LANE_BOTTOM, vx0: V.x0, vy0: V.y0, vx1: V.x1, vy1: V.y1 });
   }
 
   /** 相手の段の位置（上の端）と縮める割合 */
@@ -605,9 +536,11 @@ export class Renderer {
   }
 
   /** 曲の終わりの帯（クリア成功・クリア失敗・フルコンボ・全良） */
-  private endFx: { kind: 'allgood' | 'fc' | 'clear' | 'fail'; t: number } | null = null;
-  showEnd(kind: 'allgood' | 'fc' | 'clear' | 'fail') {
+  private endFx: { kind: EndKind; t: number } | null = null;
+  /** 帯を出す。見せる長さ（ms）を返す */
+  showEnd(kind: EndKind) {
     this.endFx = { kind, t: performance.now() };
+    return END_HOLD[kind];
   }
 
   reset() {
