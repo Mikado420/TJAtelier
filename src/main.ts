@@ -1702,10 +1702,14 @@ async function applyHitSound(kind: HitSound, f: AudioFile) {
 
 // ---------- テストプレイ ----------
 
+/** 曲えらびから直接プレイした（結果画面の「もどる」で曲えらびへ） */
+let playFromHome = false;
+
 /** 最後に「最初から」で始めたか（結果画面の「もう一度」で同じ所から始める） */
 let lastTestFromStart = true;
 
 async function startTest(fromStart = lastTestFromStart) {
+  $('back').textContent = playFromHome ? '曲えらびへ' : 'エディタへ戻る';
   lastTestFromStart = fromStart;
   stopPlayback();
   closeSheet();
@@ -1752,7 +1756,13 @@ $('applyCalib').addEventListener('click', () => {
   $('applyCalib').closest('.calib')!.classList.add('hidden');
   toast(`判定調整を ${settings.offset}ms にしました`);
 });
-$('back').addEventListener('click', () => play.close());
+$('back').addEventListener('click', () => {
+  play.close();
+  if (playFromHome) {
+    playFromHome = false;
+    void (async () => { await persist(); await home.show(currentSongId); })();
+  }
+});
 // ポーズ: 左上のボタン。つづける／はじめから（曲の最初から）／エディタへ
 $('playPause').addEventListener('click', () => play.pause());
 $('pauseResume').addEventListener('click', () => void play.resume());
@@ -1760,7 +1770,7 @@ $('pauseRetry').addEventListener('click', () => void (play.lastWasCalibration ? 
 // ポーズの画面の設定（変えたら今のプレイにすぐ反映）
 play.onPauseOpen = () => {
   // オンライン対戦: 曲は止まらない。やりなおし・オートは無く、「やめる」で部屋に戻る
-  $('pauseBack').textContent = play.isOnline ? 'やめる' : 'エディタへ';
+  $('pauseBack').textContent = play.isOnline ? 'やめる' : playFromHome ? '曲えらびへ' : 'エディタへ';
   $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー（曲は止まりません）' : 'ポーズ';
   $('pauseSettings').innerHTML = `
     <h3>プレイ</h3>
@@ -1783,7 +1793,14 @@ $('pauseSettings').addEventListener('input', (e) => onPauseSetting(e, false));
 $('pauseSettings').addEventListener('change', (e) => onPauseSetting(e, true));
 play.onSettingsChange = saveSettings;
 $('pauseRestart').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest(true)));
-$('pauseBack').addEventListener('click', () => (play.isOnline ? play.quitOnline() : play.close()));
+$('pauseBack').addEventListener('click', () => {
+  if (play.isOnline) { play.quitOnline(); return; }
+  play.close();
+  if (playFromHome) {
+    playFromHome = false;
+    void (async () => { await persist(); await home.show(currentSongId); })();
+  }
+});
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
 play.onExit = () => view.invalidate();
 
@@ -1843,9 +1860,14 @@ function audioLength(a: AudioFile): Promise<number> {
 }
 
 /** 一覧の曲をエディタで開く（play ならそのままテストプレイ） */
-async function openSong(id: string, mode: 'edit' | 'play') {
+async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   const data = await loadSongData(id);
   if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
+  if (course) {
+    const ci = data.chart.courses.findIndex((c) => c.name === course);
+    if (ci >= 0) data.courseIndex = ci;
+  }
+  playFromHome = mode === 'play';
   clearTimeout(saveTimer);
   stopPlayback();
   currentSongId = id;
@@ -1892,6 +1914,13 @@ const online = new OnlineScreen({
 const home = new Home({
   audio,
   open: openSong,
+  playOpts: () => ({ speed: settings.speed, auto: !!settings.auto }),
+  setPlayOpt: (k, v) => {
+    if (k === 'speed') settings.speed = v as number;
+    else settings.auto = v as boolean;
+    saveSettings();
+    if (k === 'speed') applyPlayZoom();
+  },
   importFiles: () => pickFiles('any'),
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),

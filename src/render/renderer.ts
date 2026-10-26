@@ -378,9 +378,9 @@ export class Renderer {
   private paintLaneBase(c: CanvasRenderingContext2D, right: number) {
     c.fillStyle = '#000';
     c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, TEXT_BOTTOM - LANE_TOP + 12);
-    c.fillStyle = '#272727';
+    c.fillStyle = '#1b2025';
     c.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
-    c.fillStyle = '#838383';
+    c.fillStyle = '#5d6f7a';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, TEXT_BOTTOM - LANE_BOTTOM);
     c.fillStyle = '#000';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, 4);
@@ -400,81 +400,60 @@ export class Renderer {
     c.rect(0, 0, REF_W, REF_H);
     c.clip();
     const V = this.vis;
-    // 上の模様
-    c.fillStyle = (this.topTile && c.createPattern(this.topTile, 'repeat')) || '#e43b55';
+    // 上: 濃紺に青の斜線
+    const tg = c.createLinearGradient(0, V.y0, 0, LANE_TOP);
+    tg.addColorStop(0, '#172a37');
+    tg.addColorStop(1, '#0e1820');
+    c.fillStyle = tg;
     c.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
-    // 下の背景（夜店の並ぶお祭りの通り。オリジナルの簡単な絵）
-    const top = TEXT_BOTTOM;
-    const bot = V.y1 - 70;
-    const g = c.createLinearGradient(0, top, 0, bot);
-    g.addColorStop(0, '#5a0d12');
-    g.addColorStop(0.55, '#9c1d1b');
-    g.addColorStop(1, '#c8352a');
-    c.fillStyle = g;
-    c.fillRect(V.x0, top, V.x1 - V.x0, V.y1 - top);
-    // 屋台（紅白のひさし・台）
-    const stallW = 360;
-    for (let x = Math.floor(V.x0 / stallW) * stallW; x < V.x1; x += stallW) {
-      const sx = x + 20;
-      const sw = stallW - 40;
-      c.fillStyle = '#3a0a0c';
-      c.fillRect(sx + 8, top + 150, sw - 16, bot - top - 150);
-      // 台の紅白の幕
-      for (let k = 0; k < 8; k++) {
-        c.fillStyle = k % 2 ? '#f4efe6' : '#d8261f';
-        c.fillRect(sx + 8 + (k * (sw - 16)) / 8, bot - 150, (sw - 16) / 8 + 1, 150);
-      }
-      // ひさし
-      for (let k = 0; k < 6; k++) {
-        c.fillStyle = k % 2 ? '#f4efe6' : '#e2322a';
-        c.beginPath();
-        const ax = sx + (k * sw) / 6;
-        c.moveTo(ax, top + 100);
-        c.lineTo(ax + sw / 6, top + 100);
-        c.lineTo(ax + sw / 6, top + 150);
-        c.quadraticCurveTo(ax + sw / 12, top + 172, ax, top + 150);
-        c.closePath();
-        c.fill();
-      }
-      c.fillStyle = '#2a0607';
-      c.fillRect(sx, top + 94, sw, 8);
-      // 店先の明かり
-      const lg = c.createRadialGradient(sx + sw / 2, top + 240, 10, sx + sw / 2, top + 240, 150);
-      lg.addColorStop(0, 'rgba(255,200,110,0.45)');
-      lg.addColorStop(1, 'rgba(255,200,110,0)');
-      c.fillStyle = lg;
-      c.fillRect(sx, top + 110, sw, 260);
-    }
-    // 提灯の列
-    c.strokeStyle = 'rgba(30,0,0,0.7)';
-    c.lineWidth = 3;
+    c.strokeStyle = 'rgba(77,159,190,0.16)';
+    c.lineWidth = 4;
     c.beginPath();
-    c.moveTo(V.x0, top + 30);
-    for (let x = V.x0; x <= V.x1 + 160; x += 160) c.quadraticCurveTo(x + 80, top + 62, x + 160, top + 30);
-    c.stroke();
-    for (let x = Math.floor(V.x0 / 160) * 160 + 80; x < V.x1; x += 160) {
-      const y = top + 70;
-      const glow = c.createRadialGradient(x, y, 4, x, y, 60);
-      glow.addColorStop(0, 'rgba(255,240,180,0.55)');
-      glow.addColorStop(1, 'rgba(255,240,180,0)');
-      c.fillStyle = glow;
-      c.fillRect(x - 60, y - 60, 120, 120);
-      c.fillStyle = (x / 160) % 3 < 1 ? '#f6f0d8' : '#ffe08a';
-      c.beginPath();
-      c.ellipse(x, y, 22, 27, 0, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = '#2a0607';
-      c.fillRect(x - 11, y - 31, 22, 7);
-      c.fillRect(x - 11, y + 24, 22, 7);
+    const tan = Math.tan((8 * Math.PI) / 180);
+    for (let x = V.x0 - 200; x < V.x1 + 60; x += 34) {
+      c.moveTo(x, LANE_TOP);
+      c.lineTo(x + (LANE_TOP - V.y0) * tan, V.y0);
     }
-    // 一番下の帯
-    c.save();
-    c.translate(0, V.y1 - 66);
-    c.fillStyle = (this.bandTile && c.createPattern(this.bandTile, 'repeat')) || '#d6402c';
-    c.fillRect(V.x0, 0, V.x1 - V.x0, 66);
-    c.restore();
-    c.fillStyle = '#120c0a';
-    c.fillRect(V.x0, V.y1 - 70, V.x1 - V.x0, 4);
+    c.stroke();
+    // 下: 暗い夜の床に、青い光の地平線と奥へ続くグリッド
+    const top = TEXT_BOTTOM;
+    const bot = V.y1;
+    const g = c.createLinearGradient(0, top, 0, bot);
+    g.addColorStop(0, '#0f1b24');
+    g.addColorStop(1, '#070a0d');
+    c.fillStyle = g;
+    c.fillRect(V.x0, top, V.x1 - V.x0, bot - top);
+    const hz = top + 40;
+    const glow = c.createLinearGradient(0, hz - 60, 0, hz + 60);
+    glow.addColorStop(0, 'rgba(90,180,214,0)');
+    glow.addColorStop(0.5, 'rgba(90,180,214,0.28)');
+    glow.addColorStop(1, 'rgba(90,180,214,0)');
+    c.fillStyle = glow;
+    c.fillRect(V.x0, hz - 60, V.x1 - V.x0, 120);
+    c.fillStyle = 'rgba(147,205,226,0.8)';
+    c.fillRect(V.x0, hz - 1, V.x1 - V.x0, 2);
+    const vx = (V.x0 + V.x1) / 2;
+    c.strokeStyle = 'rgba(77,159,190,0.32)';
+    c.lineWidth = 2;
+    c.beginPath();
+    for (let k = -14; k <= 14; k++) {
+      c.moveTo(vx + k * 40, hz);
+      c.lineTo(vx + k * 260, bot);
+    }
+    for (let k = 1; k < 12; k++) {
+      const y = hz + (bot - hz) * Math.pow(k / 11, 1.8);
+      c.moveTo(V.x0, y);
+      c.lineTo(V.x1, y);
+    }
+    c.stroke();
+    // ぼんやりした青い光
+    for (const [x, y, r] of [[V.x0 + 260, hz + 10, 260], [V.x1 - 380, hz + 30, 320], [vx, hz - 20, 200]] as const) {
+      const lg = c.createRadialGradient(x, y, 8, x, y, r);
+      lg.addColorStop(0, 'rgba(90,180,214,0.18)');
+      lg.addColorStop(1, 'rgba(90,180,214,0)');
+      c.fillStyle = lg;
+      c.fillRect(x - r, y - r, r * 2, r * 2);
+    }
     if (!this.spectate) this.paintLaneBase(c, V.x1);
     // オンライン対戦の相手のレーンの動かない部分
     for (let n = 0; n < this.opponents.length; n++) {
@@ -570,6 +549,7 @@ export class Renderer {
     };
     for (const [x, y] of [[0, 30], [120, 30], [60, 60], [0, 90], [120, 90], [60, 0], [-60, 60], [180, 60]]) wave(x, y);
     this.topTile = t;
+    void this.topTile;
     this.topPattern = this.ctx.createPattern(t, 'repeat');
 
     // 下の帯: 色違いの市松
@@ -590,6 +570,7 @@ export class Renderer {
       }
     }
     this.bandTile = b;
+    void this.bandTile;
   }
 
   // ---------- 演出の受け口 ----------
@@ -753,7 +734,7 @@ export class Renderer {
       ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
     }
     if (gogo) {
-      ctx.fillStyle = `rgba(255,190,60,${0.16 + 0.08 * Math.sin(wall / 120)})`;
+      ctx.fillStyle = `rgba(120,200,235,${0.14 + 0.07 * Math.sin(wall / 120)})`;
       // レーンの黒い枠（背景の canvas に描いてある）には重ねない
       ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - 8 - V.y0);
       ctx.fillRect(V.x0, LANE_TOP - 8, LANE_X - 6 - V.x0, 8);
@@ -765,7 +746,7 @@ export class Renderer {
     if (this.touch) return;
     const ctx = this.ctx;
     const top = TEXT_BOTTOM;
-    ctx.fillStyle = 'rgba(255,190,215,0.8)';
+    ctx.fillStyle = 'rgba(147,205,226,0.55)';
     for (let i = 0; i < 26; i++) {
       const sp = 40 + (i * 37) % 60;
       const x = V.x0 + (((i * 173 + wall / 1000 * sp * 2) % (V.x1 - V.x0 + 100)) - 50);
@@ -1016,8 +997,8 @@ export class Renderer {
 
   /** 2P・3P・4P の色（パネルの上と下、名札の丸） */
   private static readonly PLAYER_COLOR: Record<number, [string, string, string]> = {
-    1: ['#e9452f', '#c9301f', '#e8352b'],
-    2: ['#3f8be8', '#2563c4', '#1f5fd0'],
+    1: ['#3388b8', '#1d5378', '#3a8fc0'],
+    2: ['#e9452f', '#c9301f', '#e8352b'],
     3: ['#34b26f', '#1f8a52', '#1d9a5a'],
     4: ['#e8a032', '#c27c18', '#d98a10'],
   };
@@ -1283,8 +1264,8 @@ export class Renderer {
       const x0 = Math.min(0, this.vis.x0);
       // 赤いパネル
       const g = ctx.createLinearGradient(0, LANE_TOP - 6, 0, TEXT_BOTTOM);
-      g.addColorStop(0, '#e9452f');
-      g.addColorStop(1, '#c9301f');
+      g.addColorStop(0, '#3388b8');
+      g.addColorStop(1, '#1d5378');
       ctx.fillStyle = g;
       ctx.fillRect(x0, LANE_TOP - 6, LANE_X - x0, TEXT_BOTTOM - LANE_TOP + 12);
       ctx.fillStyle = 'rgba(255,255,255,0.07)';
@@ -1296,7 +1277,7 @@ export class Renderer {
         }
       }
       // スコア欄（左上の暗い帯）
-      ctx.fillStyle = 'rgba(40,0,0,0.55)';
+      ctx.fillStyle = 'rgba(0,12,30,0.5)';
       ctx.fillRect(x0, LANE_TOP - 6, 316 - x0, 62);
 
       // 難易度（丸いバッジ＋下に名前）
@@ -1358,11 +1339,11 @@ export class Renderer {
   }
 
   /** 左下の名札（オリジナルの意匠: 1P の丸・紫の称号の帯・白い名前の帯） */
-  private drawNameplate(badge = '1P', badgeColor = '#e8352b', title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
+  private drawNameplate(badge = '1P', badgeColor = '#3a8fc0', title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
     const y0 = 470;
     // 称号の帯
-    ctx.fillStyle = '#7d3cc8';
+    ctx.fillStyle = '#14212b';
     roundRect(ctx, 46, y0, 290, 28, 14);
     ctx.fill();
     ctx.font = `800 17px ${FONT}`;
@@ -1426,18 +1407,18 @@ export class Renderer {
     this.drawSprite('drum', x - r - 2, y - r - 2, r * 2 + 4, r * 2 + 34, () => {
       const c = this.ctx;
       // 胴
-      c.fillStyle = '#5a1d10';
+      c.fillStyle = '#16203a';
       c.beginPath();
       c.ellipse(x, y + 26, r, r * 0.9, 0, 0, Math.PI * 2);
       c.fill();
-      c.fillStyle = '#a3381f';
+      c.fillStyle = '#34507f';
       c.beginPath();
       c.ellipse(x, y + 18, r * 0.98, r * 0.88, 0, 0, Math.PI * 2);
       c.fill();
       // 面
       c.beginPath();
       c.arc(x, y, r, 0, Math.PI * 2);
-      c.fillStyle = '#3a1810';
+      c.fillStyle = '#121a2c';
       c.fill();
       c.beginPath();
       c.arc(x, y, r * 0.93, 0, Math.PI * 2);
@@ -1510,16 +1491,16 @@ export class Renderer {
     const clearOn = gauge >= CLEAR_LINE;
     this.drawSprite(`gauge:${clearOn}`, G.x1 - 12, G.y1 - 44, G.x2 - G.x1 + 34, G.y2 - G.y1 + 56, () => {
       const c = this.ctx;
-      c.fillStyle = '#1a0d09';
+      c.fillStyle = '#0b1015';
       roundRect(c, G.x1 - 8, G.y1 - 7, G.x2 - G.x1 + 16, G.y2 - G.y1 + 14, 10);
       c.fill();
-      c.fillStyle = '#4a3a12';
+      c.fillStyle = '#1d3442';
       roundRect(c, clearX - 4, G.y1 - 40, G.x2 - clearX + 12, 38, 8);
       c.fill();
       c.font = `800 26px ${FONT}`;
       c.textAlign = 'left';
       c.textBaseline = 'middle';
-      outlinedText(c, 'クリア', clearX + 10, G.y1 - 21, clearOn ? '#ffe25a' : '#b9a46a', '#1a0d09', 5);
+      outlinedText(c, 'クリア', clearX + 10, G.y1 - 21, clearOn ? '#ffe25a' : '#b9a46a', '#0b1015', 5);
     });
 
     // 目盛り
@@ -1532,8 +1513,8 @@ export class Renderer {
       let col: string;
       if (i < filled) {
         if (full) col = RAINBOW[Math.floor((i * 9 + wall / 4) % 360)];
-        else col = clear ? '#ffd21f' : '#ff3d1c';
-      } else col = clear ? '#5a4a1a' : '#5a2418';
+        else col = clear ? '#ffd21f' : '#5ab4d6';
+      } else col = clear ? '#3d3a1e' : '#1d3442';
       ctx.fillStyle = col;
       ctx.fillRect(x + 1, G.y1, segW - 2, G.y2 - G.y1);
       if (i < filled) {
@@ -1550,7 +1531,7 @@ export class Renderer {
       const a = (Math.PI * 2 * i) / 12 + wall / 4000;
       ctx.beginPath();
       ctx.arc(FLOWER.x + Math.cos(a) * fr * 0.7, FLOWER.y + Math.sin(a) * fr * 0.7, fr * 0.3, 0, Math.PI * 2);
-      ctx.fillStyle = i % 2 ? (bright ? '#ffb31a' : '#a4752a') : bright ? '#ff7a1a' : '#8a5022';
+      ctx.fillStyle = i % 2 ? (bright ? '#93cde2' : '#2a5a70') : bright ? '#5ab4d6' : '#1f3a48';
       ctx.fill();
     }
     ctx.beginPath();

@@ -3,13 +3,17 @@
  * （BPM・長さ・難易度・試聴・「プレイ」「編集」）。
  */
 import type { AudioEngine } from '../audio/audio';
+import { closeCurtain, openCurtain } from '../ui/curtain';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
-  /** 曲を開く（編集・プレイ） */
-  open(id: string, mode: 'edit' | 'play'): Promise<void>;
+  /** 曲を開く（編集・プレイ）。course を渡すとその難易度で */
+  open(id: string, mode: 'edit' | 'play', course?: string): Promise<void>;
+  /** 難易度えらびに出す、プレイの設定（ハイスピード・オート） */
+  playOpts(): { speed: number; auto: boolean };
+  setPlayOpt(key: 'speed' | 'auto', v: number | boolean): void;
   /** ファイルを選んで読み込む（読み込んだ曲は一覧に入る） */
   importFiles(): void;
   /** 新しい譜面を作って開く */
@@ -34,6 +38,20 @@ const fmtBpm = (e: SongEntry) => {
   return e.bpmMin !== e.bpmMax ? `${r(e.bpmMin)}-${r(e.bpmMax)}` : r(e.bpm);
 };
 const COURSE_SHORT: Record<string, string> = { Easy: 'かんたん', Normal: 'ふつう', Hard: 'むずかしい', Oni: 'おに', Edit: 'うら' };
+const COURSE_ORDER = ['Easy', 'Normal', 'Hard', 'Oni', 'Edit'];
+const COURSE_COLOR: Record<string, string> = { Easy: 'var(--c-easy)', Normal: 'var(--c-normal)', Hard: 'var(--c-hard)', Oni: 'var(--c-oni)', Edit: 'var(--c-edit)' };
+const sortCourses = (cs: SongEntry['courses']) => [...cs].sort((a, b) => (COURSE_ORDER.indexOf(a.name) + 99) % 99 - (COURSE_ORDER.indexOf(b.name) + 99) % 99);
+const LAST_COURSE = 'malody-web:lastCourse';
+function lastCourse(id: string): string | null {
+  try { return (JSON.parse(localStorage.getItem(LAST_COURSE) ?? '{}') as Record<string, string>)[id] ?? null; } catch { return null; }
+}
+function rememberCourse(id: string, c: string) {
+  try {
+    const m = JSON.parse(localStorage.getItem(LAST_COURSE) ?? '{}') as Record<string, string>;
+    m[id] = c;
+    localStorage.setItem(LAST_COURSE, JSON.stringify(m));
+  } catch { /* 保存できない */ }
+}
 
 /** 曲名から決まる、ジャケットの代わりの斜線の模様（傾きは CSS の --tilt と同じ 8°。曲ごとに変わるのは太さ・間隔・色） */
 function jacket(e: SongEntry) {
@@ -84,6 +102,7 @@ export class Home {
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
+    this.list.addEventListener('scroll', () => this.onListScroll(), { passive: true });
     // 触れた瞬間に音を鳴らせる状態にする（iPhone はタップの中でないと音を出し始められない）
     this.el.addEventListener('pointerdown', () => {
       const ctx = this.host.audio.ctx;
@@ -131,6 +150,7 @@ export class Home {
 
   hide() {
     this.el.classList.add('hidden');
+    document.getElementById('homeDiff')?.classList.add('hidden');
     this.stopPreview();
   }
 
@@ -172,7 +192,7 @@ export class Home {
     return this.sorted(this.songs.filter((s) => this.inView(s)));
   }
 
-  private render(scrollToSel = false) {
+  private render(scrollToSel = false, listToo = true) {
     const songs = this.shown();
     // 左: フォルダ（選んでいるフォルダには「…」で名前の変更・削除）
     const uncat = this.songs.filter((x) => !x.folders.length).length;
@@ -188,14 +208,22 @@ export class Home {
     fl.push(`<button class="hf hf-add" data-h="folder"><span>＋ 新しいフォルダ</span></button>`);
     this.foldersEl.innerHTML = fl.join('');
 
-    // 真ん中: 曲の縦の一覧
     const pk = this.picking;
-    const tags = (s: SongEntry) => (this.folder === null || this.query ? s.folders : s.folders.filter((f) => f !== this.folder));
-    const rows = songs.map((s) => `<div class="hr ${s.id === this.sel && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}">${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : '<i class="hr-mk"></i>'}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small></div><span class="hr-bpm">${fmtBpm(s)}</span></div>`);
-    if (!rows.length) {
-      rows.push(`<div class="hr-empty">${this.query ? '見つかりませんでした' : this.folder === UNCAT ? '未分類の曲はありません' : this.folder !== null ? 'このフォルダには曲がありません' : 'まだ曲がありません'}</div>`);
+    if (listToo) {
+      // 真ん中: 曲の縦の一覧
+      const tags = (s: SongEntry) => (this.folder === null || this.query ? s.folders : s.folders.filter((f) => f !== this.folder));
+      const rows = songs.map((s) => {
+        const cs = sortCourses(s.courses);
+        const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
+        const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
+        return `<div class="hr ${s.id === this.sel && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}">${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : '<i class="hr-mk"></i>'}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span></div>`;
+      });
+      if (!rows.length) {
+        rows.push(`<div class="hr-empty">${this.query ? '見つかりませんでした' : this.folder === UNCAT ? '未分類の曲はありません' : this.folder !== null ? 'このフォルダには曲がありません' : 'まだ曲がありません'}</div>`);
+      }
+      this.list.innerHTML = rows.join('');
+      this.list.classList.toggle('picking', !!pk);
     }
-    this.list.innerHTML = rows.join('');
 
     // 選んでいるとき: 一覧の下に「すべて選択」「完了」、右の面に選んだ曲と操作
     const bar = document.getElementById('homePick')!;
@@ -232,16 +260,16 @@ export class Home {
           </div>
         </div>`;
     } else if (s) {
-      const courses = s.courses.map((c) => `<span class="hd hd-${esc(c.name.toLowerCase())}">${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
       this.detail.innerHTML = `
         <div class="hdx-jk">${jacket(s)}</div>
-        <div class="hdx-top"><small>選んでいる曲</small><button class="hdx-more" data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></div>
+        <div class="hdx-top"><small>試聴</small><span class="hdx-pv"><button data-h="prev" aria-label="前の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/></svg></button><button data-h="pp" aria-label="試聴"></button><button data-h="next" aria-label="次の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button></span><button class="hdx-more" data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></div>
         <h1 class="hdx-title">${esc(s.title)}</h1>
-        <div class="hdx-sub">${esc(s.subtitle || 'アーティスト未設定')}</div>
         <div class="hdx-bpm">${fmtBpm(s)}<small>BPM</small></div>
-        <div class="hdx-row"><span>長さ ${fmtLen(s.length)}</span><span class="hdx-pv"><button data-h="prev" aria-label="前の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="M19 5 9 12l10 7z"/></svg></button><button data-h="pp" aria-label="試聴"></button><button data-h="next" aria-label="次の曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button></span></div>
-        <div class="hdx-diffs">${courses}</div>
-        <div class="hdx-acts"><button class="hdx-an" data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>情報</button><button class="hdx-edit" data-edit="${s.id}">編集</button><button class="hdx-play" data-play="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>プレイ</button></div>`;
+        <div class="hdx-acts">
+          <button class="hdx-play" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button>
+          <button class="hdx-edit" data-edit="${s.id}">エディタで開く</button>
+          <button class="hdx-an" data-analyze="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>譜面情報</button>
+        </div>`;
     } else {
       this.detail.innerHTML = `<div class="hdx-empty"><b>曲を選んでください</b><button class="hdx-play" data-h="import">読み込む</button></div>`;
     }
@@ -249,14 +277,179 @@ export class Home {
     (document.getElementById('homeSort') as HTMLElement).textContent = SORT_LABEL[this.sort];
     (document.getElementById('homePath') as HTMLElement).textContent = this.query ? `「${this.query}」` : this.folder === UNCAT ? '未分類' : this.folder ?? 'すべて';
     (document.getElementById('homeCount') as HTMLElement).textContent = `${songs.length} 曲`;
-    if (scrollToSel) this.list.querySelector('.hr.on')?.scrollIntoView({ block: 'center' });
+    // 端の曲もまんなかまで来られるよう、上下に余白
+    const pad = `${Math.max(0, this.list.clientHeight / 2 - 26)}px`;
+    this.list.style.paddingTop = pad;
+    this.list.style.paddingBottom = pad;
+    if (scrollToSel) this.centerSel(false);
     this.paintPlayer();
+    this.paintCurve();
+  }
+
+  // ---------- まんなかの縦リスト ----------
+
+  /** 選んでいる曲をリストのまんなかへ */
+  private centerSel(smooth: boolean) {
+    const row = this.list.querySelector<HTMLElement>('.hr.on');
+    if (!row) return;
+    const top = row.offsetTop - (this.list.clientHeight - row.offsetHeight) / 2;
+    this.ignoreScroll = performance.now() + (smooth ? 500 : 120);
+    this.list.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  private ignoreScroll = 0;
+  private scrollTimer = 0;
+  private curveRaf = 0;
+
+  /** スクロールしたら: 帯をまんなかからの距離で右へずらす（弧のように）。止まったら、まんなかの曲を選ぶ */
+  private onListScroll() {
+    if (!this.curveRaf) this.curveRaf = requestAnimationFrame(() => { this.curveRaf = 0; this.paintCurve(); });
+    clearTimeout(this.scrollTimer);
+    if (this.picking) return;
+    this.scrollTimer = window.setTimeout(() => {
+      if (performance.now() < this.ignoreScroll) return;
+      const mid = this.list.scrollTop + this.list.clientHeight / 2;
+      let best: HTMLElement | null = null;
+      let bd = Infinity;
+      for (const r of Array.from(this.list.querySelectorAll<HTMLElement>('.hr'))) {
+        const d = Math.abs(r.offsetTop + r.offsetHeight / 2 - mid);
+        if (d < bd) { bd = d; best = r; }
+      }
+      const id = best?.dataset.song;
+      if (id && id !== this.sel) this.selectRow(id, false);
+    }, 140);
+  }
+
+  private paintCurve() {
+    const L = this.list;
+    const mid = L.scrollTop + L.clientHeight / 2;
+    const h = Math.max(1, L.clientHeight / 2);
+    for (const r of Array.from(L.querySelectorAll<HTMLElement>('.hr'))) {
+      const c = r.offsetTop + r.offsetHeight / 2;
+      if (Math.abs(c - mid) > L.clientHeight) continue;
+      const d = Math.min(1.4, Math.abs(c - mid) / h);
+      r.style.setProperty('--d', d.toFixed(3));
+    }
+  }
+
+  /** 曲を選ぶ（一覧を作り直さずに、選んでいる帯と右の面だけ変える） */
+  private selectRow(id: string, scroll: boolean) {
+    this.sel = id;
+    this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
+    this.list.querySelector(`[data-song="${id}"]`)?.classList.add('on');
+    this.render(false, false);
+    // 選んだ帯が広がるので、まんなかへ寄せ直す
+    if (scroll) this.centerSel(true);
+    else requestAnimationFrame(() => this.centerSel(true));
+    const s = this.songs.find((q) => q.id === id);
+    if (s) void this.startPreview(s);
+  }
+
+  // ---------- 難易度えらび ----------
+
+  private diffSong: SongEntry | null = null;
+  private diffCourse = '';
+
+  private openDiff(id: string) {
+    const s = this.songs.find((x) => x.id === id);
+    if (!s || !s.courses.length) { this.host.toast('譜面がありません'); return; }
+    const cs = sortCourses(s.courses);
+    const last = lastCourse(id);
+    this.diffSong = s;
+    this.diffCourse = cs.some((c) => c.name === last) ? last! : cs[cs.length - 1].name;
+    this.paintDiff();
+    const el = document.getElementById('homeDiff')!;
+    el.classList.remove('hidden');
+    void el.offsetWidth;
+    el.classList.add('on');
+  }
+
+  private closeDiff() {
+    const el = document.getElementById('homeDiff')!;
+    el.classList.remove('on');
+    setTimeout(() => { if (!el.classList.contains('on')) el.classList.add('hidden'); }, 260);
+    this.diffSong = null;
+  }
+
+  private paintDiff() {
+    const s = this.diffSong;
+    if (!s) return;
+    const o = this.host.playOpts();
+    const cards = sortCourses(s.courses).map((c) => {
+      const on = c.name === this.diffCourse;
+      const stars = '★'.repeat(Math.max(0, Math.min(10, c.level)));
+      return `<button class="hdf-card ${on ? 'on' : ''}" data-dcourse="${esc(c.name)}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}"><i></i><span>${esc(COURSE_SHORT[c.name] ?? c.name)}</span><b>${c.level}</b><em>${stars}</em>${on ? '<u>1P</u>' : ''}</button>`;
+    }).join('');
+    document.getElementById('homeDiff')!.innerHTML = `
+      <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
+        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}　${fmtLen(s.length)}</small></div>
+        <div class="hdf-body">
+          <div class="hdf-side"><button data-df="back" aria-label="もどる">${ICON.back}</button></div>
+          <div class="hdf-cards">${cards}</div>
+        </div>
+      </div>
+      <div class="hdf-foot">
+        <span class="hdf-tip">選んだ難易度をもう一度タップでも始まります</span>
+        <span class="hdf-opt">ハイスピード<button data-df="sp-" aria-label="ハイスピードを下げる">−</button><b>×${o.speed.toFixed(1)}</b><button data-df="sp+" aria-label="ハイスピードを上げる">＋</button></span>
+        <button class="hdf-opt hdf-auto ${o.auto ? 'on' : ''}" data-df="auto">オート ${o.auto ? 'ON' : 'OFF'}</button>
+        <button class="hdf-go" data-df="go">はじめる</button>
+      </div>`;
+  }
+
+  private async onDiffClick(t: HTMLElement) {
+    const card = t.closest<HTMLElement>('[data-dcourse]');
+    if (card) {
+      const c = card.dataset.dcourse!;
+      if (c === this.diffCourse) { await this.startSong(); return; }
+      this.diffCourse = c;
+      this.paintDiff();
+      return;
+    }
+    const b = t.closest<HTMLElement>('[data-df]');
+    if (!b) {
+      if (t.id === 'homeDiff') this.closeDiff();
+      return;
+    }
+    const a = b.dataset.df!;
+    const o = this.host.playOpts();
+    if (a === 'back') this.closeDiff();
+    else if (a === 'sp-' || a === 'sp+') {
+      const v = Math.round((o.speed + (a === 'sp+' ? 0.1 : -0.1)) * 10) / 10;
+      this.host.setPlayOpt('speed', Math.max(0.1, Math.min(10, v)));
+      this.paintDiff();
+    } else if (a === 'auto') {
+      this.host.setPlayOpt('auto', !o.auto);
+      this.paintDiff();
+    } else if (a === 'go') await this.startSong();
+  }
+
+  private starting = false;
+
+  /** 幕を閉じて、選んだ難易度で始める（始まったら幕を開ける） */
+  private async startSong() {
+    const s = this.diffSong;
+    if (!s || this.starting) return;
+    this.starting = true;
+    const course = this.diffCourse;
+    rememberCourse(s.id, course);
+    const lv = s.courses.find((c) => c.name === course)?.level ?? 0;
+    this.stopPreview();
+    try {
+      await closeCurtain({ title: s.title, sub: s.subtitle, course: `${COURSE_SHORT[course] ?? course} ${lv}`, color: COURSE_COLOR[course] });
+      this.closeDiff();
+      await this.host.open(s.id, 'play', course);
+    } finally {
+      this.starting = false;
+      void openCurtain();
+    }
   }
 
   private onClick(e: MouseEvent) {
     const t = e.target as HTMLElement;
     const d = (sel: string) => t.closest<HTMLElement>(sel);
     let x: HTMLElement | null;
+    if (d('#homeDiff')) { void this.onDiffClick(t); return; }
+    if ((x = d('[data-pickdiff]'))) { this.openDiff(x.dataset.pickdiff!); return; }
     if ((x = d('[data-play]'))) { this.stopPreview(); void this.host.open(x.dataset.play!, 'play'); return; }
     if ((x = d('[data-edit]'))) { this.stopPreview(); void this.host.open(x.dataset.edit!, 'edit'); return; }
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
@@ -283,11 +476,9 @@ export class Home {
         this.render();
         return;
       }
-      if (this.sel === id) return;
-      this.sel = id;
-      this.render();
-      const s = this.songs.find((q) => q.id === id);
-      if (s) void this.startPreview(s);
+      // まんなかの曲をもう一度タップで難易度えらび
+      if (this.sel === id) { this.openDiff(id); return; }
+      this.selectRow(id, true);
     }
   }
 
@@ -321,9 +512,7 @@ export class Home {
       if (!list.length) return;
       const i = list.findIndex((s) => s.id === this.sel);
       const j = i < 0 ? 0 : (i + (a === 'next' ? 1 : -1) + list.length) % list.length;
-      this.sel = list[j].id;
-      this.render(true);
-      void this.startPreview(list[j]);
+      this.selectRow(list[j].id, true);
     } else if (a === 'pp') {
       if (this.playing) this.pausePreview();
       else {
