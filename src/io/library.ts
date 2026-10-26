@@ -110,20 +110,32 @@ export async function removeFromFolder(ids: string[], folder: string) {
   await writeIndex((list) => list.map((x) => (ids.includes(x.id) ? { ...x, folders: x.folders.filter((f) => f !== folder) } : x)));
 }
 
+/**
+ * フォルダは「親/子/孫」のように / でつないだ道のりで表す（フォルダの中のフォルダ）。
+ * f が root そのものか、root の中（下のどこか）にあるか
+ */
+export const inFolderTree = (f: string, root: string) => f === root || f.startsWith(`${root}/`);
+/** 道のりの親たち（"A/B/C" → ["A", "A/B"]） */
+export const folderParents = (f: string) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'));
+
+/** フォルダを作る（親のフォルダも無ければ作る） */
 export async function addFolder(name: string) {
   const fs = await listFolders();
-  if (!fs.includes(name)) await dbPut(kFolders, [...fs, name]);
+  const add = [...folderParents(name), name].filter((f) => !fs.includes(f));
+  if (add.length) await dbPut(kFolders, [...fs, ...add]);
 }
 
+/** フォルダの名前（道のり）を変える。中のフォルダもいっしょに移る */
 export async function renameFolder(from: string, to: string) {
+  const mv = (f: string) => (inFolderTree(f, from) ? to + f.slice(from.length) : f);
   const fs = await listFolders();
-  await dbPut(kFolders, fs.map((f) => (f === from ? to : f)).filter((f, i, a) => a.indexOf(f) === i));
-  await writeIndex((list) => list.map((x) => (x.folders.includes(from) ? { ...x, folders: [...new Set(x.folders.map((f) => (f === from ? to : f)))] } : x)));
+  await dbPut(kFolders, [...fs.map(mv), ...folderParents(to)].filter((f, i, a) => a.indexOf(f) === i));
+  await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, from)) ? { ...x, folders: [...new Set(x.folders.map(mv))] } : x)));
 }
 
-/** フォルダを消す（中の曲は消さず、そのフォルダから外すだけ） */
+/** フォルダを消す（中のフォルダも。曲は消さず、そのフォルダから外すだけ） */
 export async function deleteFolder(name: string) {
   const fs = await listFolders();
-  await dbPut(kFolders, fs.filter((f) => f !== name));
-  await writeIndex((list) => list.map((x) => (x.folders.includes(name) ? { ...x, folders: x.folders.filter((f) => f !== name) } : x)));
+  await dbPut(kFolders, fs.filter((f) => !inFolderTree(f, name)));
+  await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, name)) ? { ...x, folders: x.folders.filter((f) => !inFolderTree(f, name)) } : x)));
 }

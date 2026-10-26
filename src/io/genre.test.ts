@@ -11,6 +11,7 @@ test('genre.ini の GenreName をフォルダ名にする（下のフォルダ�
     { name: 'pack/genre.ini', data: enc.encode('[Genre]\r\nGenreName=ナムコオリジナル\r\nGenreColor=#ff0000\r\n') },
     { name: 'pack/a/a.tja', data: enc.encode(TJA('A')) },
     { name: 'pack/b/b.tja', data: enc.encode(TJA('B')) },
+    { name: 'pack/b/genre.ini', data: enc.encode('GenreName=アニメ/特撮\n') },
     { name: 'game/genre.ini', data: sjis },
     { name: 'game/c.tja', data: enc.encode(TJA('C')) },
     { name: 'other/d.tja', data: enc.encode(TJA('D')) },
@@ -21,6 +22,6 @@ test('genre.ini の GenreName をフォルダ名にする（下のフォルダ�
   ]);
   const r = await loadFiles([new File([blob], 'x.zip')]);
   const g = Object.fromEntries(r.songs.map((s) => [s.chart.title, s.genre]));
-  expect(g).toEqual({ A: 'ナムコオリジナル', B: 'ナムコオリジナル', C: 'ゲーム', D: undefined, E: 'empty', F: 'ボーカロイド' });
+  expect(g).toEqual({ A: 'ナムコオリジナル', B: 'ナムコオリジナル/アニメ／特撮', C: 'ゲーム', D: undefined, E: 'empty', F: 'ボーカロイド' });
   expect(r.skipped).toEqual([]);
 });

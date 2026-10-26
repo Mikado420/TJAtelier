@@ -1562,7 +1562,7 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     }
     const id = newId();
     // genre.ini があれば、そのジャンル名のフォルダに入れる
-    const f = sng.genre ? sng.genre.slice(0, 40) : folder;
+    const f = sng.genre ? sng.genre.split('/').map((x) => x.slice(0, 40)).join('/') : folder;
     if (sng.genre && !genresMade.has(f)) { genresMade.add(f); await addFolder(f).catch(() => {}); }
     await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, f);
     added.push(id);

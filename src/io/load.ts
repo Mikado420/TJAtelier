@@ -13,7 +13,7 @@ export interface LoadedSong {
   audio: AudioFile | null;
   /** .tja のファイル名（zip の中ならフォルダ付き） */
   tjaName: string;
-  /** 同じフォルダか上のフォルダにある genre.ini の GenreName（入れるフォルダの名前） */
+  /** 同じフォルダか上のフォルダにある genre.ini の GenreName（入れるフォルダ。上にもあれば "親/子"） */
   genre?: string;
 }
 
@@ -69,16 +69,20 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
     }
     // GenreName が空なら、genre.ini が置いてあるフォルダの名前
     if (!name) name = dir(e.name).split('/').filter(Boolean).pop() ?? '';
-    if (name) genres.set(dir(e.name), name);
+    // フォルダの道のりの区切り（/）は名前に使えないので全角に
+    if (name) genres.set(dir(e.name), name.replace(/\//g, '／'));
   }
+  // 上のフォルダにも genre.ini があれば、フォルダの中のフォルダにする（"親ジャンル/子ジャンル"）
   const genreOf = (path: string) => {
+    const chain: string[] = [];
     let d = dir(path);
     for (;;) {
       const g = genres.get(d);
-      if (g) return g;
-      if (!d) return undefined;
+      if (g) chain.unshift(g);
+      if (!d) break;
       d = dir(d.slice(0, -1));
     }
+    return chain.length ? chain.join('/') : undefined;
   };
   const tjas: typeof entries = [];
   const audios: typeof entries = [];

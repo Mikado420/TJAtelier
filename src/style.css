@@ -2115,3 +2115,11 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .ol-pf i { width: 8px; height: 8px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.2s; }
 .ol-pf.open i { transform: translateY(2px) rotate(-135deg); }
 .ol-pfl { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px 14px; border-left: 4px solid var(--fc); margin-left: 4px; }
+
+/* ---------- フォルダの中のフォルダ: 字下げ ---------- */
+.home .hr.hfb { margin-left: calc(10px + var(--d) * 26px + var(--dp, 0) * 24px); }
+.home .hr.in { margin-left: calc(16px + var(--dp, 1) * 24px + var(--d) * 26px); }
+.hr-empty.in { margin-left: calc(22px + var(--dp, 1) * 24px); }
+.home-list.picking .hr.hfb { margin-left: calc(14px + var(--dp, 0) * 24px); }
+.home-list.picking .hr.in { margin-left: calc(16px + var(--dp, 1) * 24px); }
+.hfb-acts button { min-width: 42px; }

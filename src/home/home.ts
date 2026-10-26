@@ -5,7 +5,7 @@
 import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import {
-  addFolder, addToFolder, deleteFolder, deleteSong, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
+  addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
@@ -150,7 +150,7 @@ export class Home {
       if (ctx.state !== 'running') void ctx.resume();
       if (this.pendingPreview) {
         this.pendingPreview = false;
-        const s = this.songs.find((x) => x.id === this.sel);
+        const s = this.focus === 'song' ? this.songs.find((x) => x.id === this.sel) : undefined;
         if (s && !this.playing) void this.startPreview(s);
       }
     }, true);
@@ -185,8 +185,8 @@ export class Home {
       }
     }
     this.render(true);
-    // 選んでいる曲の試聴を流す（自動で鳴らせないときは、次に触れたときに）
-    const s = this.songs.find((x) => x.id === this.sel);
+    // 曲を選んでいるときだけ、その曲の試聴を流す（自動で鳴らせないときは、次に触れたときに）
+    const s = this.focus === 'song' ? this.songs.find((x) => x.id === this.sel) : undefined;
     if (s) void this.startPreview(s);
   }
 
@@ -201,6 +201,8 @@ export class Home {
     this.folders = await listFolders();
     // 曲が入っているのに一覧に無いフォルダも出す
     for (const s of this.songs) for (const f of s.folders) if (!this.folders.includes(f)) this.folders.push(f);
+    // フォルダの中のフォルダ: 親のフォルダも出す
+    for (const f of [...this.folders]) for (const p of folderParents(f)) if (!this.folders.includes(p)) this.folders.push(p);
     if (this.folder && this.folder !== UNCAT && !this.folders.includes(this.folder)) this.folder = null;
     if (this.picking) for (const id of [...this.picking]) if (!this.songs.some((x) => x.id === id)) this.picking.delete(id);
   }
@@ -226,9 +228,21 @@ export class Home {
   }
 
   private keyOf(f: string | null) { return f === null ? ALL : f; }
-  private folderName(key: string) { return key === ALL ? 'すべて' : key === UNCAT ? '未分類' : key; }
+  /** 帯に出す名前（フォルダの中のフォルダは、いちばん下の名前） */
+  private folderName(key: string) { return key === ALL ? 'すべて' : key === UNCAT ? '未分類' : key.split('/').pop()!; }
+  /** フォルダ（中のフォルダも含む）に入っている曲 */
   private folderSongs(key: string) {
-    return key === ALL ? this.songs : key === UNCAT ? this.songs.filter((x) => !x.folders.length) : this.songs.filter((x) => x.folders.includes(key));
+    return key === ALL ? this.songs : key === UNCAT ? this.songs.filter((x) => !x.folders.length) : this.songs.filter((x) => x.folders.some((f) => inFolderTree(f, key)));
+  }
+  /** すぐ下のフォルダ */
+  private childFolders(key: string) {
+    return this.folders.filter((f) => f.startsWith(`${key}/`) && !f.slice(key.length + 1).includes('/')).sort((a, b) => a.localeCompare(b, 'ja'));
+  }
+  /** 開いているフォルダと、その親たち */
+  private openChain(): Set<string> {
+    if (!this.open) return new Set();
+    const k = this.keyOf(this.folder);
+    return new Set(k === ALL || k === UNCAT ? [k] : [...folderParents(k), k]);
   }
 
   private sorted(list: SongEntry[]) {
@@ -262,7 +276,7 @@ export class Home {
         const top = cs.length ? Math.max(...cs.map((c) => c.level)) : 0;
         const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
         const cr = topCrown(bm, s);
-        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f)}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${pk ? '' : `<span class="hr-acts">
+        return `<div class="hr ${inner ? 'in' : ''} ${s.id === this.sel && this.focus === 'song' && !pk ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small><span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span></div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${pk ? '' : `<span class="hr-acts">
           <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
           <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`}</div>`;
       };
@@ -272,20 +286,28 @@ export class Home {
         for (const x of songs) rows.push(songRow(x, ''));
         if (!rows.length) rows.push('<div class="hr-empty">見つかりませんでした</div>');
       } else {
-        // フォルダの帯（すべて・未分類・作ったフォルダ）。開いている帯の下に、中の曲
-        const keys = [ALL, UNCAT, ...[...this.folders].sort((a, b) => a.localeCompare(b, 'ja'))];
-        const openKey = this.open ? this.keyOf(this.folder) : '';
-        for (const k of keys) {
+        // フォルダの帯（すべて・未分類・作ったフォルダ）。開いている帯の下に、中のフォルダと曲（フォルダの中のフォルダは字下げ）
+        const chain = this.openChain();
+        const deepest = this.open ? this.keyOf(this.folder) : '';
+        const ic = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
+        const bar = (k: string, dp: number) => {
           const n = this.folderSongs(k).length;
           const col = folderColor(k);
-          const isOpen = k === openKey;
+          const isOpen = chain.has(k);
           const on = this.focus === 'folder' && k === this.fbar && !pk;
-          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${pk ? '' : `<span class="hfb-acts">${k === ALL || k === UNCAT ? '<button data-h="new" aria-label="ここに新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><small>新しい譜面</small></button>' : `<button data-h="new" aria-label="ここに新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button data-frename="${esc(k)}" aria-label="名前を変える"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg><small>消す</small></button>`}</span>`}<i class="hfb-ar" aria-hidden="true"></i></div>`);
-          if (isOpen) {
-            for (const x of songs) rows.push(songRow(x, col));
-            if (!songs.length) rows.push(`<div class="hr-empty in" style="--fc:${col}">${k === UNCAT ? '未分類の曲はありません' : k === ALL ? 'まだ曲がありません' : 'このフォルダには曲がありません'}</div>`);
-          }
-        }
+          const user = k !== ALL && k !== UNCAT;
+          const acts = pk ? '' : `<span class="hfb-acts">${user
+            ? `<button data-h="new" aria-label="ここに新しい譜面">${ic('M12 5v14M5 12h14')}<small>譜面</small></button><button data-fsub="${esc(k)}" aria-label="中にフォルダを作る">${ic('M3 6.5h6l2 2h10v10H3zM12 11v6M9 14h6')}<small>フォルダ</small></button><button data-frename="${esc(k)}" aria-label="名前を変える">${ic('M4 20h4L19 9l-4-4L4 16z')}<small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す">${ic('M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13')}<small>消す</small></button>`
+            : `<button data-h="new" aria-label="ここに新しい譜面">${ic('M12 5v14M5 12h14')}<small>新しい譜面</small></button>`}</span>`;
+          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col};--dp:${dp}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${acts}<i class="hfb-ar" aria-hidden="true"></i></div>`);
+          if (!isOpen) return;
+          const kids = user ? this.childFolders(k) : [];
+          for (const c of kids) bar(c, dp + 1);
+          if (k !== deepest) return;
+          for (const x of songs) rows.push(songRow(x, col).replace('data-song=', `data-dp="${dp + 1}" data-song=`).replace('style="--fc:', `style="--dp:${dp + 1};--fc:`));
+          if (!songs.length && !kids.length) rows.push(`<div class="hr-empty in" style="--fc:${col};--dp:${dp + 1}">${k === UNCAT ? '未分類の曲はありません' : k === ALL ? 'まだ曲がありません' : 'このフォルダには曲がありません'}</div>`);
+        };
+        for (const k of [ALL, UNCAT, ...this.folders.filter((f) => !f.includes('/')).sort((a, b) => a.localeCompare(b, 'ja'))]) bar(k, 0);
         if (!pk) rows.push('<div class="hr hfb hfb-add" data-h="folder"><span class="hfb-n">＋ 新しいフォルダ</span></div>');
       }
       this.list.innerHTML = rows.join('');
@@ -438,6 +460,8 @@ export class Home {
   private selectBar(key: string, scroll: boolean) {
     this.fbar = key;
     this.focus = 'folder';
+    // フォルダを選んでいるあいだは曲を鳴らさない
+    this.stopPreview();
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
     this.list.querySelector(`[data-fbar="${CSS.escape(key)}"]`)?.classList.add('on');
     this.render(false, false);
@@ -447,12 +471,18 @@ export class Home {
 
   /** フォルダの帯を開く・閉じる（ほかの帯は閉じる） */
   private toggleFolder(key: string) {
-    const isOpen = this.open && this.keyOf(this.folder) === key;
+    const isOpen = this.openChain().has(key);
     this.fbar = key;
     this.focus = 'folder';
     this.host.audio.playUi('folder');
-    if (isOpen) this.open = false;
-    else {
+    // フォルダを選んでいるあいだは曲を鳴らさない
+    this.stopPreview();
+    if (isOpen) {
+      // 閉じる: 親のフォルダがあれば、そこを開いたままにする
+      const parent = key === ALL || key === UNCAT ? undefined : folderParents(key).pop();
+      if (parent) this.folder = parent;
+      else this.open = false;
+    } else {
       this.folder = key === ALL ? null : key;
       this.open = true;
     }
@@ -461,12 +491,31 @@ export class Home {
   }
 
   private async deleteFolderAsk(name: string) {
-    if (!confirm(`フォルダ「${name}」を消しますか？（中の曲は消えず、このフォルダから外れるだけです）`)) return;
+    const kids = this.folders.some((f) => f.startsWith(`${name}/`));
+    if (!confirm(`フォルダ「${name.replace(/\//g, ' › ')}」を消しますか？（${kids ? '中のフォルダもいっしょに消えます。' : ''}曲は消えず、フォルダから外れるだけです）`)) return;
     await deleteFolder(name);
-    if (this.folder === name) { this.folder = null; this.open = false; }
-    this.fbar = ALL;
+    if (this.folder && inFolderTree(this.folder, name)) {
+      const parent = folderParents(name).pop();
+      this.folder = parent ?? null;
+      this.open = !!parent;
+    }
+    this.fbar = this.folder ?? ALL;
     this.focus = 'folder';
     await this.reload();
+    this.render(true);
+  }
+
+  /** フォルダの中に新しいフォルダを作る */
+  private async newSubfolder(parent: string) {
+    const name = await this.askName(`「${this.folderName(parent)}」の中に新しいフォルダ`, '', '作る');
+    if (!name) return;
+    const path = `${parent}/${name}`;
+    await addFolder(path);
+    await this.reload();
+    this.folder = parent;
+    this.open = true;
+    this.fbar = path;
+    this.focus = 'folder';
     this.render(true);
   }
 
@@ -660,6 +709,7 @@ export class Home {
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
     if (d('[data-stat]')) { this.nextStat(); return; }
     if ((x = d('[data-fopen]'))) { this.toggleFolder(x.dataset.fopen!); return; }
+    if ((x = d('[data-fsub]'))) { void this.newSubfolder(x.dataset.fsub!); return; }
     if ((x = d('[data-frename]'))) { void this.renameFolderAsk(x.dataset.frename!); return; }
     if ((x = d('[data-fdel]'))) { void this.deleteFolderAsk(x.dataset.fdel!); return; }
     if ((x = d('[data-pk]'))) { void this.pickAction(x.dataset.pk!, x); return; }
@@ -834,7 +884,7 @@ export class Home {
     const names = [...this.folders].sort((a, b) => a.localeCompare(b, 'ja')).filter((f) => f !== move);
     const done = async (msg: string) => { await this.reload(); this.render(); this.host.toast(msg); };
     this.popup(anchor, [
-      ...names.map((f) => [`${has(f) && !move ? '✓ ' : '　 '}${f}`, async () => {
+      ...names.map((f) => [`${has(f) && !move ? '✓ ' : '　 '}${'　'.repeat(f.split('/').length - 1)}${f.split('/').pop()}`, async () => {
         if (move) {
           await addToFolder(ids, f);
           await removeFromFolder(ids, move);
@@ -919,7 +969,7 @@ export class Home {
       const err = box.querySelector<HTMLElement>('.ha-err')!;
       const check = () => {
         const v = input.value.trim();
-        const bad = !v ? '' : v === UNCAT || v === 'すべて' || v === '未分類' ? 'その名前は使えません' : '';
+        const bad = !v ? '' : v === UNCAT || v === 'すべて' || v === '未分類' ? 'その名前は使えません' : v.includes('/') ? '「/」は使えません' : '';
         err.textContent = bad;
         okBtn.disabled = !v || !!bad || v === initial;
         return okBtn.disabled ? null : v;
@@ -944,12 +994,15 @@ export class Home {
 
   /** フォルダの名前を変える（同じ名前のフォルダがあるときは、まとめてよいか聞く） */
   private async renameFolderAsk(from: string) {
-    const to = await this.askName('フォルダの名前を変える', from, '変える');
-    if (!to) return;
-    if (this.folders.includes(to) && !confirm(`「${to}」はすでにあります。2 つのフォルダをまとめますか？`)) return;
+    const parent = folderParents(from).pop();
+    const nm = await this.askName('フォルダの名前を変える', from.split('/').pop()!, '変える');
+    if (!nm) return;
+    const to = parent ? `${parent}/${nm}` : nm;
+    if (this.folders.includes(to) && !confirm(`「${nm}」はすでにあります。2 つのフォルダをまとめますか？`)) return;
     await renameFolder(from, to);
-    if (this.folder === from) this.folder = to;
-    if (this.fbar === from) this.fbar = to;
+    const mv = (f: string) => (inFolderTree(f, from) ? to + f.slice(from.length) : f);
+    if (this.folder) this.folder = mv(this.folder);
+    this.fbar = mv(this.fbar);
     await this.reload();
     this.render();
     this.host.toast(`フォルダの名前を「${to}」にしました`);

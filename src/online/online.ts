@@ -280,7 +280,7 @@ export class OnlineScreen {
         const list = inF(k);
         if (k !== ALL && !list.length) return '';
         const open = this.pickOpen === k;
-        const name = k === ALL ? 'すべて' : k === UNCAT ? '未分類' : k;
+        const name = k === ALL ? 'すべて' : k === UNCAT ? '未分類' : k.replace(/\//g, ' › ');
         return `<button class="ol-pf${open ? ' open' : ''}" data-pf="${esc(k)}" style="--fc:${folderColor(k)}"><span>${esc(name)}</span><small>${list.length} 曲</small><i aria-hidden="true"></i></button>
           ${open ? `<div class="ol-pfl" style="--fc:${folderColor(k)}">${list.length ? list
             .map((x) => `<div class="ol-pi"><span class="ol-pit">${esc(x.title)}${x.length ? '' : '<small>音源なし</small>'}</span><span class="ol-pic">${x.courses
