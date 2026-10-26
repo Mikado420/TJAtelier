@@ -52,7 +52,7 @@ export function writeTJA(chart: EChart): string {
     if (balloons.length) out.push(`BALLOON:${balloons.join(',')}`);
     for (const [k, v] of c.extra) out.push(`${k}:${v}`);
     out.push('');
-    if (c.scrollMode) out.push(c.scrollMode === 'hb' ? '#HBSCROLL' : '#BMSCROLL');
+    if (c.scrollMode) out.push('#HBSCROLL');
     out.push('#START');
     out.push(...writeCourseBody(c));
     out.push('#END');

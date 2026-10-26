@@ -323,7 +323,7 @@ export class Home {
       const off = pk.size ? '' : 'disabled';
       bar.innerHTML = `
         <button data-pk="all" class="pk-all ${allOn ? 'on' : ''}"><i class="hr-ck">${allOn ? '✓' : ''}</i>${allOn ? '選択を解除' : 'すべて選択'}</button>
-        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲` : '曲をタップして選ぶ'}</span>
+        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲` : ''}</span>
         <button data-pk="add" ${off}>フォルダに入れる</button>
         ${inFolder ? `<button data-pk="move" ${off}>移す</button><button data-pk="remove" ${off}>外す</button>` : `<button data-pk="clear" ${off}>未分類に戻す</button>`}
         <button data-pk="delete" class="bad" ${off}>削除</button>
@@ -383,7 +383,6 @@ export class Home {
         <span class="cst-bar">${bar || '<i class="cr-none" style="flex:1"></i>'}</span>
         ${rows.map(([k, l]) => `<span class="cst-r cr-${k}"><i aria-hidden="true"></i><span>${l}</span><b>${cnt[k]}</b></span>`).join('')}
       </span>
-      <span class="cst-tip">タップで切り替え ›</span>
     </button>`;
   }
 
@@ -614,7 +613,7 @@ export class Home {
         <i class="hdf-flash"></i>
       </div>
       <div class="hdf-foot">
-        <span class="hdf-tip">${this.diffUra && canUra ? 'おにをもう一度タップで、おもてのおにに戻る' : canUra ? 'カードをえらぶ → はじめる　／　おにをもう一度で裏おに' : 'カードをえらぶ → はじめる'}</span>
+        <span class="hdf-tip"></span>
         <span class="hdf-opt">ハイスピード<button data-df="sp-" aria-label="ハイスピードを下げる">−</button><b>×${o.speed.toFixed(1)}</b><button data-df="sp+" aria-label="ハイスピードを上げる">＋</button></span>
         <button class="hdf-opt hdf-auto ${o.auto ? 'on' : ''}" data-df="auto">オート ${o.auto ? 'ON' : 'OFF'}</button>
         <button class="hdf-go" data-df="go" ${sel ? '' : 'disabled'}>はじめる</button>

@@ -91,7 +91,8 @@ export function parseTJA(text: string): EChart {
       }
       // 流れ方: #START の直前（または #START の後）に置く
       if (name === 'HBSCROLL' || name === 'BMSCROLL') {
-        const mode = name === 'HBSCROLL' ? 'hb' : 'bm';
+        // #BMSCROLL は #HBSCROLL と同じにする（このアプリの #HBSCROLL は SCROLL も効く）
+        const mode = 'hb' as const;
         if (inChart) course.scrollMode = mode;
         else header.scrollMode = mode;
         continue;

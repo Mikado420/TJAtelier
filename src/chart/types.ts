@@ -68,8 +68,8 @@ export interface Course {
 /**
  * 判定枠から何拍ぶん先に描くか（音符・小節線の位置。拍の数 × 1 拍の幅 で x になる）。
  * - ふつう: (音符の時刻 − 今) × その音符の BPM / 60 × その音符の SCROLL
- * - #HBSCROLL: (音符の拍 − 今の拍)。BPM が変わるとレーン全体の速さが変わり、SCROLL は無視
- * - #BMSCROLL: (音符の拍 − 今の拍) × その音符の SCROLL。#BPMCHANGE が無ければふつうと同じ
+ * - #HBSCROLL: (音符の拍 − 今の拍) × その音符の SCROLL。BPM が変わるとレーン全体の速さが変わる
+ *   （#BMSCROLL はこのアプリでは使わない。読み込んだときは #HBSCROLL と同じにする）
  */
 export function scrollAhead(
   mode: Course['scrollMode'],
@@ -77,7 +77,7 @@ export function scrollAhead(
   now: number,
   beatNow: number | null,
 ): number {
-  if (mode && beatNow !== null && n.beat !== undefined) return (n.beat - beatNow) * (mode === 'bm' ? n.scroll : 1);
+  if (mode && beatNow !== null && n.beat !== undefined) return (n.beat - beatNow) * n.scroll;
   return ((n.time - now) * n.bpm * n.scroll) / 60;
 }
 

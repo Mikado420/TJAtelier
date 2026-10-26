@@ -384,7 +384,7 @@ const TOOL_LOOK: Record<Tool, { label: string; cls: string }> = {
   scroll: { label: 'SCROLL・グラデ', cls: 'cmd scroll' },
   bpm: { label: 'BPMCHANGE', cls: 'cmd bpm' },
   measure: { label: 'MEASURE', cls: 'cmd measure' },
-  select: { label: '選択（コピー・切り取り・貼り付け）', cls: 'cmd select' },
+  select: { label: '選択', cls: 'cmd select' },
 };
 /** 各ボタンが今どちらの音符になっているか */
 const groupTool: Record<string, Tool> = { small: 'don', big: 'bigDon', roll: 'roll', balloon: 'balloon', gogo: 'gogo', scroll: 'scroll', bpm: 'bpm', measure: 'measure', select: 'select' };
@@ -1105,8 +1105,7 @@ function renderSheet() {
       <label class="field"><span>流れ方</span>
         <select data-course-scroll>
           <option value="" ${!ed.course.scrollMode ? 'selected' : ''}>ふつう</option>
-          <option value="hb" ${ed.course.scrollMode === 'hb' ? 'selected' : ''}>#HBSCROLL（BPM で急に変わる・SCROLL 無視）</option>
-          <option value="bm" ${ed.course.scrollMode === 'bm' ? 'selected' : ''}>#BMSCROLL（BPM で急に変わる・SCROLL 有効）</option>
+          <option value="hb" ${ed.course.scrollMode ? 'selected' : ''}>#HBSCROLL</option>
         </select>
       </label>
       <div class="btns three">
@@ -1456,7 +1455,7 @@ $('sheetBody').addEventListener('change', (e) => {
   } else if (d.courseScroll !== undefined) {
     const v = el.value;
     ed.mutate(() => {
-      if (v === 'hb' || v === 'bm') ed.course.scrollMode = v;
+      if (v === 'hb') ed.course.scrollMode = v;
       else delete ed.course.scrollMode;
     });
   } else if (d.courseLevel !== undefined) {
@@ -2152,7 +2151,7 @@ function renderPointSheet(body: HTMLElement) {
   else value = `${m.num}/${m.den}`;
   $('sheetTitle').textContent = title;
   const where = kind === 'measure' ? `小節 ${m.index + 1} から` : `小節 ${m.index + 1}・${Number(beat.toFixed(2))} 拍目から`;
-  const label = { scroll: 'SCROLL', bpm: 'BPM', measure: '拍子（例: 3/4）' }[kind];
+  const label = { scroll: 'SCROLL', bpm: 'BPM', measure: '拍子' }[kind];
   body.innerHTML = `
     <p class="note">${where}</p>
     <label class="field"><span>${label}</span><input type="text" autocapitalize="off" autocomplete="off" id="pointValue" value="${value}"></label>

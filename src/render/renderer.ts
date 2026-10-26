@@ -582,14 +582,13 @@ export class Renderer {
 
   /** 判定枠の中心（#JPOSSCROLL で動く） */
   private jx = JX;
-  /** #HBSCROLL / #BMSCROLL のときの今の拍の位置（null ならふつうの流れ方） */
+  /** #HBSCROLL のときの今の拍の位置（null ならふつうの流れ方） */
   private beatNow: number | null = null;
   private scrollMode: Course['scrollMode'] = undefined;
 
   /**
    * 音符・小節線の x。ふつうは音符ごとの BPM・SCROLL の速さで流れる。
-   * #HBSCROLL / #BMSCROLL は拍の数の差で決める（BPM が変わるとレーン全体の速さが変わる）。
-   * #BMSCROLL は、さらに音符ごとの SCROLL を掛ける（#BPMCHANGE が無ければふつうと同じ）
+   * #HBSCROLL は拍の数の差で決め、音符ごとの SCROLL を掛ける（BPM が変わるとレーン全体の速さが変わる）
    */
   private xOf(time: number, beat: number | undefined, n: { bpm: number; scroll: number }, now: number) {
     return this.jx + scrollAhead(this.scrollMode, { time, bpm: n.bpm, scroll: n.scroll, beat }, now, this.beatNow) * (MEASURE_PX / 4) * this.speed;

@@ -38,8 +38,8 @@ export interface ECourse {
   /** LEVEL / BALLOON 以外の難易度ごとのヘッダ（SCOREINIT など）をそのまま保持 */
   extra: [string, string][];
   /**
-   * 譜面の流れ方（#START の直前の #HBSCROLL / #BMSCROLL）。
-   * hb・bm は拍の数で位置を決めるので、BPM が変わった瞬間にレーン全体の速さが変わる。hb は #SCROLL を無視、bm は反映
+   * 譜面の流れ方（#START の直前の #HBSCROLL）。拍の数で位置を決めるので、BPM が変わった瞬間に
+   * レーン全体の速さが変わる。#SCROLL も効く（前の版の 'bm'・読み込んだ #BMSCROLL も同じ扱い）
    */
   scrollMode?: 'hb' | 'bm';
   /** グラデ（エディタの中だけで使う。.tja には書き込まない） */
@@ -228,8 +228,8 @@ export class Timing {
 }
 
 /**
- * #HBSCROLL / #BMSCROLL の拍の位置。tick → 拍の位置と、時刻 → 拍の位置の表を作る。
- * 拍の位置は BPM だけで決める（#SCROLL は入れない）。#BMSCROLL の #SCROLL は、ふつうと同じく
+ * #HBSCROLL の拍の位置。tick → 拍の位置と、時刻 → 拍の位置の表を作る。
+ * 拍の位置は BPM だけで決める（#SCROLL は入れない）。#SCROLL は、ふつうと同じく
  * 音符・小節線ごとの速さに掛ける（scrollAhead）ので、#BPMCHANGE が無ければふつうの流れ方と同じになる
  */
 export function beatTable(chart: EChart, course: ECourse) {
