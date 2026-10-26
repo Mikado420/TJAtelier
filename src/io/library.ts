@@ -23,6 +23,10 @@ export interface SongEntry {
   /** 前の版の「入っているフォルダ（1 つだけ、'' は一番上）」。読み込むときに folders へ移す */
   folder?: string;
   audioName: string;
+  /** 背景の動画のファイル名（無ければ undefined） */
+  video?: string;
+  /** 背景の動画のずれ（秒。+ で動画を先へ進める） */
+  videoOffset?: number;
   demoStart: number;
   updatedAt: number;
 }
@@ -36,6 +40,10 @@ const kIndex = 'lib-index';
 const kFolders = 'lib-folders';
 const kChart = (id: string) => `lib-chart-${id}`;
 const kAudio = (id: string) => `lib-audio-${id}`;
+const kVideo = (id: string) => `lib-video-${id}`;
+
+/** 背景の動画。fromAudio = 音源と同じファイル（mp4 だけの曲。二重に持たない） */
+export interface VideoFile { name: string; data: ArrayBuffer | null; fromAudio?: boolean }
 
 /** 前の版（フォルダが 1 つだけ）の一覧を、今の形（いくつでも）に直す */
 const norm = (x: SongEntry): SongEntry => {
@@ -66,6 +74,7 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
     length: length ?? prev.length ?? 0,
     courses: chart.courses.map((c) => ({ name: c.name, level: c.level })),
     folders: prev.folders ?? (prev.folder ? [prev.folder] : []),
+    ...(prev.video ? { video: prev.video, videoOffset: prev.videoOffset } : {}),
     audioName: chart.wave,
     demoStart: chart.demoStart,
     updatedAt: Date.now(),
@@ -96,7 +105,31 @@ export async function saveSong(id: string, data: SongData, audio?: AudioFile | n
 export async function deleteSong(id: string) {
   await dbDel(kChart(id));
   await dbDel(kAudio(id));
+  await dbDel(kVideo(id));
   await writeIndex((list) => list.filter((x) => x.id !== id));
+}
+
+/** 背景の動画を入れる・消す（null で消す） */
+export async function saveSongVideo(id: string, v: VideoFile | null) {
+  if (v) await dbPut(kVideo(id), v.fromAudio ? { name: v.name, data: null, fromAudio: true } : v);
+  else await dbDel(kVideo(id));
+  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, video: v?.name } : x)));
+}
+
+/** 背景の動画（音源と同じファイルなら、音源のデータを使う） */
+export async function loadSongVideo(id: string): Promise<{ name: string; data: ArrayBuffer; fromAudio: boolean } | null> {
+  const v = await dbGet<VideoFile>(kVideo(id));
+  if (!v) return null;
+  if (v.fromAudio) {
+    const a = await dbGet<AudioFile>(kAudio(id));
+    return a ? { name: v.name, data: a.data, fromAudio: true } : null;
+  }
+  return v.data ? { name: v.name, data: v.data, fromAudio: false } : null;
+}
+
+/** 動画のずれ（秒）を変える */
+export async function setVideoOffset(id: string, sec: number) {
+  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, videoOffset: sec } : x)));
 }
 
 /** 曲（いくつでも）をフォルダに入れる（ほかのフォルダからは外さない） */

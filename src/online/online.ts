@@ -13,10 +13,10 @@ import { parseTJA } from '../chart/tja';
 import { writeTJA } from '../chart/tjaWrite';
 import { Game } from '../engine/game';
 import { saveBest, type Crown } from '../home/home';
-import { listFolders, listSongs, loadSongAudio, loadSongData, type SongEntry } from '../io/library';
+import { listFolders, listSongs, loadSongAudio, loadSongData, loadSongVideo, type SongEntry } from '../io/library';
 import type { PlayMode } from '../play/playmode';
 import type { Opponent } from '../render/renderer';
-import { getCachedAudio, putCachedAudio } from './cache';
+import { getCachedAudio, getCachedVideo, putCachedAudio, putCachedVideo } from './cache';
 import {
   audioHash, listRooms, newRoomId, OnlineClient,
   type ChatMsg, type HistoryRow, type ResultRow, type RoomInfo, type RoomSettings, type Roster, type SongMeta, type WatchPlayer,
@@ -26,6 +26,8 @@ export interface OnlineHost {
   audio: AudioEngine;
   play: PlayMode;
   toast(msg: string): void;
+  /** 背景の動画を流す設定か（流さないなら動画は受け取らない） */
+  videoOn(): boolean;
   /** オンラインの画面を閉じた（曲選択へ戻る） */
   closed(): void;
 }
@@ -78,6 +80,10 @@ export class OnlineScreen {
   private myCourse = '';
   /** 受け取り中・送り中の割合（null = していない） */
   private transfer: { label: string; ratio: number } | null = null;
+  /** 背景の動画の受け取り・送りの割合 */
+  private vtransfer: { label: string; ratio: number } | null = null;
+  /** 今の曲の背景の動画（受け取ったもの。プレイで流す） */
+  private video: { key: string; data: ArrayBuffer; name: string; off: number } | null = null;
   /** 曲を選ぶ一覧 */
   private picking: SongEntry[] | null = null;
   private pickOpen = '';
@@ -361,6 +367,7 @@ export class OnlineScreen {
           <div class="ol-now"><b>${esc(s.title)}</b><small>${esc(s.byName)} の予約</small></div>
           ${courses.length ? `<div class="ol-mycourse"><span>あなたの難易度</span>${courses.map((c) => `<button data-course="${esc(c.name)}" class="${c.name === this.myCourse ? 'on' : ''}" ${R.phase === 'play' ? 'disabled' : ''}>${courseChip(c.name, c.level)}</button>`).join('')}</div>` : ''}
           ${tr ? `<div class="ol-prog"><span>${esc(tr.label)} ${Math.round(tr.ratio * 100)}%</span><i style="width:${(tr.ratio * 100).toFixed(1)}%"></i></div>` : ''}
+          ${this.vtransfer ? `<div class="ol-prog ol-vprog"><span>${esc(this.vtransfer.label)} ${Math.round(this.vtransfer.ratio * 100)}%</span><i style="width:${(this.vtransfer.ratio * 100).toFixed(1)}%"></i></div>` : ''}
           <div class="ol-go">
             ${this.waiting ? '<p class="ol-wait">ほかの人が終わるのを待っています…</p>'
               : R.phase === 'play' ? (this.song ? '<button class="ol-btn primary big" data-ol="watch">観戦する</button>' : '<p class="ol-wait">プレイ中です</p>')
@@ -623,6 +630,19 @@ export class OnlineScreen {
         this.paintProgress();
       },
       songReady: (meta, bytes) => void this.received(meta, bytes),
+      vupload: (key, lib) => void this.vupload(key, lib),
+      videoProgress: (ratio) => {
+        if (!this.vtransfer) return;
+        this.vtransfer.ratio = ratio;
+        this.paintVProgress();
+      },
+      videoReady: (meta, bytes) => {
+        const ab = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? (bytes.buffer as ArrayBuffer) : (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+        this.vtransfer = null;
+        void putCachedVideo(meta.vhash, ab);
+        this.setVideo(meta, ab);
+        if (this.view === 'room' && !this.playingNow) this.renderSong();
+      },
       start: (zero, key, players) => void this.startGame(zero, key, players),
       watch: (zero, key, players) => void this.startGame(zero, key, players, true),
       state: (s) => {
@@ -709,11 +729,85 @@ export class OnlineScreen {
         audioName: a?.name ?? '',
         hash: a ? await audioHash(a.data) : '',
         lib: id,
+        ...(await this.videoMeta(id)),
       },
     });
     this.modal = '';
     this.renderModal();
     this.host.toast(`「${chart.title || '（無題）'}」を予約しました`);
+  }
+
+  /** 予約する曲の背景の動画の情報（動画が無ければ空） */
+  private async videoMeta(id: string) {
+    const v = await loadSongVideo(id).catch(() => null);
+    if (!v) return { vname: '', vsize: 0, vhash: '', voff: 0, vfromAudio: false };
+    const e = (await listSongs()).find((x) => x.id === id);
+    return { vname: v.name, vsize: v.fromAudio ? 0 : v.data.byteLength, vhash: v.fromAudio ? '' : await audioHash(v.data), voff: e?.videoOffset ?? 0, vfromAudio: v.fromAudio };
+  }
+
+  /** 背景の動画を決める（プレイで流す） */
+  private setVideo(meta: SongMeta, data: ArrayBuffer) {
+    if (this.nextSong?.meta.key !== meta.key) return;
+    this.video = { key: meta.key, data, name: meta.vname, off: meta.voff };
+    if (!this.playingNow) this.applyVideo();
+  }
+
+  /** 今の曲の動画をプレイ画面に渡す（無ければ外す） */
+  private applyVideo() {
+    const v = this.video && this.video.key === this.song?.meta.key ? this.video : null;
+    const type = v && /\.mov$/i.test(v.name) ? 'video/quicktime' : 'video/mp4';
+    this.host.play.setVideo(v ? new Blob([v.data], { type }) : null, v?.off ?? 0);
+  }
+
+  /** 背景の動画: 持っていればそれを、なければ（流す設定なら）受け取る。音源と同じファイルなら音源を使う */
+  private async prepareVideo(meta: SongMeta, by: string, audio: ArrayBuffer | null) {
+    const c = this.client;
+    if (!c || !meta.vname) return;
+    if (meta.vfromAudio) {
+      if (audio) this.setVideo(meta, audio);
+      return;
+    }
+    if (!meta.vsize) return;
+    let v: ArrayBuffer | null = null;
+    if (by === c.me) v = (await loadSongVideo(meta.lib).catch(() => null))?.data ?? null;
+    if (!v) v = await getCachedVideo(meta.vhash);
+    if (v) { this.setVideo(meta, v); return; }
+    // 動画を流さない設定なら受け取らない（通信を節約）
+    if (!this.host.videoOn()) return;
+    this.vtransfer = { label: '動画を受け取っています', ratio: 0 };
+    c.vneed(meta);
+    if (this.view === 'room' && !this.playingNow) this.renderSong();
+  }
+
+  /** 予約した人: 今の曲の背景の動画を送る */
+  private async vupload(key: string, lib: string) {
+    const c = this.client;
+    if (!c) return;
+    const v = await loadSongVideo(lib).catch(() => null);
+    if (!v || v.fromAudio) return;
+    this.vtransfer = { label: '動画を送っています', ratio: 0 };
+    this.paintVProgress();
+    try {
+      await c.sendAudio(key, v.data, (r) => {
+        if (!this.vtransfer) return;
+        this.vtransfer.ratio = r;
+        this.paintVProgress();
+      }, 'vend');
+    } catch (err) {
+      this.host.toast((err as Error).message);
+    }
+    this.vtransfer = null;
+    if (this.view === 'room' && !this.playingNow) this.renderSong();
+  }
+
+  private paintVProgress() {
+    const tr = this.vtransfer;
+    if (!tr || this.view !== 'room' || this.playingNow) return;
+    const el = this.body.querySelector<HTMLElement>('.ol-vprog');
+    if (el) {
+      el.querySelector('span')!.textContent = `${tr.label} ${Math.round(tr.ratio * 100)}%`;
+      el.querySelector<HTMLElement>('i')!.style.width = `${(tr.ratio * 100).toFixed(1)}%`;
+    } else this.renderSong();
   }
 
   /** 次の曲が決まった: 音源を持っていればすぐ読み込み、なければ受け取る */
@@ -732,6 +826,9 @@ export class OnlineScreen {
     if (this.playingNow) return;
     this.song = null;
     this.transfer = null;
+    this.vtransfer = null;
+    this.video = null;
+    this.host.play.setVideo(null);
     // 難易度: 前と同じ難易度があればそれ、なければ予約した人の難易度
     if (!chart.courses.some((x) => x.name === this.myCourse)) this.myCourse = meta.course;
     if (this.myCourse !== meta.course) c.send({ t: 'course', c: this.myCourse });
@@ -742,11 +839,14 @@ export class OnlineScreen {
       if (!audio) {
         this.transfer = { label: '曲を受け取っています', ratio: 0 };
         c.need(meta);
+        // 音源と別の動画は、音源のあとに受け取る（サーバーは音源を送り終えてから流す）
+        if (!meta.vfromAudio) void this.prepareVideo(meta, by, null);
         if (this.view === 'room') this.renderSong();
         return;
       }
     }
     await this.load(meta, chart, audio);
+    void this.prepareVideo(meta, by, audio);
   }
 
   /** 音源を全部受け取った */
@@ -755,6 +855,8 @@ export class OnlineScreen {
     void putCachedAudio(meta.hash, ab.slice(0));
     const chart = this.nextSong?.meta.key === meta.key ? this.nextSong.chart : parseTJA(meta.tja);
     await this.load(meta, chart, ab);
+    // 動画が音源と同じファイルなら、受け取った音源を動画にも使う
+    if (meta.vfromAudio) this.setVideo(meta, ab);
   }
 
   /** 今の曲を読み込んで、遊べる状態にする */
@@ -765,6 +867,7 @@ export class OnlineScreen {
     try {
       await this.host.audio.loadMusic(audio);
       this.song = { meta, chart };
+      this.applyVideo();
       c.send({ t: 'have', key: meta.key });
     } catch {
       this.host.toast('届いた曲を読み込めませんでした');

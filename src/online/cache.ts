@@ -34,3 +34,35 @@ export async function putCachedAudio(hash: string, data: ArrayBuffer) {
     // とっておけなくても遊べる
   }
 }
+
+// ---------- 背景の動画（大きいので新しい 3 本まで） ----------
+const VINDEX = 'olvcache-index';
+const VMAX = 3;
+const vkey = (hash: string) => `olvcache-${hash}`;
+
+export async function getCachedVideo(hash: string): Promise<ArrayBuffer | null> {
+  if (!hash) return null;
+  try {
+    const v = await dbGet<ArrayBuffer>(vkey(hash));
+    if (!v) return null;
+    const list = ((await dbGet<string[]>(VINDEX)) ?? []).filter((h) => h !== hash);
+    await dbPut(VINDEX, [...list, hash]);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+export async function putCachedVideo(hash: string, data: ArrayBuffer) {
+  if (!hash) return;
+  try {
+    const list = ((await dbGet<string[]>(VINDEX)) ?? []).filter((h) => h !== hash);
+    // 先に古いものを消してから入れる（容量が足りなくならないように）
+    while (list.length >= VMAX) await dbDel(vkey(list.shift()!));
+    await dbPut(vkey(hash), data);
+    list.push(hash);
+    await dbPut(VINDEX, list);
+  } catch {
+    // とっておけなくても遊べる
+  }
+}

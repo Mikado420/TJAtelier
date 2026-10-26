@@ -40,6 +40,12 @@ export interface SongMeta {
   hash: string;
   /** 予約した人の曲の一覧での番号 */
   lib: string;
+  /** 背景の動画: ファイル名（無ければ ''）・バイト数（音源と同じなら 0）・中身から作った値・ずれ（秒）・音源と同じファイルか */
+  vname: string;
+  vsize: number;
+  vhash: string;
+  voff: number;
+  vfromAudio: boolean;
 }
 
 export interface RoomSettings { pick: 'host' | 'all' | 'turn' | 'random'; limit: number; auto: boolean }
@@ -75,6 +81,12 @@ export interface Handlers {
   songProgress(ratio: number): void;
   /** 音源を全部受け取った */
   songReady(meta: SongMeta, audio: Uint8Array): void;
+  /** 予約した曲の背景の動画を送ってほしい（予約した人に） */
+  vupload(key: string, lib: string): void;
+  /** 動画を受け取った割合（0〜1） */
+  videoProgress(ratio: number): void;
+  /** 動画を全部受け取った */
+  videoReady(meta: SongMeta, video: Uint8Array): void;
   start(zero: number, key: string, players: { p: string; name: string; course: string }[]): void;
   /** 観戦: 今のプレイの曲の 0 秒の時刻と、参加している人のここまでの様子 */
   watch(zero: number, key: string, players: WatchPlayer[]): void;
@@ -120,6 +132,9 @@ export class OnlineClient {
   private meta: SongMeta | null = null;
   private buf: Uint8Array | null = null;
   private got = 0;
+  // 受け取り中の背景の動画
+  private vbuf: Uint8Array | null = null;
+  private vgot = 0;
   /** 送っている曲の通し番号（途中で別の曲に変えたら古いほうを止める） */
   private upSeq = 0;
 
@@ -249,10 +264,21 @@ export class OnlineClient {
         this.meta = m.meta as SongMeta;
         this.buf = null;
         this.got = 0;
+        this.vbuf = null;
+        this.vgot = 0;
+        this.upSeq++; // 前の曲を送っている途中なら止める
         this.on.next?.(this.meta, String(m.by));
         break;
       }
       case 'upload': this.on.upload?.(String(m.key), String(m.lib ?? '')); break;
+      case 'vupload': this.on.vupload?.(String(m.key), String(m.lib ?? '')); break;
+      case 'vend':
+        if (this.meta && m.key === this.meta.key && this.vbuf && this.vgot === this.meta.vsize) {
+          const b = this.vbuf;
+          this.vbuf = null;
+          this.on.videoReady?.(this.meta, b);
+        }
+        break;
       case 'songEnd':
         if (this.meta && m.key === this.meta.key && this.buf && this.got === this.meta.size) {
           const b = this.buf;
@@ -275,7 +301,16 @@ export class OnlineClient {
   }
 
   private onChunk(data: ArrayBuffer) {
-    if (!this.meta || !this.buf) return;
+    if (!this.meta) return;
+    // 音源を受け取り終えていなければ音源、それから動画（サーバーは音源を送り終えてから動画を流す）
+    if (!this.buf || this.got >= this.buf.length) {
+      if (!this.vbuf) return;
+      const n = Math.min(data.byteLength, this.vbuf.length - this.vgot);
+      this.vbuf.set(new Uint8Array(data, 0, n), this.vgot);
+      this.vgot += n;
+      this.on.videoProgress?.(this.vgot / this.meta.vsize);
+      return;
+    }
     const n = Math.min(data.byteLength, this.buf.length - this.got);
     this.buf.set(new Uint8Array(data, 0, n), this.got);
     this.got += n;
@@ -290,8 +325,16 @@ export class OnlineClient {
     this.send({ t: 'need', key: meta.key });
   }
 
-  /** 予約した人: 今の曲の音源を送る（少しずつ。送った割合を progress で知らせる） */
-  async sendAudio(key: string, audio: ArrayBuffer, progress?: (r: number) => void) {
+  /** 背景の動画を持っていない（欲しい）: 受け取る準備をして、サーバーに知らせる */
+  vneed(meta: SongMeta) {
+    if (this.meta?.key !== meta.key || !meta.vsize) return;
+    this.vbuf = new Uint8Array(meta.vsize);
+    this.vgot = 0;
+    this.send({ t: 'vneed', key: meta.key });
+  }
+
+  /** 予約した人: 今の曲の音源（end = 'songEnd'）・動画（end = 'vend'）を送る（少しずつ。送った割合を progress で知らせる） */
+  async sendAudio(key: string, audio: ArrayBuffer, progress?: (r: number) => void, end: 'songEnd' | 'vend' = 'songEnd') {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('つながっていません');
     const seq = ++this.upSeq;
@@ -305,7 +348,7 @@ export class OnlineClient {
       ws.send(audio.slice(i, i + CHUNK));
       progress?.(Math.min(1, (i + CHUNK) / audio.byteLength));
     }
-    this.send({ t: 'songEnd', key });
+    this.send({ t: end, key });
   }
 }
 

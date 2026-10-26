@@ -70,6 +70,8 @@ export interface Layout {
   drumRY: number;
   /** これより上は指を置いておく場所（叩いても反応しない）。0 ならなし（画面 px） */
   restBottom: number;
+  /** 背景の動画を「上だけ」に出すときの範囲（画面 px） */
+  top: { x: number; y: number; w: number; h: number };
 }
 
 /** オンライン対戦の相手（小さいレーンで下に並べる） */
@@ -219,6 +221,7 @@ export class Renderer {
       drumY: this.drum().cy,
       drumRY: this.drum().ry,
       restBottom: this.restZone ? this.sy(LANE_TOP) : 0,
+      top: { x: this.ox, y: this.oy, w: REF_W * s, h: this.sy(LANE_TOP) - this.oy },
     };
     for (const c of Object.values(this.burstSprites)) { c.width = 0; c.height = 0; }
     this.burstSprites = {};
@@ -237,6 +240,9 @@ export class Renderer {
 
   /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
   spectate = false;
+
+  /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
+  videoMode: '' | 'full' | 'top' = '';
 
   /** 観戦のとき: 画面に入る音符・小節線の位置だけ求める（自分のレーンは描かない） */
   private computeVis(game: Game, bars: Course['bars'], now: number, right: number) {
@@ -329,15 +335,50 @@ export class Renderer {
     const bg = this.bg ?? document.createElement('canvas');
     bg.width = this.canvas.width;
     bg.height = this.canvas.height;
-    const c = bg.getContext('2d', { alpha: false })!;
-    c.fillStyle = '#000';
-    c.fillRect(0, 0, bg.width, bg.height);
+    const c = bg.getContext('2d')!;
+    const vm = this.videoMode;
+    c.clearRect(0, 0, bg.width, bg.height);
+    // 背景の動画を全面に出すときは、後ろの動画が見えるように塗らない
+    if (vm !== 'full') {
+      c.fillStyle = '#000';
+      c.fillRect(0, 0, bg.width, bg.height);
+    }
     c.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
     c.save();
     c.beginPath();
     c.rect(0, 0, REF_W, REF_H);
     c.clip();
     const V = this.vis;
+    if (vm) this.paintVideoBackground(c, V, vm);
+    else this.paintPlainBackground(c, V);
+    if (!this.spectate) {
+      // 動画の上では、レーンを少し透かす
+      c.globalAlpha = vm === 'full' ? 0.78 : 1;
+      this.paintLaneBase(c, V.x1);
+      c.globalAlpha = 1;
+    }
+    // オンライン対戦の相手のレーンの動かない部分
+    for (let n = 0; n < this.opponents.length; n++) {
+      const { top, k } = this.rowGeom(n);
+      c.save();
+      c.translate(0, top);
+      c.scale(k, k);
+      c.translate(0, -(LANE_TOP - 6));
+      c.globalAlpha = vm === 'full' ? 0.78 : 1;
+      this.paintLaneBase(c, V.x1 / k);
+      c.restore();
+    }
+    this.finishBackground(c, bg);
+  }
+
+  /** 背景の動画があるとき: 全面なら塗らない、上だけなら上を空けて下はふつうの床 */
+  private paintVideoBackground(c: CanvasRenderingContext2D, V: Rect, vm: 'full' | 'top') {
+    if (vm === 'full') return;
+    this.paintPlainBackground(c, V);
+    c.clearRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
+  }
+
+  private paintPlainBackground(c: CanvasRenderingContext2D, V: Rect) {
     // 上: 濃紺に青の斜線
     const tg = c.createLinearGradient(0, V.y0, 0, LANE_TOP);
     tg.addColorStop(0, '#172a37');
@@ -392,17 +433,9 @@ export class Renderer {
       c.fillStyle = lg;
       c.fillRect(x - r, y - r, r * 2, r * 2);
     }
-    if (!this.spectate) this.paintLaneBase(c, V.x1);
-    // オンライン対戦の相手のレーンの動かない部分
-    for (let n = 0; n < this.opponents.length; n++) {
-      const { top, k } = this.rowGeom(n);
-      c.save();
-      c.translate(0, top);
-      c.scale(k, k);
-      c.translate(0, -(LANE_TOP - 6));
-      this.paintLaneBase(c, V.x1 / k);
-      c.restore();
-    }
+  }
+
+  private finishBackground(c: CanvasRenderingContext2D, bg: HTMLCanvasElement) {
     c.restore(); // 16:9 の枠の切り抜きを外す（太鼓は黒帯の上まで描く）
     // タッチ用の太鼓（画面 px の座標系）
     if (this.touch && this.padVisible) {

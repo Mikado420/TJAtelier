@@ -20,7 +20,7 @@ import { writeCourseBody } from './chart/tjaWrite';
 
 import { DIVISORS, Editor, type Tool } from './editor/editor';
 import { EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow } from './editor/view';
-import { loadFiles, type AudioFile } from './io/load';
+import { isVideoName, loadFiles, type AudioFile } from './io/load';
 import { encodeSJIS } from './chart/sjis';
 import { analyzeCourse, simulateRolls } from './chart/analyze';
 import { drawChartImage } from './chart/chartImage';
@@ -28,7 +28,7 @@ import { mountTimeline } from './ui/infoTimeline';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, newId, saveSong, setCurrentId } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, saveSong, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZip, readZip, writeZip } from './io/zip';
 import { exportBackup, importBackup, isBackup } from './io/backup';
@@ -89,6 +89,10 @@ const settings = {
   volMetro: 1.2,
   /** 画面の音（タップ・フォルダ・結果・曲名） */
   volUi: 1,
+  /** 背景の動画: 全面・上だけ・出さない */
+  videoMode: 'full' as 'full' | 'top' | 'off',
+  /** 背景の動画の明るさ（0.1〜1） */
+  videoDim: 0.5,
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
@@ -1096,6 +1100,8 @@ function renderSheet() {
       </div>
       <label class="field"><span>DEMOSTART</span><input type="number" step="0.01" inputmode="decimal" data-meta="demoStart" value="${c.demoStart}"></label>
       <label class="field"><span>音源名</span><input type="text" data-meta="wave" value="${esc(c.wave)}" placeholder="${esc(ed.audio?.name ?? '曲名.ogg')}" autocomplete="off"></label>
+      ${currentVideo ? `<div class="field"><span>背景の動画</span><div class="vid-row"><b>${esc(currentVideo.name)}</b><button data-act="rmVideo" class="danger">外す</button></div></div>
+      <label class="field"><span>動画のずれ (秒)</span><input type="number" step="0.01" inputmode="decimal" data-voff value="${currentVideo.offset}"></label>` : ''}
 
       <h3>難易度</h3>
       <div class="list">${courses}</div>
@@ -1349,8 +1355,11 @@ function playSettingRows() {
     ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
     ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
     ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
-    ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}`;
+    ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}
+    <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }
+const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['top', '上だけ'], ['off', '出さない']];
 function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}
@@ -1398,9 +1407,19 @@ function onHitModeClick(b: HTMLButtonElement) {
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
 }
 
+/** 背景の動画（全面 / 上だけ / 出さない）のボタン */
+function onVideoModeClick(b: HTMLButtonElement) {
+  settings.videoMode = b.dataset.vmode as typeof settings.videoMode;
+  saveSettings();
+  b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  play.applySettings();
+}
+
 $('sheetBody').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
   if (b) onHitModeClick(b);
+  const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');
+  if (v) onVideoModeClick(v);
 });
 $('sheetBody').addEventListener('input', (e) => { onSettingInput(e.target as HTMLInputElement, false); });
 $('sheetBody').addEventListener('change', (e) => { onSettingInput(e.target as HTMLInputElement, true); });
@@ -1441,12 +1460,21 @@ $('sheetBody').addEventListener('click', (e) => {
 $('sheetBody').addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement | HTMLSelectElement;
   const d = el.dataset;
+  if (d.voff !== undefined) {
+    // 背景の動画のずれ（秒）
+    const v = Number(el.value);
+    if (!Number.isFinite(v) || !currentSongId || !currentVideo) return;
+    currentVideo.offset = Math.max(-60, Math.min(60, v));
+    play.setVideoOffset(currentVideo.offset);
+    void setVideoOffset(currentSongId, currentVideo.offset);
+    return;
+  }
   if (d.meta) {
     const key = d.meta as 'title' | 'subtitle' | 'bpm' | 'offset' | 'demoStart' | 'wave';
     if (key === 'wave') {
-      // 音源名（WAVE:）。音源はいつも .ogg なので拡張子は .ogg にそろえる
+      // 音源名（WAVE:）。音源は .ogg（動画の音を使う曲は動画の名前のまま）
       const raw = el.value.trim().replace(/[\\/:*?"<>|]+/g, '_');
-      const name = raw ? oggName(raw) : '';
+      const name = raw ? (isVideoName(raw) ? raw : oggName(raw)) : '';
       el.value = name;
       ed.mutate(() => { ed.chart.wave = name; });
       return;
@@ -1545,6 +1573,8 @@ async function convertAudio(a: AudioFile, label = a.name): Promise<{ file: Audio
   busy(`「${label}」を読み込んでいます…`);
   const buf = await audio.ctx.decodeAudioData(a.data.slice(0));
   if (isOgg(a.data)) return { file: { name: oggName(a.name), data: a.data }, length: buf.duration };
+  // 動画（mp4 など）は変換しない（背景の動画にもそのまま使う）
+  if (isVideoName(a.name)) return { file: a, length: buf.duration };
   const data = await pcmToOgg(bufferChannels(buf), buf.sampleRate, (p) => busy(`「${label}」を .ogg にしています…`, p));
   return { file: { name: oggName(a.name), data }, length: buf.duration };
 }
@@ -1591,13 +1621,22 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
         a = c.file;
         len = c.length;
         sng.chart.wave = a.name;
-      } catch { r.skipped.push(sng.audio.name); }
+      } catch {
+        // 動画の音が読めない（音の無い動画など）: 動画だけ使う
+        if (sng.video?.fromAudio) sng.video = { name: sng.video.name, data: sng.video.data };
+        else r.skipped.push(sng.audio.name);
+      }
     }
+    if (sng.video) setBgMovie(sng.chart, sng.video.name);
     const id = newId();
     // genre.ini があれば、そのジャンル名のフォルダに入れる
     const f = sng.genre ? sng.genre.split('/').map((x) => x.slice(0, 40)).join('/') : folder;
     if (sng.genre && !genresMade.has(f)) { genresMade.add(f); await addFolder(f).catch(() => {}); }
     await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, f);
+    if (sng.video) {
+      busy(`「${sng.chart.title || sng.video.name}」の動画を入れています…`);
+      await saveSongVideo(id, { name: sng.video.name, data: sng.video.fromAudio && a ? null : sng.video.data, fromAudio: !!(sng.video.fromAudio && a) });
+    }
     added.push(id);
   }
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
@@ -1607,12 +1646,20 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     if (mode === 'audio' && currentSongId && !home.visible) {
       busyEnd();
       await applyAudioOnly(c.file);
+      // 動画なら、背景の動画にも使う
+      if (isVideoName(c.file.name)) {
+        await saveSongVideo(currentSongId, { name: c.file.name, data: null, fromAudio: true });
+        ed.mutate(() => setBgMovie(ed.chart, c.file.name));
+        await refreshVideo(currentSongId);
+      }
       return;
     }
     const chart = newChart(raw.name.replace(/\.[^.]+$/, ''));
     chart.wave = c.file.name;
+    if (isVideoName(c.file.name)) setBgMovie(chart, c.file.name);
     const id = newId();
     await saveSong(id, { chart, courseIndex: 0 }, c.file, c.length, folder);
+    if (isVideoName(c.file.name)) await saveSongVideo(id, { name: c.file.name, data: null, fromAudio: true });
     added.push(id);
   }
   busyEnd();
@@ -1623,6 +1670,13 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   if (home.visible) await home.select(added[0]);
   else if (added.length === 1) await openSong(added[0], 'edit');
   else await home.show(added[0]);
+}
+
+/** 譜面のヘッダの BGMOVIE: を、背景の動画の名前にする（TJAPlayer などでもその動画が流れるように） */
+function setBgMovie(chart: { extra: [string, string][] }, name: string) {
+  const i = chart.extra.findIndex(([k]) => k.toUpperCase() === 'BGMOVIE');
+  if (i >= 0) chart.extra[i] = [chart.extra[i][0], name];
+  else chart.extra.push(['BGMOVIE', name]);
 }
 
 async function applyAudioOnly(a: AudioFile) {
@@ -1738,6 +1792,12 @@ async function fileAction(act: string) {
     const name = COURSE_NAMES.find((n) => !used.has(n)) ?? 'Edit';
     ed.addCourse(name, act === 'dupCourse' ? ed.course.level : 1, act === 'dupCourse' ? ed.course : undefined);
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
+  } else if (act === 'rmVideo') {
+    if (!currentSongId || !confirm('背景の動画を外しますか？')) return;
+    await saveSongVideo(currentSongId, null);
+    ed.mutate(() => { ed.chart.extra = ed.chart.extra.filter(([k]) => k.toUpperCase() !== 'BGMOVIE'); });
+    await refreshVideo(currentSongId);
+    openSheet('info');
   } else if (act === 'backup') {
     busy('バックアップを作っています…', 0);
     try {
@@ -1857,6 +1917,8 @@ $('pauseSettings').addEventListener('click', (e) => {
   if (pm) { play.setAuto(pm.dataset.pmode === 'auto'); return; }
   const hm = t.closest<HTMLButtonElement>('[data-hitmode]');
   if (hm) onHitModeClick(hm);
+  const vm = t.closest<HTMLButtonElement>('[data-vmode]');
+  if (vm) onVideoModeClick(vm);
 });
 const onPauseSetting = (e: Event, commit: boolean) => {
   if (onSettingInput(e.target as HTMLInputElement, commit)) play.applySettings();
@@ -1953,7 +2015,7 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   view.pos = 0;
   let a = await loadSongAudio(id);
   // 前の版で入れた .mp3 などは、開いたときに .ogg にしておく
-  if (a && !isOgg(a.data)) {
+  if (a && !isOgg(a.data) && !isVideoName(a.name)) {
     try {
       a = (await convertAudio(a, data.chart.title)).file;
       data.chart.wave = a.name;
@@ -1963,11 +2025,22 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
     busyEnd();
   }
   await setAudio(a, false);
+  await refreshVideo(id);
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
   home.hide();
   updateHeader();
   if (mode === 'play') void startTest(true);
+}
+
+/** 開いている曲の背景の動画（プレイで流す） */
+let currentVideo: { name: string; offset: number } | null = null;
+const videoType = (name: string) => (/\.mov$/i.test(name) ? 'video/quicktime' : /\.webm$/i.test(name) ? 'video/webm' : 'video/mp4');
+async function refreshVideo(id: string | null) {
+  const v = id ? await loadSongVideo(id) : null;
+  const e = id && v ? (await listSongs()).find((x) => x.id === id) : undefined;
+  currentVideo = v ? { name: v.name, offset: e?.videoOffset ?? 0 } : null;
+  play.setVideo(v ? new Blob([v.data], { type: videoType(v.name) }) : null, currentVideo?.offset ?? 0);
 }
 
 /** 新しい曲を一覧に作って開く */
@@ -1981,10 +2054,12 @@ const online = new OnlineScreen({
   audio,
   play,
   toast,
-  // オンラインで読み込んだ音源から、開いていた曲の音源に戻す
+  videoOn: () => settings.videoMode !== 'off',
+  // オンラインで読み込んだ音源・動画から、開いていた曲のものに戻す
   closed: () => void (async () => {
     const a = currentSongId ? await loadSongAudio(currentSongId) : null;
     await audio.loadMusic(a ? a.data.slice(0) : null).catch(() => {});
+    await refreshVideo(currentSongId);
   })(),
 });
 

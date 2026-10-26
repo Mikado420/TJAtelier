@@ -71,6 +71,13 @@ export interface SongMeta {
   hash: string;
   /** 予約した人の曲の一覧での番号（予約した人だけが使う） */
   lib: string;
+  /** 背景の動画のファイル名（無ければ ''）・バイト数（音源と同じファイルなら 0）・中身から作った値・ずれ（秒） */
+  vname: string;
+  vsize: number;
+  vhash: string;
+  voff: number;
+  /** 動画が音源と同じファイル（mp4 だけの曲。音源を受け取れば動画にも使う） */
+  vfromAudio: boolean;
 }
 
 interface QItem { qid: string; by: string; byName: string; meta: Omit<SongMeta, 'key'> }
@@ -99,6 +106,8 @@ const LEAD_MS = 4500;
 const COUNTDOWN_MS = 3000;
 /** 通信が切れてから席を消すまで（ms） */
 const AWAY_MS = 20000;
+/** 背景の動画の上限（バイト。サーバーにはためずに、持っていない人へそのまま流す） */
+export const MAX_VIDEO = 300 * 1024 * 1024;
 /** 予約できる曲の数（部屋全体） */
 const MAX_QUEUE = 30;
 
@@ -118,7 +127,11 @@ export class RoomCore {
   private settings: RoomSettings = { pick: 'all', limit: 2, auto: true };
   private queue: QItem[] = [];
   /** 今の曲（予約から 1 曲ずつ。音源は持っていない人にだけ配る） */
-  private current: { item: QItem; key: string; uploading: boolean; done: boolean; chunks: ArrayBuffer[]; received: number; need: Set<string> } | null = null;
+  private current: {
+    item: QItem; key: string; uploading: boolean; done: boolean; chunks: ArrayBuffer[]; received: number; need: Set<string>;
+    /** 背景の動画（ためずに流すだけ。欲しい人がいるときだけ、予約した人に送ってもらう） */
+    vuploading: boolean; vreceived: number; vneed: Set<string>;
+  } | null = null;
   /** 最後に遊んだ曲（「もう一回」用） */
   private last: QItem | null = null;
   /** 順番に選ぶとき: 最後に選ばれた人 */
@@ -288,6 +301,11 @@ export class RoomCore {
             audioName: clean(meta.audioName, 80),
             hash: clean(meta.hash, 80),
             lib: clean(meta.lib, 40),
+            vname: clean(meta.vname, 80),
+            vsize: Math.max(0, Math.min(MAX_VIDEO, Math.floor(Number(meta.vsize) || 0))),
+            vhash: clean(meta.vhash, 80),
+            voff: Math.max(-60, Math.min(60, Number(meta.voff) || 0)),
+            vfromAudio: !!meta.vfromAudio,
           },
         });
         this.advance();
@@ -367,6 +385,19 @@ export class RoomCore {
         if (cur.received !== cur.item.meta.size) return this.sendTo(p, { t: 'err', msg: '音源を送りきれませんでした' });
         cur.done = true;
         for (const id of cur.need) { const o = this.players.get(id); if (o) this.sendTo(o, { t: 'songEnd', key: cur.key }); }
+        this.maybeVideoUpload();
+        break;
+      case 'vneed':
+        // 背景の動画を持っていない（欲しい）: 予約した人に送ってもらう（音源を送り終えてから）
+        if (!cur || m.key !== cur.key || !cur.item.meta.vsize) return;
+        cur.vneed.add(p.id);
+        this.maybeVideoUpload();
+        break;
+      case 'vend':
+        if (!cur || p.id !== cur.item.by || !cur.vuploading || m.key !== cur.key) return;
+        cur.vuploading = false;
+        for (const id of cur.vneed) { const o = this.players.get(id); if (o) this.sendTo(o, { t: 'vend', key: cur.key }); }
+        cur.vneed.clear();
         break;
       case 'ok':
         p.ok = !!m.on;
@@ -481,16 +512,34 @@ export class RoomCore {
     } else this.queue = this.queue.filter((x) => x.qid !== item!.qid);
     this.lastBy = item.by;
     const key = `${item.qid}-${this.now().toString(36)}`;
-    this.current = { item, key, uploading: false, done: item.meta.size === 0, chunks: [], received: 0, need: new Set() };
+    this.current = { item, key, uploading: false, done: item.meta.size === 0, chunks: [], received: 0, need: new Set(), vuploading: false, vreceived: 0, vneed: new Set() };
     for (const o of this.players.values()) { o.ready = false; o.ok = false; o.course = item.meta.course; }
     this.broadcast({ t: 'next', meta: { ...item.meta, key }, by: item.by });
     this.roster();
   }
 
-  /** 予約した人から届いた音源のかけら（持っていない人にだけ配る。後から入った人のためにためておく） */
+  /** 動画を欲しい人がいて、音源を送っている途中でなければ、予約した人に動画を送ってもらう */
+  private maybeVideoUpload() {
+    const cur = this.current;
+    if (!cur || cur.vuploading || !cur.vneed.size || (cur.uploading && !cur.done)) return;
+    const by = this.players.get(cur.item.by);
+    if (!by) return;
+    cur.vuploading = true;
+    cur.vreceived = 0;
+    this.sendTo(by, { t: 'vupload', key: cur.key, lib: cur.item.meta.lib });
+  }
+
+  /** 予約した人から届いた音源・動画のかけら（音源は持っていない人に配ってためておく。動画は欲しい人へ流すだけ） */
   private audioChunk(p: Player, data: ArrayBuffer) {
     const cur = this.current;
-    if (!cur || p.id !== cur.item.by || cur.done || this.phase !== 'wait') return;
+    if (!cur || p.id !== cur.item.by) return;
+    if (!(cur.uploading && !cur.done && this.phase === 'wait')) {
+      // 動画（プレイ中も流してよい。終わってから使う）
+      if (!cur.vuploading || cur.vreceived + data.byteLength > cur.item.meta.vsize) return;
+      cur.vreceived += data.byteLength;
+      for (const id of cur.vneed) { const o = this.players.get(id); if (o) this.sendRaw(o, data); }
+      return;
+    }
     if (cur.received + data.byteLength > cur.item.meta.size) {
       this.sendTo(p, { t: 'err', msg: '音源の大きさが合いません' });
       return;

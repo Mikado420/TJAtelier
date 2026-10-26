@@ -2216,3 +2216,14 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .ol-player { flex-wrap: wrap; row-gap: 4px; }
 .ol-player .ol-pn { flex: 1 1 70px; }
 .ol-player .ol-kick { width: 30px; height: 28px; font-size: 14px; }
+
+/* 背景の動画（いちばん後ろ。上に背景・レーンの canvas を重ねる） */
+.play .play-video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; background: #000; }
+.play .play-video.hidden { display: none; }
+/* 背景の動画がある曲の印・エディタの曲情報 */
+.hr-vid { display: inline-block; width: 16px; height: 16px; margin-left: 6px; vertical-align: -2px; fill: none; stroke: var(--accent-hi); stroke-width: 2; stroke-linejoin: round; }
+.home .hr.on .hr-vid { width: 20px; height: 20px; stroke: var(--accent); }
+.vid-row { display: flex; align-items: center; gap: 8px; }
+.vid-row b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.vid-row button { flex: none; }
+.ol-vprog i { background: #7b4bd0; }

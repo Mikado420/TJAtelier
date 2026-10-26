@@ -7,7 +7,7 @@ function conn() {
   const bin: ArrayBuffer[] = [];
   return { got, bin, send: (d: string | ArrayBuffer) => (typeof d === 'string' ? got.push(JSON.parse(d)) : bin.push(d)), close() {} };
 }
-const meta = (title: string, size = 0, hash = '') => ({ title, subtitle: '', course: 'Oni', level: 8, tja: 'x', size, audioName: 'a.ogg', hash, lib: title });
+const meta = (title: string, size = 0, hash = '', vsize = 0) => ({ title, subtitle: '', course: 'Oni', level: 8, tja: 'x', size, audioName: 'a.ogg', hash, lib: title, vname: vsize ? 'v.mp4' : '', vsize, vhash: vsize ? 'vh' : '', voff: 0, vfromAudio: false });
 const last = (c: ReturnType<typeof conn>, t: string) => [...c.got].reverse().find((m) => m.t === t);
 
 describe('部屋（予約・音源を配る・準備OK・入り直し）', () => {
@@ -95,5 +95,23 @@ describe('部屋（予約・音源を配る・準備OK・入り直し）', () =>
     expect(typeof B2 !== 'string' && B2.id).toBe(B.id);
     vi.advanceTimersByTime(25000);
     expect((last(cb2, 'roster')!.players as Msg[]).length).toBe(2);
+  });
+
+  it('背景の動画は、欲しい人がいるときだけ、音源を送り終えてから流す（サーバーにはためない）', () => {
+    const { ca, cb, A, B, send, room } = setup();
+    send(B, { t: 'reserve', meta: meta('動画', 10, 'h', 20) });
+    const key = (last(cb, 'next')!.meta as Msg).key;
+    send(B, { t: 'have', key });
+    send(A, { t: 'need', key });
+    send(A, { t: 'vneed', key });
+    // 音源を送っている間は、動画はまだ頼まない
+    expect(last(cb, 'vupload')).toBeUndefined();
+    room.message(B, new ArrayBuffer(10));
+    send(B, { t: 'songEnd', key });
+    expect(last(cb, 'vupload')?.key).toBe(key);
+    room.message(B, new ArrayBuffer(20));
+    send(B, { t: 'vend', key });
+    expect(ca.bin.map((b) => b.byteLength)).toEqual([10, 20]);
+    expect(last(ca, 'vend')?.key).toBe(key);
   });
 });

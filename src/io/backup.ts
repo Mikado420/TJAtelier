@@ -1,8 +1,8 @@
 /**
- * バックアップ（曲・音源・フォルダ・遊んだ記録をまとめて 1 つの .zip に書き出す・戻す）。
+ * バックアップ（曲・音源・背景の動画・フォルダ・遊んだ記録をまとめて 1 つの .zip に書き出す・戻す）。
  * 音源が多いと大きくなるので、だいたい 80MB ごとに分けて書き出す（戻すときは全部まとめて選べばよい）
  */
-import { addFolder, listFolders, listSongs, loadSongAudio, loadSongData, restoreSong, type SongData, type SongEntry } from './library';
+import { addFolder, listFolders, listSongs, loadSongAudio, loadSongData, loadSongVideo, restoreSong, saveSongVideo, type SongData, type SongEntry } from './library';
 import type { ZipEntry } from './zip';
 import { writeZip } from './zip';
 
@@ -18,7 +18,7 @@ interface Manifest {
   parts: number;
   folders: string[];
   best: Record<string, { score: number; crown: string }>;
-  songs: { entry: SongEntry; audioName: string | null }[];
+  songs: { entry: SongEntry; audioName: string | null; videoName?: string; videoFromAudio?: boolean }[];
 }
 
 const stamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
@@ -34,7 +34,8 @@ export async function exportBackup(save: (blob: Blob, name: string) => Promise<v
   let size = 0;
   for (const s of songs) {
     const a = await loadSongAudio(s.id);
-    const n = a?.data.byteLength ?? 0;
+    const v = s.video ? await loadSongVideo(s.id) : null;
+    const n = (a?.data.byteLength ?? 0) + (v && !v.fromAudio ? v.data.byteLength : 0);
     if (size + n > PART_BYTES && groups[groups.length - 1].length) { groups.push([]); size = 0; }
     groups[groups.length - 1].push(s);
     size += n;
@@ -51,7 +52,10 @@ export async function exportBackup(save: (blob: Blob, name: string) => Promise<v
       files.push({ name: `charts/${s.id}.json`, data: enc.encode(JSON.stringify(data)), compress: true });
       const a = await loadSongAudio(s.id);
       if (a) files.push({ name: `audio/${s.id}/${a.name}`, data: new Uint8Array(a.data) });
-      list.push({ entry: s, audioName: a?.name ?? null });
+      // 背景の動画（音源と同じファイルなら入れない）
+      const v = s.video ? await loadSongVideo(s.id) : null;
+      if (v && !v.fromAudio) files.push({ name: `video/${s.id}/${v.name}`, data: new Uint8Array(v.data) });
+      list.push({ entry: s, audioName: a?.name ?? null, ...(v ? { videoName: v.name, videoFromAudio: v.fromAudio } : {}) });
       progress?.(++done / Math.max(1, songs.length));
     }
     const m: Manifest = { app: 'TJAtelier', version: 1, createdAt: Date.now(), part: gi + 1, parts: groups.length, folders, best, songs: list };
@@ -73,13 +77,18 @@ export async function importBackup(entries: ZipEntry[]): Promise<number> {
   if (m.app !== 'TJAtelier') throw new Error('TJAtelier のバックアップではありません');
   const byName = new Map(entries.map((e) => [e.name, e]));
   let n = 0;
-  for (const { entry, audioName } of m.songs) {
+  for (const { entry, audioName, videoName, videoFromAudio } of m.songs) {
     const c = byName.get(`charts/${entry.id}.json`);
     if (!c) continue;
     const data = JSON.parse(new TextDecoder().decode(c.data)) as SongData;
     const a = audioName ? byName.get(`audio/${entry.id}/${audioName}`) : undefined;
     const audio = a ? { name: audioName!, data: a.data.buffer.slice(a.data.byteOffset, a.data.byteOffset + a.data.byteLength) as ArrayBuffer } : null;
     await restoreSong(entry, data, audio);
+    if (videoName) {
+      const v = videoFromAudio ? null : byName.get(`video/${entry.id}/${videoName}`);
+      if (videoFromAudio) await saveSongVideo(entry.id, { name: videoName, data: null, fromAudio: true });
+      else if (v) await saveSongVideo(entry.id, { name: videoName, data: v.data.buffer.slice(v.data.byteOffset, v.data.byteOffset + v.data.byteLength) as ArrayBuffer });
+    }
     n++;
   }
   // 遊んだ記録は、良いほうを残す

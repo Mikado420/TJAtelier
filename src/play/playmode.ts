@@ -40,6 +40,10 @@ export interface PlaySettings {
   restZone?: boolean;
   /** 指のタッチをポインターイベントで受け取る（iPhone の取りこぼし対策の切り替え） */
   pointerInput?: boolean;
+  /** 背景の動画: 全面・上だけ・出さない */
+  videoMode?: 'full' | 'top' | 'off';
+  /** 背景の動画の明るさ（0.1〜1） */
+  videoDim?: number;
 }
 
 /** オンライン対戦のプレイ（PlayMode.startOnline に渡す） */
@@ -195,7 +199,10 @@ export class PlayMode {
     this.root.classList.add('online');
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
+    this.stopVideo();
+    this.applyVideo(false);
     this.renderer.resize();
+    this.placeVideo();
     this.renderer.speed = this.settings.speed;
     this.active = true;
     postNative({ type: 'play', active: true });
@@ -250,6 +257,7 @@ export class PlayMode {
 
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
+    this.stopVideo();
     this.root.classList.add('hidden');
     this.root.classList.remove('online');
     document.body.classList.remove('playing');
@@ -325,7 +333,10 @@ export class PlayMode {
     // プレイ中は後ろのエディタを描かない・重ねて表示しない（プレイ画面に全部の力を使う）
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
+    this.stopVideo();
+    this.applyVideo(false);
     this.renderer.resize();
+    this.placeVideo();
     this.renderer.speed = this.settings.speed;
     this.active = true;
     postNative({ type: 'play', active: true });
@@ -392,6 +403,7 @@ export class PlayMode {
       P.last = t0;
       // 続けた直後は音が出るまで時計が少し戻ることがあるので、止めた時刻より前には戻さない
       const now = Math.max(this.time(), this.timeFloor);
+      this.syncVideo();
       if (this.auto && !this.calibrating) {
         this.scheduleSounds(now);
         this.autoPlay(game, now);
@@ -468,7 +480,113 @@ export class PlayMode {
     R.speed = this.settings.speed;
     R.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
+    this.applyVideo(false);
     R.resize();
+    this.placeVideo();
+  }
+
+  // ---------- 背景の動画 ----------
+
+  private video: HTMLVideoElement | null = null;
+  private videoUrl = '';
+  private videoOffset = 0;
+  private videoCheck = 0;
+
+  /** 背景の動画を決める（null で無し）。offset = 動画のずれ（秒。+ で動画を先へ） */
+  setVideo(src: Blob | null, offset = 0) {
+    this.videoOffset = offset;
+    if (this.videoUrl) URL.revokeObjectURL(this.videoUrl);
+    this.videoUrl = '';
+    if (!src) {
+      if (this.video) {
+        this.video.pause();
+        this.video.removeAttribute('src');
+        this.video.load();
+      }
+    } else {
+      if (!this.video) {
+        const v = document.createElement('video');
+        v.className = 'play-video';
+        v.muted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', '');
+        v.setAttribute('aria-hidden', 'true');
+        v.preload = 'auto';
+        this.root.prepend(v);
+        this.video = v;
+      }
+      this.videoUrl = URL.createObjectURL(src);
+      this.video.src = this.videoUrl;
+    }
+    if (this.active) this.applySettings();
+  }
+
+  setVideoOffset(sec: number) {
+    this.videoOffset = sec;
+  }
+
+  /** 今の動画の出し方（'' = 出さない） */
+  private get videoMode(): '' | 'full' | 'top' {
+    const m = this.settings.videoMode ?? 'full';
+    return this.videoUrl && m !== 'off' && !this.calibrating ? m : '';
+  }
+
+  /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */
+  private applyVideo(resize = true) {
+    const mode = this.videoMode;
+    const R = this.renderer;
+    const v = this.video;
+    if (v) {
+      v.classList.toggle('hidden', !mode);
+      v.style.filter = `brightness(${Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5))})`;
+      if (!mode) v.pause();
+    }
+    if (R.videoMode !== mode) {
+      R.videoMode = mode;
+      if (resize) R.resize();
+    }
+    this.placeVideo();
+  }
+
+  /** 上だけに出すときは、レーンより上の範囲に置く */
+  private placeVideo() {
+    const v = this.video;
+    if (!v) return;
+    const t = this.videoMode === 'top' ? this.renderer.layout?.top : null;
+    if (t) Object.assign(v.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px` });
+    else Object.assign(v.style, { left: '0', top: '0', width: '100%', height: '100%' });
+  }
+
+  /** 動画を曲に合わせる（ずれが大きければ飛ばし、小さければ速さを少し変えて追いつく） */
+  private syncVideo() {
+    const v = this.video;
+    if (!v || !this.videoMode) return;
+    const t = this.audio.now() + this.videoOffset;
+    const dur = Number.isFinite(v.duration) ? v.duration : Infinity;
+    if (t < 0 || t >= dur) {
+      if (!v.paused) v.pause();
+      return;
+    }
+    const wall = performance.now();
+    if (v.paused) {
+      if (wall < this.videoCheck) return;
+      this.videoCheck = wall + 300;
+      try { v.currentTime = t; } catch { /* まだ読み込み中 */ }
+      void v.play().catch(() => {});
+      return;
+    }
+    if (wall < this.videoCheck) return;
+    this.videoCheck = wall + 500;
+    const d = v.currentTime - t;
+    if (Math.abs(d) > 0.25) {
+      v.playbackRate = 1;
+      v.currentTime = t + 0.05;
+    } else v.playbackRate = d > 0.03 ? 0.96 : d < -0.03 ? 1.04 : 1;
+  }
+
+  private stopVideo() {
+    this.video?.pause();
+    this.videoCheck = 0;
   }
 
   /** ポーズ（曲を止めて、ポーズのメニューを出す） */
@@ -483,6 +601,7 @@ export class PlayMode {
       return;
     }
     this.paused = true;
+    this.stopVideo();
     this.pausedAt = this.audio.now();
     this.timeFloor = this.time();
     cancelAnimationFrame(this.raf);
@@ -555,6 +674,7 @@ export class PlayMode {
 
   finish() {
     if (!this.active) return;
+    this.stopVideo();
     this.hidePause();
     this.active = false;
     postNative({ type: 'play', active: false });
@@ -806,6 +926,7 @@ export class PlayMode {
 
   /** 結果を出さずに止める（途中でやめた） */
   private stopQuietly() {
+    this.stopVideo();
     this.hidePause();
     this.active = false;
     postNative({ type: 'play', active: false });
