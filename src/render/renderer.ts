@@ -2048,12 +2048,14 @@ export class Renderer {
    */
   private drum() {
     const P = this.pad;
+    // 大きさ 100%（面の横幅が画面の幅の 60.5%）のとき、面の上の端がレーンのすぐ下に来る位置を中心にして、
+    // 縦横とも同じ割合で拡大縮小する。rx・ry は面の大きさ（その外側が縁）
+    const base = (0.605 * P.w) / 2;
+    const cy = P.top + Math.max(5, base * 0.045) + 0.03 * P.h + base * 0.66;
     const rx = P.half;
     const ry = rx * 0.66;
-    const rim = Math.max(8, rx * 0.075);
-    // 面の上の端はレーンのすぐ下に固定（大きくすると横と下へ広がる）
-    const top = P.top + rim * 1.3 + 0.025 * P.h;
-    return { cx: P.x, cy: top + ry, rx, ry, rim };
+    const rim = Math.max(5, rx * 0.045);
+    return { cx: P.x, cy, rx, ry, rim };
   }
 
   /** 叩いたときの光（ドン・カッ × 左右）の画像。画面 px の半分の細かさで作る（ぼんやり光るだけなので十分） */
@@ -2111,15 +2113,15 @@ export class Renderer {
     // 縁のでこぼこ: 外周に小さな丸を少しずつ重ねて並べ、縁と 1 つの形にして塗る（重なった所が濃くならないように）
     const ax = D.rx + D.rim;
     const ay = D.ry + D.rim;
-    const n = Math.max(32, Math.round((2 * Math.PI * Math.sqrt((ax * ax + ay * ay) / 2)) / (D.rim * 0.8)));
+    const n = Math.max(32, Math.round((2 * Math.PI * Math.sqrt((ax * ax + ay * ay) / 2)) / (D.rim * 0.9)));
     ctx.beginPath();
     ctx.ellipse(D.cx, D.cy, ax, ay, 0, 0, Math.PI * 2);
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2;
       const x = D.cx + Math.cos(a) * ax;
       const y = D.cy + Math.sin(a) * ay;
-      ctx.moveTo(x + D.rim * 0.5, y);
-      ctx.arc(x, y, D.rim * 0.5, 0, Math.PI * 2);
+      ctx.moveTo(x + D.rim * 0.35, y);
+      ctx.arc(x, y, D.rim * 0.35, 0, Math.PI * 2);
     }
     ctx.fill('nonzero');
     // 縁の鋲
