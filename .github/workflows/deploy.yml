@@ -17,14 +17,15 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      # package-lock.json をコミットしたら `npm ci` と `cache: npm` に切り替えると速くなる
-      - run: npm install
+          cache: npm
+      # package-lock.json のとおりに入れる（依存を変えたら「package-lock.json を作り直す」を動かす）
+      - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v4
@@ -35,7 +36,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
