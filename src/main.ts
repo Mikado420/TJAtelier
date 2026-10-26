@@ -6,7 +6,7 @@ import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
 import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent } from './chart/model';
 import { parseTJA } from './chart/tja';
-import { writeTJA } from './chart/tjaWrite';
+import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
 import type { Note } from './chart/types';
 import { DEMO_TJA } from './demo';
@@ -1155,7 +1155,7 @@ function renderSheet() {
   } else if (sheet === 'events') {
     // TJA のテキスト（譜面全体）。書き換えて「反映」すると譜面に反映する
     $('sheetTitle').textContent = 'TJA';
-    const text = writeTJA(ed.chart);
+    const text = tjaText(ed.chart);
     body.innerHTML = `
       <p class="tja-status" id="tjaStatus"></p>
       <div class="tja-wrap">
@@ -1681,7 +1681,7 @@ async function fileAction(act: string) {
     await createSong(parseTJA(DEMO_TJA));
     closeSheet();
   } else if (act === 'saveTja') {
-    download(new Blob([encodeSJIS(writeTJA(ed.chart)).buffer as ArrayBuffer], { type: 'text/plain' }), `${safeName(ed.chart.title)}.tja`);
+    download(new Blob([encodeSJIS(tjaText(ed.chart)).buffer as ArrayBuffer], { type: 'text/plain' }), `${safeName(ed.chart.title)}.tja`);
   } else if (act === 'saveZip') {
     const name = safeName(ed.chart.title);
     const files: { name: string; data: Uint8Array; compress?: boolean }[] = [];
@@ -1689,12 +1689,12 @@ async function fileAction(act: string) {
       ed.chart.wave = ed.audio.name;
       files.push({ name: `${name}/${ed.audio.name}`, data: new Uint8Array(await exportAudioData(ed.audio)) });
     }
-    const tja = encodeSJIS(writeTJA(ed.chart));
+    const tja = encodeSJIS(tjaText(ed.chart));
     files.unshift({ name: `${name}/${name}.tja`, data: tja, compress: true });
     download(await writeZip(files), `${name}.zip`);
   } else if (act === 'copy') {
     try {
-      await navigator.clipboard.writeText(writeTJA(ed.chart));
+      await navigator.clipboard.writeText(tjaText(ed.chart));
       toast('TJA をコピーしました');
     } catch {
       toast('コピーできませんでした');

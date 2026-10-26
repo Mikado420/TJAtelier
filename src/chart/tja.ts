@@ -142,6 +142,8 @@ export function parseTJA(text: string): EChart {
     }
   }
 
+  chart.source = text;
+
   // #END が無いファイルへの保険
   if (inChart) {
     if (items.length) flushMeasure();

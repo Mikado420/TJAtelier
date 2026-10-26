@@ -56,6 +56,11 @@ export interface EChart {
   /** 未対応のヘッダ（GENRE, SONGVOL など）をそのまま保持して書き出す */
   extra: [string, string][];
   courses: ECourse[];
+  /**
+   * 自分で書いた（読み込んだ）TJA のテキスト。コメント・空行・改行の位置を残すために持っておき、
+   * 書き出すときは、これに譜面の変更だけを書き込む（tjaPatch.ts の tjaText）
+   */
+  source?: string;
 }
 
 export const COURSE_NAMES = ['Easy', 'Normal', 'Hard', 'Oni', 'Edit'] as const;

@@ -33,7 +33,8 @@ function eventLine(e: EEvent): string {
   }
 }
 
-export function writeTJA(chart: EChart): string {
+/** 曲全体のヘッダ（TITLE など。空行は入れない） */
+export function writeHead(chart: EChart): string[] {
   const out: string[] = [];
   out.push(`TITLE:${chart.title}`);
   if (chart.subtitle) out.push(`SUBTITLE:${chart.subtitle}`);
@@ -42,17 +43,30 @@ export function writeTJA(chart: EChart): string {
   out.push(`OFFSET:${num(chart.offset)}`);
   if (chart.demoStart) out.push(`DEMOSTART:${num(chart.demoStart)}`);
   for (const [k, v] of chart.extra) out.push(`${k}:${v}`);
-  out.push('');
+  return out;
+}
 
+/** 難易度ごとのヘッダ（COURSE・LEVEL・BALLOON など。#START の直前の #HBSCROLL も） */
+export function writeCourseHead(c: ECourse): string[] {
+  sortCourse(c);
+  const out: string[] = [];
+  out.push(`COURSE:${c.name}`);
+  out.push(`LEVEL:${c.level}`);
+  const balloons = c.notes.filter((n) => n.type === 'balloon').map((n) => n.hits ?? 5);
+  if (balloons.length) out.push(`BALLOON:${balloons.join(',')}`);
+  for (const [k, v] of c.extra) out.push(`${k}:${v}`);
+  if (c.scrollMode) out.push('#HBSCROLL');
+  return out;
+}
+
+export function writeTJA(chart: EChart): string {
+  const out: string[] = [...writeHead(chart), ''];
   for (const c of chart.courses) {
-    sortCourse(c);
-    out.push(`COURSE:${c.name}`);
-    out.push(`LEVEL:${c.level}`);
-    const balloons = c.notes.filter((n) => n.type === 'balloon').map((n) => n.hits ?? 5);
-    if (balloons.length) out.push(`BALLOON:${balloons.join(',')}`);
-    for (const [k, v] of c.extra) out.push(`${k}:${v}`);
+    const h = writeCourseHead(c);
+    const hb = h[h.length - 1] === '#HBSCROLL';
+    out.push(...(hb ? h.slice(0, -1) : h));
     out.push('');
-    if (c.scrollMode) out.push('#HBSCROLL');
+    if (hb) out.push('#HBSCROLL');
     out.push('#START');
     out.push(...writeCourseBody(c));
     out.push('#END');
@@ -62,7 +76,14 @@ export function writeTJA(chart: EChart): string {
 }
 
 export function writeCourseBody(c: ECourse): string[] {
-  const lines: string[] = [];
+  return writeMeasures(c).flat();
+}
+
+/**
+ * 小節ごとの行（命令の行と、音符の行）。atLeast を渡すと、内容が無くてもその数まで小節を書く
+ * （元のテキストの小節と 1 つずつ比べるため）
+ */
+export function writeMeasures(c: ECourse, atLeast = 0): string[][] {
   const end = contentEnd(c);
 
   // tick → 文字
@@ -74,12 +95,20 @@ export function writeCourseBody(c: ECourse): string[] {
     if (n.endTick !== undefined && !chars.has(n.endTick)) chars.set(n.endTick, '8');
   }
 
-  const ms = measures(c, end);
+  let ms = measures(c, end);
   // 最後の小節の内容があるところまで
   const lastIdx = ms.findIndex((m) => m.start + m.length > end);
-  const used = ms.slice(0, (lastIdx < 0 ? ms.length - 1 : lastIdx) + 1);
-
-  for (const m of used) {
+  let count = (lastIdx < 0 ? ms.length - 1 : lastIdx) + 1;
+  if (atLeast > count) {
+    while (ms.length < atLeast) {
+      const l = ms[ms.length - 1];
+      ms = measures(c, l.start + l.length * (atLeast - ms.length + 1));
+    }
+    count = atLeast;
+  }
+  const out: string[][] = [];
+  for (const m of ms.slice(0, count)) {
+    const lines: string[] = [];
     const mEnd = m.start + m.length;
     const evs = c.events.filter((e) => e.tick >= m.start && e.tick < mEnd);
     const positions: number[] = [];
@@ -102,6 +131,7 @@ export function writeCourseBody(c: ECourse): string[] {
       cur += chars.get(t) ?? '0';
     }
     lines.push(cur + ',');
+    out.push(lines);
   }
-  return lines;
+  return out;
 }

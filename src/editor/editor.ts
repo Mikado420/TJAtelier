@@ -95,11 +95,13 @@ export class Editor {
   // ---------- Undo / Redo ----------
 
   private snapshot() {
-    return JSON.stringify({ chart: this.chart, courseIndex: this.courseIndex });
+    // 元のテキスト（source）は大きいので写さない（戻したあとも今のテキストに変更を書き込めば合う）
+    return JSON.stringify({ chart: { ...this.chart, source: undefined }, courseIndex: this.courseIndex });
   }
 
   private restore(s: string) {
     const o = JSON.parse(s) as { chart: EChart; courseIndex: number };
+    if (this.chart.source) o.chart.source = this.chart.source;
     this.chart = o.chart;
     this.courseIndex = o.courseIndex;
     this.pendingLong = null;
