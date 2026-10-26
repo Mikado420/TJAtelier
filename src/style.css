@@ -2026,3 +2026,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hst-r small { grid-column: 3 / -1; justify-self: end; }
 .hst-r b { grid-column: 2 / -1; }
 .hst-r b small { margin-left: 4px; }
+/* 左: 少し広げて、ボタンは 2 × 2 でゆったり */
+.home { grid-template-columns: calc(clamp(124px, 15.5%, 176px) + var(--safe-l)) minmax(0, 1fr) calc(clamp(170px, 21%, 250px) + var(--det-sk) + var(--safe-r)); }
+.home-navb { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 10px 10px; }
+.home-navb button { max-width: none; height: clamp(38px, 11vh, 46px); }
