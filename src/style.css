@@ -1879,3 +1879,51 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res-bubble::before { display: none; }
 .res.r-fc .res-ribbon { background: linear-gradient(90deg, #3a7ca5, #93cde2, #3a7ca5); }
 .res-side { background: rgba(20, 24, 27, 0.88); border-radius: 0; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+
+/* ---------- 難易度えらび（案1: 横並びのカード・おにをめくって裏おに） ---------- */
+.home-diff { display: block; padding: 0; }
+.home-diff.hidden { display: none; }
+.hdf-info { position: absolute; left: calc(12px + var(--safe-l)); top: 22%; width: clamp(120px, 17vw, 160px); display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--cc); font-size: 11px; }
+.hdf-il { color: rgba(255, 255, 255, 0.65); font-size: 10px; }
+.hdf-best { font: 800 22px/1.05 var(--fd); }
+.hdf-ir { display: flex; justify-content: space-between; margin-top: 4px; }
+.hdf-ir .cr-allgood { background: linear-gradient(90deg, #ff7a9a, #ffd23f, #5ee07a, #6fd0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hdf-ir .cr-fc { color: #ffd23f; }
+.hdf-ir .cr-clear { color: #d8e0e8; }
+.hdf-ir .cr-fail, .hdf-ir .cr-none { color: rgba(255, 255, 255, 0.5); }
+.home-diff .hdf-box { position: absolute; left: calc(clamp(120px, 17vw, 160px) + 26px + var(--safe-l)); right: calc(14px + var(--safe-r)); top: calc(10px + var(--safe-t)); bottom: calc(64px + var(--safe-b)); width: auto; display: flex; flex-direction: column; overflow: visible; }
+.home-diff .hdf-head { align-items: center; padding: 8px 20px; transition: background 0.3s; }
+.home-diff .hdf-body { flex: 1; min-height: 0; padding: 22px 16px 14px; align-items: stretch; }
+.home-diff .hdf-side { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+.home-diff .hdf-side button { width: 48px; height: 48px; }
+.home-diff .hdf-cards { grid-auto-columns: minmax(0, 1fr); justify-content: stretch; perspective: 700px; }
+.home .hdf-card { height: auto; min-height: 0; padding: 10px 4px 8px; gap: 3px; justify-content: center; background: linear-gradient(var(--cc), var(--cd)) !important; color: #fff !important; opacity: 0.82; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.12); transform-style: preserve-3d; transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s; }
+.home .hdf-card svg { width: clamp(28px, 9vh, 44px); height: clamp(28px, 9vh, 44px); flex: none; }
+.home .hdf-card span { padding: 0; font-size: clamp(12px, 3.6vh, 15px); font-weight: 900; white-space: nowrap; }
+.home .hdf-card b { font: 800 clamp(18px, 6vh, 24px)/1 var(--fd); }
+.hdf-meter { display: flex; gap: 2px; padding: 2px 0 0 !important; }
+.hdf-meter i { width: 5px; height: 8px; background: rgba(255, 255, 255, 0.25); }
+.hdf-meter i.on { background: #fff; }
+.home .hdf-card.on { opacity: 1; background: linear-gradient(var(--cc), var(--cd)) !important; color: #fff !important; transform: translateY(-8px); box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent), 0 0 24px rgba(147, 205, 226, 0.8); }
+.home .hdf-card.on.ura { box-shadow: 0 0 0 3px #fff, 0 0 0 6px #7b4bd0, 0 0 28px rgba(160, 120, 255, 0.9); }
+.home .hdf-card u { top: -30px; }
+.home .hdf-card.ura u { background: #7b4bd0; }
+.hdf-uraok { position: absolute; right: 5px; top: 5px; font-size: 9px; font-weight: 900; padding: 1px 4px; background: rgba(0, 0, 0, 0.35); }
+.hdf-urab { position: absolute; left: 5px; top: 5px; width: 22px; height: 22px; display: grid; place-items: center; font-size: 12px; font-weight: 900; background: #fff; color: #2e1660; }
+/* めくる */
+.home .hdf-card.fout { transform: translateY(-8px) rotateY(90deg); transition: transform 0.18s ease-in; }
+.home .hdf-card.fin { animation: hdfFlipIn 0.22s ease-out; }
+@keyframes hdfFlipIn { from { transform: translateY(-8px) rotateY(-90deg); } to { transform: translateY(-8px) rotateY(0); } }
+.hdf-flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: #7b4bd0; }
+.hdf-flash.go { animation: hdfFlash 0.5s ease-out; }
+@keyframes hdfFlash { from { opacity: 0.4; } to { opacity: 0; } }
+/* 裏おにのときは紫に */
+.home-diff.ura .hdf-box { box-shadow: 0 0 0 3px #7b4bd0, 0 18px 40px rgba(0, 0, 0, 0.6); }
+.home-diff.ura .hdf-head { background: var(--stripes), #7b4bd0; }
+.home-diff .hdf-foot { position: absolute; left: calc(clamp(120px, 17vw, 160px) + 26px + var(--safe-l)); right: calc(14px + var(--safe-r)); bottom: calc(10px + var(--safe-b)); width: auto; }
+.home .hdf-go:disabled { background: var(--btn); color: rgba(255, 255, 255, 0.4); }
+@media (max-width: 640px) {
+  .hdf-info { display: none; }
+  .home-diff .hdf-box, .home-diff .hdf-foot { left: 10px; }
+}
+.home-diff .hdf-cards { grid-auto-columns: minmax(0, 150px); justify-content: center; }

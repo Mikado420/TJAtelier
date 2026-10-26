@@ -1,4 +1,5 @@
 import { OnlineScreen } from './online/online';
+import { saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
@@ -1803,6 +1804,10 @@ $('pauseBack').addEventListener('click', () => {
 });
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
 play.onExit = () => view.invalidate();
+// 曲の最初から自分で叩いたときだけ、自己ベストとして残す
+play.onFinished = (r) => {
+  if (currentSongId && lastTestFromStart) saveBest(currentSongId, ed.course.name, r.score, r.crown);
+};
 
 // ---------- 起動 ----------
 

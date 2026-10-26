@@ -68,6 +68,8 @@ export class PlayMode {
   onExit: () => void = () => {};
   /** ポーズ画面で設定（オート）を変えたとき（保存用） */
   onSettingsChange: () => void = () => {};
+  /** 結果が出たとき（自己ベストを残す）。オート・タイミング調整のときは呼ばない */
+  onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => void = () => {};
   /** ポーズの画面を出したとき（設定の欄を作る） */
   onPauseOpen: () => void = () => {};
   /** いちばん最後に始めたときの引数（「やりなおす」で同じ所から） */
@@ -665,6 +667,7 @@ export class PlayMode {
     const [cl, cc] = COURSE[info.course] ?? [info.course, 'var(--btn)'];
     R.classList.remove('res-calib', 'go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     R.classList.add(`r-${rank}`);
+    if (!this.auto) this.onFinished({ score: s.score, crown: rank });
     R.querySelector('.res-title')!.textContent = info.title;
     R.querySelector('.res-sub')!.textContent = `${cl} ★${info.level}`;
     const badge = R.querySelector<HTMLElement>('.res-course')!;

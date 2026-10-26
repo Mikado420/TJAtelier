@@ -42,8 +42,22 @@ const COURSE_ORDER = ['Easy', 'Normal', 'Hard', 'Oni', 'Edit'];
 const COURSE_COLOR: Record<string, string> = { Easy: 'var(--c-easy)', Normal: 'var(--c-normal)', Hard: 'var(--c-hard)', Oni: 'var(--c-oni)', Edit: 'var(--c-edit)' };
 const sortCourses = (cs: SongEntry['courses']) => [...cs].sort((a, b) => (COURSE_ORDER.indexOf(a.name) + 99) % 99 - (COURSE_ORDER.indexOf(b.name) + 99) % 99);
 const LAST_COURSE = 'malody-web:lastCourse';
-function lastCourse(id: string): string | null {
-  try { return (JSON.parse(localStorage.getItem(LAST_COURSE) ?? '{}') as Record<string, string>)[id] ?? null; } catch { return null; }
+const BEST = 'malody-web:best';
+export type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
+/** 自己ベスト（曲・難易度ごと） */
+export function loadBest(id: string, course: string): { score: number; crown: Crown } | null {
+  try { return (JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown }>)[`${id}:${course}`] ?? null; } catch { return null; }
+}
+const CROWN_RANK: Record<Crown, number> = { fail: 0, clear: 1, fc: 2, allgood: 3 };
+/** 遊んだ記録を残す（点数・王冠はそれぞれ良いほうを残す） */
+export function saveBest(id: string, course: string, score: number, crown: Crown) {
+  try {
+    const m = JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown }>;
+    const k = `${id}:${course}`;
+    const p = m[k];
+    m[k] = { score: Math.max(score, p?.score ?? 0), crown: !p || CROWN_RANK[crown] > CROWN_RANK[p.crown] ? crown : p.crown };
+    localStorage.setItem(BEST, JSON.stringify(m));
+  } catch { /* 保存できない */ }
 }
 function rememberCourse(id: string, c: string) {
   try {
@@ -348,15 +362,18 @@ export class Home {
   // ---------- 難易度えらび ----------
 
   private diffSong: SongEntry | null = null;
+  /** 選んでいる難易度（'' = まだ選んでいない） */
   private diffCourse = '';
+  /** おにの枠を裏おに（Edit）にしているか */
+  private diffUra = false;
 
   private openDiff(id: string) {
     const s = this.songs.find((x) => x.id === id);
     if (!s || !s.courses.length) { this.host.toast('譜面がありません'); return; }
-    const cs = sortCourses(s.courses);
-    const last = lastCourse(id);
     this.diffSong = s;
-    this.diffCourse = cs.some((c) => c.name === last) ? last! : cs[cs.length - 1].name;
+    this.diffCourse = '';
+    // おにが無く裏おにだけある曲は、おにの枠に最初から裏おにを出す
+    this.diffUra = !s.courses.some((c) => c.name === 'Oni') && s.courses.some((c) => c.name === 'Edit');
     this.paintDiff();
     const el = document.getElementById('homeDiff')!;
     el.classList.remove('hidden');
@@ -371,36 +388,103 @@ export class Home {
     this.diffSong = null;
   }
 
-  private paintDiff() {
+  /** 並べる枠（かんたん・ふつう・むずかしい・おに）。おにの枠は裏おにと入れ替わる */
+  private diffSlots(s: SongEntry) {
+    const has = (n: string) => s.courses.find((c) => c.name === n);
+    const slots: { slot: string; name: string; level: number }[] = [];
+    for (const n of ['Easy', 'Normal', 'Hard']) {
+      const c = has(n);
+      if (c) slots.push({ slot: n, name: n, level: c.level });
+    }
+    const oni = has('Oni');
+    const ura = has('Edit');
+    const show = this.diffUra && ura ? ura : oni ?? ura;
+    if (show) slots.push({ slot: 'Oni', name: show.name, level: show.level });
+    return { slots, canUra: !!(oni && ura) };
+  }
+
+  private paintDiff(flipIn = false) {
     const s = this.diffSong;
     if (!s) return;
     const o = this.host.playOpts();
-    const cards = sortCourses(s.courses).map((c) => {
+    const { slots, canUra } = this.diffSlots(s);
+    const sel = slots.find((x) => x.name === this.diffCourse);
+    const bars = (n: number) => [0, 1, 2].map((k) => `<rect x="${8 + k * 12}" y="${30 - k * 9}" width="7" height="${10 + k * 9}" fill="${k < n ? '#fff' : 'rgba(255,255,255,0.3)'}"/>`).join('');
+    const ICON_D: Record<string, string> = {
+      Easy: bars(1), Normal: bars(2), Hard: bars(3),
+      Oni: '<path d="M6 40 L10 14 L18 26 L24 8 L30 26 L38 14 L42 40 Z" fill="#fff"/>',
+      Edit: '<path d="M6 40 L10 14 L18 26 L24 8 L30 26 L38 14 L42 40 Z" fill="#1d2023" stroke="#fff" stroke-width="2.5"/>',
+    };
+    const DARK: Record<string, string> = { Easy: '#9c3a20', Normal: '#4f7a1e', Hard: '#11615a', Oni: '#7a1a4a', Edit: '#2e1660' };
+    const cards = slots.map((c) => {
       const on = c.name === this.diffCourse;
-      const stars = '★'.repeat(Math.max(0, Math.min(10, c.level)));
-      return `<button class="hdf-card ${on ? 'on' : ''}" data-dcourse="${esc(c.name)}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}"><i></i><span>${esc(COURSE_SHORT[c.name] ?? c.name)}</span><b>${c.level}</b><em>${stars}</em>${on ? '<u>1P</u>' : ''}</button>`;
+      const meter = Array.from({ length: 10 }, (_, k) => `<i class="${k < c.level ? 'on' : ''}"></i>`).join('');
+      const label = c.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[c.name] ?? c.name;
+      return `<button class="hdf-card ${on ? 'on' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
+        <svg viewBox="0 0 48 48" aria-hidden="true">${ICON_D[c.name] ?? ''}</svg>
+        <span>${esc(label)}</span><b>★${c.level}</b><em class="hdf-meter">${meter}</em>
+        ${c.slot === 'Oni' && canUra && c.name !== 'Edit' ? '<small class="hdf-uraok">裏あり</small>' : ''}
+        ${c.name === 'Edit' ? '<small class="hdf-urab">裏</small>' : ''}
+        ${on ? '<u>1P</u>' : ''}</button>`;
     }).join('');
-    document.getElementById('homeDiff')!.innerHTML = `
+    const best = sel ? loadBest(s.id, sel.name) : null;
+    const crownLabel: Record<string, string> = { allgood: '全良', fc: 'フルコンボ', clear: 'クリア', fail: '未クリア' };
+    const info = sel
+      ? `<span class="hdf-il">${esc(sel.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[sel.name] ?? sel.name)} ★${sel.level} の記録</span>
+         <span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>
+         <span class="hdf-ir"><span>王冠</span><b class="cr-${best?.crown ?? 'none'}">${best ? crownLabel[best.crown] ?? '' : 'なし'}</b></span>`
+      : '<span class="hdf-il">難易度をえらんでください</span>';
+    const el = document.getElementById('homeDiff')!;
+    el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));
+    el.innerHTML = `
+      <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
         <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}　${fmtLen(s.length)}</small></div>
         <div class="hdf-body">
-          <div class="hdf-side"><button data-df="back" aria-label="もどる">${ICON.back}</button></div>
+          <div class="hdf-side">
+            <button data-df="back" aria-label="曲えらびにもどる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+            <button data-df="opt" aria-label="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+          </div>
           <div class="hdf-cards">${cards}</div>
         </div>
+        <i class="hdf-flash"></i>
       </div>
       <div class="hdf-foot">
-        <span class="hdf-tip">選んだ難易度をもう一度タップでも始まります</span>
+        <span class="hdf-tip">${this.diffUra && canUra ? 'おにをもう一度タップで、おもてのおにに戻る' : canUra ? 'カードをえらぶ → はじめる　／　おにをもう一度で裏おに' : 'カードをえらぶ → はじめる'}</span>
         <span class="hdf-opt">ハイスピード<button data-df="sp-" aria-label="ハイスピードを下げる">−</button><b>×${o.speed.toFixed(1)}</b><button data-df="sp+" aria-label="ハイスピードを上げる">＋</button></span>
         <button class="hdf-opt hdf-auto ${o.auto ? 'on' : ''}" data-df="auto">オート ${o.auto ? 'ON' : 'OFF'}</button>
-        <button class="hdf-go" data-df="go">はじめる</button>
+        <button class="hdf-go" data-df="go" ${sel ? '' : 'disabled'}>はじめる</button>
       </div>`;
   }
+
+  /** おにの枠をめくって、裏おに⇔おもてのおにを入れ替える */
+  private async flipUra() {
+    const el = document.getElementById('homeDiff')!;
+    const card = el.querySelector<HTMLElement>('[data-slot="Oni"]');
+    if (this.flipping || !card) return;
+    this.flipping = true;
+    card.classList.add('fout');
+    await new Promise((r) => setTimeout(r, 180));
+    this.diffUra = !this.diffUra;
+    this.diffCourse = this.diffUra ? 'Edit' : 'Oni';
+    this.paintDiff(true);
+    const f = el.querySelector<HTMLElement>('.hdf-flash');
+    if (f) { f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+    setTimeout(() => { this.flipping = false; }, 240);
+  }
+
+  private flipping = false;
 
   private async onDiffClick(t: HTMLElement) {
     const card = t.closest<HTMLElement>('[data-dcourse]');
     if (card) {
       const c = card.dataset.dcourse!;
-      if (c === this.diffCourse) { await this.startSong(); return; }
+      if (c === this.diffCourse) {
+        // 選んでいるおにをもう一度: 裏おにがあれば入れ替える（無ければ何もしない）
+        const s = this.diffSong;
+        if (s && card.dataset.slot === 'Oni' && this.diffSlots(s).canUra) await this.flipUra();
+        return;
+      }
       this.diffCourse = c;
       this.paintDiff();
       return;
@@ -413,6 +497,7 @@ export class Home {
     const a = b.dataset.df!;
     const o = this.host.playOpts();
     if (a === 'back') this.closeDiff();
+    else if (a === 'opt') this.host.settings();
     else if (a === 'sp-' || a === 'sp+') {
       const v = Math.round((o.speed + (a === 'sp+' ? 0.1 : -0.1)) * 10) / 10;
       this.host.setPlayOpt('speed', Math.max(0.1, Math.min(10, v)));
@@ -420,7 +505,7 @@ export class Home {
     } else if (a === 'auto') {
       this.host.setPlayOpt('auto', !o.auto);
       this.paintDiff();
-    } else if (a === 'go') await this.startSong();
+    } else if (a === 'go' && this.diffCourse) await this.startSong();
   }
 
   private starting = false;
@@ -431,11 +516,12 @@ export class Home {
     if (!s || this.starting) return;
     this.starting = true;
     const course = this.diffCourse;
+    if (!course) return;
     rememberCourse(s.id, course);
     const lv = s.courses.find((c) => c.name === course)?.level ?? 0;
     this.stopPreview();
     try {
-      await closeCurtain({ title: s.title, sub: s.subtitle, course: `${COURSE_SHORT[course] ?? course} ${lv}`, color: COURSE_COLOR[course] });
+      await closeCurtain({ title: s.title, sub: s.subtitle, course: `${course === 'Edit' ? 'おに（裏）' : COURSE_SHORT[course] ?? course} ${lv}`, color: COURSE_COLOR[course] });
       this.closeDiff();
       await this.host.open(s.id, 'play', course);
     } finally {
