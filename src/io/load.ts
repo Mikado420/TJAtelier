@@ -61,8 +61,14 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
   const genres = new Map<string, string>();
   for (const e of entries) {
     if (base(e.name).toLowerCase() !== 'genre.ini') continue;
-    const m = /^\s*GenreName\s*=\s*(.+?)\s*$/im.exec(decodeText(e.data));
-    const name = m?.[1].replace(/^["']|["']$/g, '').trim();
+    // 1 行ずつ見る（値が空の行から次の行へはみ出さないように）
+    let name = '';
+    for (const line of decodeText(e.data).replace(/^\uFEFF/, '').split(/\r\n|\r|\n/)) {
+      const m = /^[ \t]*GenreName[ \t]*=(.*)$/i.exec(line);
+      if (m) { name = m[1].trim().replace(/^["']|["']$/g, '').trim(); break; }
+    }
+    // GenreName が空なら、genre.ini が置いてあるフォルダの名前
+    if (!name) name = dir(e.name).split('/').filter(Boolean).pop() ?? '';
     if (name) genres.set(dir(e.name), name);
   }
   const genreOf = (path: string) => {

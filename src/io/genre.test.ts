@@ -14,9 +14,13 @@ test('genre.ini の GenreName をフォルダ名にする（下のフォルダ�
     { name: 'game/genre.ini', data: sjis },
     { name: 'game/c.tja', data: enc.encode(TJA('C')) },
     { name: 'other/d.tja', data: enc.encode(TJA('D')) },
+    { name: 'empty/genre.ini', data: enc.encode('[Genre]\r\nGenreName=\r\nGenreColor=#0080FF\r\n') },
+    { name: 'empty/e.tja', data: enc.encode(TJA('E')) },
+    { name: 'cr/genre.ini', data: enc.encode('\uFEFF[Genre]\rGenreName = ボーカロイド \rGenreColor=#0080FF\r') },
+    { name: 'cr/f.tja', data: enc.encode(TJA('F')) },
   ]);
   const r = await loadFiles([new File([blob], 'x.zip')]);
   const g = Object.fromEntries(r.songs.map((s) => [s.chart.title, s.genre]));
-  expect(g).toEqual({ A: 'ナムコオリジナル', B: 'ナムコオリジナル', C: 'ゲーム', D: undefined });
+  expect(g).toEqual({ A: 'ナムコオリジナル', B: 'ナムコオリジナル', C: 'ゲーム', D: undefined, E: 'empty', F: 'ボーカロイド' });
   expect(r.skipped).toEqual([]);
 });
