@@ -175,7 +175,7 @@ export class Renderer {
     this.ctx = canvas.getContext('2d')!;
     // Web フォントが後から読み込まれたら、前もって描いておいた文字の絵を作り直す
     document.fonts?.addEventListener?.('loadingdone', () => {
-      this.sprites.clear();
+      this.dropSprites();
       clearTextCache();
     });
     this.makePatterns();
@@ -216,14 +216,17 @@ export class Renderer {
       drumRY: this.drum().ry,
       restBottom: this.restZone ? this.sy(LANE_TOP) : 0,
     };
+    for (const c of Object.values(this.burstSprites)) { c.width = 0; c.height = 0; }
     this.burstSprites = {};
-    this.sprites.clear();
+    this.dropSprites();
     this.padFlash = null;
     this.buildBackground();
     if (this.hud) {
-      this.hud.width = this.canvas.width;
-      this.hud.height = this.canvas.height;
-      this.hud.style.display = this.opponents.length ? '' : 'none';
+      // 相手がいないときは HUD の大きさを 0 にしてメモリを空ける
+      const on = this.opponents.length > 0;
+      this.hud.width = on ? this.canvas.width : 0;
+      this.hud.height = on ? this.canvas.height : 0;
+      this.hud.style.display = on ? '' : 'none';
     }
     this.hudKeys.clear();
   }
@@ -425,6 +428,12 @@ export class Renderer {
   private gogoGradRight = 0;
   private sprites = new Map<string, { c: HTMLCanvasElement; dx: number; dy: number; x0: number; y0: number }>();
 
+  /** 前もって描いた絵を全部手放す（iPhone はキャンバスの大きさを 0 にしないとメモリがすぐ空かない） */
+  private dropSprites() {
+    for (const sp of this.sprites.values()) { sp.c.width = 0; sp.c.height = 0; }
+    this.sprites.clear();
+  }
+
   private drawSprite(key: string, x: number, y: number, w: number, h: number, paint: () => void, alpha = 1) {
     const sc = this.dpr * this.s;
     const k = `${key}|${this.canvas.width}x${this.canvas.height}`;
@@ -545,6 +554,15 @@ export class Renderer {
 
   reset() {
     this.endFx = null;
+    // 曲ごとの絵（曲名・難易度のパネル）は曲が変わると使わないので手放す。
+    // iPhone はキャンバスのメモリに上限があり、たまると画面が描けなくなって落ちる
+    for (const [k, sp] of this.sprites) {
+      if (k.startsWith('title:') || k.startsWith('panel:') || !k.endsWith(`|${this.canvas.width}x${this.canvas.height}`)) {
+        sp.c.width = 0;
+        sp.c.height = 0;
+        this.sprites.delete(k);
+      }
+    }
     this.bursts = [];
     this.flyers = [];
     this.flashes = [];

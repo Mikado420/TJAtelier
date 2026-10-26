@@ -2093,3 +2093,25 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .cr-none { --crc: #4a525c; }
 .cst-bar .cr-allgood { background: linear-gradient(90deg, #ff6fb4, #ffd23f, #6fe0a0, #5ab4ff); }
 .cst-tip { font-size: 10px; font-weight: 700; color: var(--sub); text-align: right; opacity: 0.8; }
+
+/* ---------- オンライン: チャット・フォルダ分けした曲えらび ---------- */
+.ol-players { overflow: hidden; }
+.ol-chat { flex: 1; min-height: 120px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 8px; }
+.ol-log { flex: 1; min-height: 0; overflow-y: auto; touch-action: pan-y; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ol-log p { margin: 0; display: flex; gap: 6px; align-items: baseline; line-height: 1.35; }
+.ol-log p b { flex: none; max-width: 40%; color: var(--accent-hi); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-log p span { min-width: 0; overflow-wrap: anywhere; }
+.ol-log p.me b { color: #ffd23f; }
+.ol-log .ol-log-empty { color: var(--sub); font-size: 12px; }
+.ol-say { display: flex; gap: 6px; }
+.ol-say input { flex: 1; min-width: 0; height: 40px; padding: 0 10px; font-size: 16px; background: var(--inp); color: #fff; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0; }
+.ol-say button { width: 46px; height: 40px; padding: 0; display: grid; place-items: center; }
+.ol-say svg { width: 20px; height: 20px; fill: #fff; stroke: #fff; stroke-width: 1.5; stroke-linejoin: round; }
+.ol-bubble { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-pf { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px 0 18px; text-align: left; font-size: 14px; font-weight: 800; color: #fff; background: linear-gradient(90deg, var(--fc) 0 8px, #2c3238 8px) !important; box-shadow: inset 0 -2px 0 var(--fc); border-radius: 0; }
+.ol-pf.open { background: var(--fc) !important; }
+.ol-pf span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ol-pf small { font: 700 13px var(--fd); opacity: 0.85; }
+.ol-pf i { width: 8px; height: 8px; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-2px) rotate(45deg); transition: transform 0.2s; }
+.ol-pf.open i { transform: translateY(2px) rotate(-135deg); }
+.ol-pfl { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px 14px; border-left: 4px solid var(--fc); margin-left: 4px; }

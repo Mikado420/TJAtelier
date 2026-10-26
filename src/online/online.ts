@@ -6,10 +6,11 @@ import type { AudioEngine } from '../audio/audio';
 import { toPlayable, type EChart } from '../chart/model';
 import { parseTJA } from '../chart/tja';
 import { writeTJA } from '../chart/tjaWrite';
-import { listSongs, loadSongAudio, loadSongData, type SongEntry } from '../io/library';
+import { listFolders, listSongs, loadSongAudio, loadSongData, type SongEntry } from '../io/library';
+import { saveBest, type Crown } from '../home/home';
 import type { PlayMode } from '../play/playmode';
 import type { Opponent } from '../render/renderer';
-import { listRooms, newRoomId, OnlineClient, type ResultRow, type RoomInfo, type Roster, type SongMeta, type WatchPlayer } from './net';
+import { listRooms, newRoomId, OnlineClient, type ChatMsg, type ResultRow, type RoomInfo, type Roster, type SongMeta, type WatchPlayer } from './net';
 
 export interface OnlineHost {
   audio: AudioEngine;
@@ -31,8 +32,17 @@ const courseChip = (name: string, level: number) => {
   const [label, color] = COURSE[name] ?? [name, 'var(--btn)'];
   return `<span class="ol-course" style="--cc:${color}">${esc(label)}<b>★${level}</b></span>`;
 };
-/** 送れるスタンプ（自由な文字は送れない） */
-const STAMPS = ['よろしく！', 'ナイス！', 'もう1回！', 'おつかれ！', 'すごい！', 'ちょっと待って', 'いくよ！', 'ありがとう！'];
+/** 曲を選ぶときのフォルダ（「すべて」「未分類」はフォルダ名に使えない値） */
+const ALL = '\uE000all';
+const UNCAT = '\uE000uncat';
+const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
+function folderColor(key: string) {
+  if (key === ALL) return '#4d9fbe';
+  if (key === UNCAT) return '#5a6670';
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return FOLDER_COLORS[h % FOLDER_COLORS.length];
+}
 const NAME_KEY = 'malody-web:onlineName';
 
 type View = 'lobby' | 'room';
@@ -57,7 +67,11 @@ export class OnlineScreen {
   private waiting = false;
   private playingNow = false;
   private opponents = new Map<string, Opponent>();
-  private chats = new Map<string, { k: number; t: number }>();
+  /** チャットの記録（新しいものが下） */
+  private chatLog: ChatMsg[] = [];
+  /** 曲を選ぶ一覧で開いているフォルダ */
+  private pickOpen = '';
+  private pickFolders: string[] = [];
   private modal: '' | 'create' | { join: RoomInfo } = '';
 
   constructor(private readonly host: OnlineHost) {
@@ -153,12 +167,37 @@ export class OnlineScreen {
     sub.innerHTML = `${c.room.locked ? '🔒 ' : ''}部屋 ${esc(c.room.id)}`;
     this.body.innerHTML = `
       <div class="ol-room">
-        <section class="ol-card ol-players"><h3>参加者 <small>${this.roster?.players.length ?? 0} / 4</small></h3><div id="olPlayers"></div></section>
+        <section class="ol-card ol-players"><h3>参加者 <small>${this.roster?.players.length ?? 0} / 4</small></h3><div id="olPlayers"></div>
+          <div class="ol-chat"><div class="ol-log" id="olLog" aria-live="polite"></div>
+            <form class="ol-say" id="olSay"><input id="olMsg" maxlength="80" placeholder="メッセージを送る" autocomplete="off" enterkeyhint="send"><button class="ol-btn primary" type="submit" aria-label="送る"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-5 16-3-7z"/></svg></button></form>
+          </div>
+        </section>
         <section class="ol-card ol-songbox" id="olSong"></section>
       </div>
       ${this.results ? this.resultsHtml() : ''}`;
     this.renderPlayers();
     this.renderSong();
+    this.renderLog();
+    const form = this.body.querySelector<HTMLFormElement>('#olSay')!;
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inp = form.querySelector<HTMLInputElement>('#olMsg')!;
+      const x = inp.value.trim().slice(0, 80);
+      if (!x || !this.client) return;
+      this.client.send({ t: 'chat', x });
+      inp.value = '';
+    });
+  }
+
+  /** チャットの記録を描く（いちばん下までスクロール） */
+  private renderLog() {
+    const el = this.body.querySelector<HTMLElement>('#olLog');
+    if (!el) return;
+    const me = this.client?.me;
+    el.innerHTML = this.chatLog.length
+      ? this.chatLog.map((c) => `<p class="${c.p === me ? 'me' : ''}"><b>${esc(c.name)}</b><span>${esc(c.x)}</span></p>`).join('')
+      : '<p class="ol-log-empty">まだメッセージはありません</p>';
+    el.scrollTop = el.scrollHeight;
   }
 
   private renderLobbyList() {
@@ -209,16 +248,13 @@ export class OnlineScreen {
     if (!el || !R) return;
     const me = this.client!.me;
     const amHost = R.host === me;
-    const now = performance.now();
     el.innerHTML = R.players
       .map((p) => {
         const st = p.inGame ? '<em class="play">プレイ中</em>' : p.ready ? '<em class="ok">準備OK</em>' : R.song ? '<em>受け取り中</em>' : '<em>待機</em>';
-        const chat = this.chats.get(p.p);
-        const bubble = chat && now - chat.t < 4000 ? `<span class="ol-bubble">${esc(STAMPS[chat.k] ?? '')}</span>` : '';
         return `<div class="ol-player${p.p === me ? ' me' : ''}">
           <span class="ol-crown">${p.p === R.host ? '👑' : ''}</span>
           <span class="ol-pn">${esc(p.name)}${p.p === me ? '<small>あなた</small>' : ''}</span>
-          ${bubble}${st}
+          ${st}
           ${amHost && p.p !== me ? `<button class="ol-kick" data-kick="${esc(p.p)}" aria-label="退出させる">×</button>` : ''}
         </div>`;
       })
@@ -231,18 +267,29 @@ export class OnlineScreen {
     if (!el || !R) return;
     const amHost = R.host === this.client!.me;
     if (this.picking) {
+      // フォルダごとに分けて出す（タップで開く。曲えらびと同じ並び）
+      const songs = this.picking;
+      const keys = [ALL, UNCAT, ...[...this.pickFolders].sort((x, y) => x.localeCompare(y, 'ja'))];
+      const inF = (k: string) => (k === ALL ? songs : k === UNCAT ? songs.filter((x) => !x.folders.length) : songs.filter((x) => x.folders.includes(k)));
+      const rows = keys.map((k) => {
+        const list = inF(k);
+        if (k !== ALL && !list.length) return '';
+        const open = this.pickOpen === k;
+        const name = k === ALL ? 'すべて' : k === UNCAT ? '未分類' : k;
+        return `<button class="ol-pf${open ? ' open' : ''}" data-pf="${esc(k)}" style="--fc:${folderColor(k)}"><span>${esc(name)}</span><small>${list.length} 曲</small><i aria-hidden="true"></i></button>
+          ${open ? `<div class="ol-pfl" style="--fc:${folderColor(k)}">${list.length ? list
+            .map((x) => `<div class="ol-pi"><span class="ol-pit">${esc(x.title)}${x.length ? '' : '<small>音源なし</small>'}</span><span class="ol-pic">${x.courses
+              .map((c) => `<button data-pick="${esc(x.id)}" data-course="${esc(c.name)}">${courseChip(c.name, c.level)}</button>`)
+              .join('')}</span></div>`)
+            .join('') : '<p class="ol-empty">曲がありません</p>'}</div>` : ''}`;
+      }).join('');
       el.innerHTML = `<h3>曲を選ぶ <button class="ol-mini" data-ol="pickClose">閉じる</button></h3>
-        <div class="ol-pick">${this.picking.length ? this.picking
-          .map((s) => `<div class="ol-pi"><span class="ol-pit">${esc(s.title)}${s.length ? '' : '<small>音源なし</small>'}</span><span class="ol-pic">${s.courses
-            .map((c) => `<button data-pick="${esc(s.id)}" data-course="${esc(c.name)}">${courseChip(c.name, c.level)}</button>`)
-            .join('')}</span></div>`)
-          .join('') : '<p class="ol-empty">曲がありません</p>'}</div>`;
+        <div class="ol-pick">${songs.length ? rows : '<p class="ol-empty">曲がありません</p>'}</div>`;
       return;
     }
     const allReady = R.players.every((p) => p.ready);
     const s = R.song;
     const tr = this.transfer;
-    const stamps = `<div class="ol-stamps">${STAMPS.map((t, i) => `<button data-stamp="${i}">${esc(t)}</button>`).join('')}</div>`;
     el.innerHTML = `
       <h3>曲${amHost && R.phase === 'wait' ? '<button class="ol-mini" data-ol="pick">曲を選ぶ</button>' : ''}</h3>
       ${s ? `<div class="ol-now"><b>${esc(s.title)}</b>${courseChip(s.course, s.level)}</div>` : `<p class="ol-empty">${amHost ? '「曲を選ぶ」で遊ぶ曲を決めてください' : '部屋主が曲を選ぶのを待っています'}</p>`}
@@ -252,8 +299,7 @@ export class OnlineScreen {
           : R.phase === 'play' ? (this.song ? '<button class="ol-btn primary big" data-ol="watch">観戦する</button><small>いま遊んでいる人のプレイを見られます</small>' : '<p class="ol-wait">プレイ中です。曲を受け取っています…</p>')
           : amHost ? `<button class="ol-btn primary big" data-ol="start" ${s && allReady && !tr ? '' : 'disabled'}>スタート</button>${s && !allReady ? '<small>全員が曲を受け取るまで待ってください</small>' : ''}`
           : `<p class="ol-wait">${s ? (this.song ? '部屋主のスタートを待っています' : '曲を受け取っています…') : ''}</p>`}
-      </div>
-      ${stamps}`;
+      </div>`;
   }
 
   private resultsHtml() {
@@ -272,7 +318,7 @@ export class OnlineScreen {
 
   private async onClick(e: Event) {
     const t = e.target as HTMLElement;
-    const b = t.closest<HTMLElement>('[data-ol],[data-join],[data-kick],[data-pick],[data-stamp]');
+    const b = t.closest<HTMLElement>('[data-ol],[data-join],[data-kick],[data-pick],[data-pf]');
     if (!b) return;
     const a = b.dataset.ol;
     if (a === 'back') return this.back();
@@ -312,12 +358,20 @@ export class OnlineScreen {
       if (confirm(`${name} を部屋から退出させますか？`)) this.client?.send({ t: 'kick', p: b.dataset.kick });
       return;
     }
-    if (b.dataset.stamp !== undefined) {
-      this.client?.send({ t: 'chat', k: Number(b.dataset.stamp) });
+    if (b.dataset.pf !== undefined) {
+      const k = b.dataset.pf;
+      this.pickOpen = this.pickOpen === k ? '' : k;
+      this.host.audio.playUi('folder');
+      this.renderSong();
+      b.blur();
+      this.body.querySelector(`[data-pf="${CSS.escape(k)}"]`)?.scrollIntoView({ block: 'nearest' });
       return;
     }
     if (a === 'pick') {
       this.picking = (await listSongs()).filter((s) => s.courses.length);
+      const fs = new Set(await listFolders().catch(() => [] as string[]));
+      for (const x of this.picking) for (const f of x.folders) fs.add(f);
+      this.pickFolders = [...fs];
       this.renderSong();
       return;
     }
@@ -359,6 +413,7 @@ export class OnlineScreen {
     this.picking = null;
     this.results = null;
     this.waiting = false;
+    this.chatLog = [];
     this.view = 'lobby';
     if (this.playingNow) {
       this.playingNow = false;
@@ -446,10 +501,16 @@ export class OnlineScreen {
         this.waiting = false;
         if (!this.playingNow && this.view === 'room') this.render();
       },
-      chat: (p, k) => {
-        this.chats.set(p, { k, t: performance.now() });
-        if (this.view === 'room') this.renderPlayers();
-        setTimeout(() => { if (this.view === 'room') this.renderPlayers(); }, 4100);
+      chat: (m) => {
+        this.chatLog.push(m);
+        if (this.chatLog.length > 100) this.chatLog.shift();
+        // プレイ中は画面の上に小さく出す
+        if (this.playingNow && m.p !== c.me) this.host.toast(`${m.name}: ${m.x}`);
+        if (this.view === 'room') this.renderLog();
+      },
+      chatlog: (list) => {
+        this.chatLog = list.slice(-100);
+        if (this.view === 'room') this.renderLog();
       },
       error: (msg) => this.host.toast(msg),
       closed: (reason) => {
@@ -513,7 +574,8 @@ export class OnlineScreen {
     try {
       const chart = parseTJA(meta.tja);
       if (!chart.courses.some((x) => x.name === meta.course)) throw new Error('course');
-      await this.host.audio.loadMusic(bytes ? (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) : null);
+      const ab = bytes ? (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? (bytes.buffer as ArrayBuffer) : (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)) : null;
+      await this.host.audio.loadMusic(ab);
       this.song = { meta, chart };
       this.client?.send({ t: 'have', key: meta.key });
     } catch {
@@ -521,6 +583,20 @@ export class OnlineScreen {
       this.song = null;
     }
     this.renderSong();
+  }
+
+  /** オンラインで遊んだ記録を、自分の曲の一覧の同じ曲に残す（部屋主は選んだ曲、ほかの人は同じ曲名の曲があれば） */
+  private async record(meta: SongMeta, score: number, crown: Crown) {
+    try {
+      const songs = await listSongs();
+      const hostId = meta.key.split(':').slice(0, -2).join(':');
+      let s = songs.find((x) => x.id === hostId && x.courses.some((c) => c.name === meta.course));
+      if (!s) {
+        const same = songs.filter((x) => x.title === meta.title && (x.subtitle ?? '') === meta.subtitle && x.courses.some((c) => c.name === meta.course));
+        if (same.length === 1) s = same[0];
+      }
+      if (s) saveBest(s.id, meta.course, score, crown);
+    } catch { /* 残せない */ }
   }
 
   /** 全員同時にスタート */
@@ -560,7 +636,11 @@ export class OnlineScreen {
       spectate,
       onFinish: (stats) => {
         this.playingNow = false;
-        if (!spectate) c.send({ t: 'fin', r: stats });
+        if (!spectate) {
+          const { crown, ...r } = stats;
+          c.send({ t: 'fin', r });
+          if (crown) void this.record(meta, r.score, crown);
+        }
         this.waiting = !this.results && (!spectate || this.roster?.phase === 'play');
         this.open();
       },

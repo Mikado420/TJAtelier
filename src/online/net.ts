@@ -25,6 +25,8 @@ export interface RoomInfo {
   song: string;
 }
 
+export interface ChatMsg { p: string; name: string; x: string }
+
 export interface SongMeta {
   key: string;
   title: string;
@@ -64,7 +66,8 @@ export interface Handlers {
   fin(p: string): void;
   quit(p: string): void;
   results(list: ResultRow[]): void;
-  chat(p: string, k: number): void;
+  chat(m: ChatMsg): void;
+  chatlog(list: ChatMsg[]): void;
   error(msg: string): void;
   /** 部屋から出された・切れた */
   closed(reason: string): void;
@@ -203,7 +206,9 @@ export class OnlineClient {
       }
       case 'songEnd':
         if (this.meta && m.key === this.meta.key && this.got === this.meta.size) {
-          this.on.songReady?.(this.meta, this.buf);
+          const b = this.buf;
+          this.buf = null; // 受け取った音源は渡したら手放す（メモリを空ける）
+          this.on.songReady?.(this.meta, b);
         }
         break;
       case 'start': this.on.start?.(Number(m.zero), String(m.key), m.players as { p: string; name: string }[]); break;
@@ -212,7 +217,8 @@ export class OnlineClient {
       case 'fin': this.on.fin?.(String(m.p)); break;
       case 'quit': this.on.quit?.(String(m.p)); break;
       case 'results': this.on.results?.(m.list as ResultRow[]); break;
-      case 'chat': this.on.chat?.(String(m.p), Number(m.k)); break;
+      case 'chat': this.on.chat?.({ p: String(m.p), name: String(m.name ?? ''), x: String(m.x ?? '') }); break;
+      case 'chatlog': this.on.chatlog?.(((m.list as ChatMsg[]) ?? []).map((c) => ({ p: String(c.p), name: String(c.name ?? ''), x: String(c.x ?? '') }))); break;
       case 'err': this.on.error?.(String(m.msg)); break;
       case 'kicked': this.closedByMe = true; this.on.closed?.('部屋主に退出させられました'); break;
     }

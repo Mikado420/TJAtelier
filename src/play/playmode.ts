@@ -43,13 +43,15 @@ export interface PlaySettings {
 }
 
 /** オンライン対戦のプレイ（PlayMode.startOnline に渡す） */
+type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
+
 export interface OnlineHooks {
   /** 自分の様子をサーバーへ送る */
   send(m: object): void;
   /** 相手（届いた様子で書き換わる） */
   opponents: Opponent[];
   /** 曲が終わった（成績） */
-  onFinish(stats: { score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }): void;
+  onFinish(stats: { score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number; crown?: Crown }): void;
   /** 途中でやめた */
   onQuit(): void;
   /** 観戦（自分は叩かず、参加している人のレーンだけを見る） */
@@ -138,6 +140,7 @@ export class PlayMode {
   private online: OnlineHooks | null = null;
   /** オンライン: まだ送っていない判定 [音符の番号, 0 良 / 1 可 / 2 不可] */
   private outbox: [number, number][] = [];
+  private sendQueued = false;
   private lastSent = 0;
   private lastSentKey = '';
 
@@ -169,6 +172,14 @@ export class PlayMode {
       this.renderer.pushJudge(e);
       const i = index.get(e.note);
       if (i !== undefined) this.outbox.push([i, CODE[e.judge]]);
+      // 判定はすぐに送る（同じ瞬間の判定はまとめて 1 回で）
+      if (!this.sendQueued) {
+        this.sendQueued = true;
+        queueMicrotask(() => {
+          this.sendQueued = false;
+          if (this.online && this.game === game) this.sendOnline(game, true);
+        });
+      }
     };
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
@@ -211,7 +222,8 @@ export class PlayMode {
     const o = this.online;
     if (!o) return;
     const t = performance.now();
-    if (!force && t - this.lastSent < 100) return;
+    // 判定があればすぐ、点数などの変化だけなら 50ms ごと
+    if (!force && !this.outbox.length && t - this.lastSent < 50) return;
     const st = game.stats;
     const key = `${st.score}|${st.combo}|${Math.round(st.gauge)}`;
     if (!this.outbox.length && key === this.lastSentKey && t - this.lastSent < 2000) return;
@@ -540,7 +552,10 @@ export class PlayMode {
       this.renderer.setOpponents([]);
       this.leaveScreen();
       const s = g.stats;
-      o.onFinish({ score: s.score, good: s.good, ok: s.ok, bad: s.bad, maxCombo: s.maxCombo, rolls: s.rolls });
+      // 自分で叩いて最後まで遊んだときは、王冠も渡す（記録に残す）
+      const fc = s.bad === 0 && g.totalHitNotes > 0;
+      const crown = !o.spectate && !this.auto ? (fc && s.ok === 0 ? 'allgood' : fc ? 'fc' : s.gauge >= CLEAR_LINE ? 'clear' : 'fail') as Crown : undefined;
+      o.onFinish({ score: s.score, good: s.good, ok: s.ok, bad: s.bad, maxCombo: s.maxCombo, rolls: s.rolls, crown });
       return;
     }
     if (this.calibrating) {
@@ -771,13 +786,24 @@ export class PlayMode {
     this.result.classList.remove('hidden');
   }
 
+  /** 結果を出さずに止める（途中でやめた） */
+  private stopQuietly() {
+    this.hidePause();
+    this.active = false;
+    postNative({ type: 'play', active: false });
+    cancelAnimationFrame(this.raf);
+    this.audio.stop();
+  }
+
   /** 「もう一度」で同じモードをやり直す */
   get lastWasCalibration() {
     return this.calibrating;
   }
 
   close() {
-    this.finish();
+    // 途中でやめたときは結果も記録も出さずに止める（最後まで遊んだときは finish 済み）
+    if (this.active && !this.online) this.stopQuietly();
+    else this.finish();
     this.root.classList.add('hidden');
     document.body.classList.remove('playing');
     this.result.classList.add('hidden');

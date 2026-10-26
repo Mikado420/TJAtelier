@@ -36,6 +36,8 @@ interface Player {
   /** 届いたメッセージの数（荒らし対策: 1 秒ごとに数え直す） */
   rate: number;
   rateAt: number;
+  /** 最後にチャットを送った時刻（連投を防ぐ） */
+  chatAt?: number;
 }
 
 export interface SongMeta {
@@ -87,6 +89,8 @@ export class RoomCore {
   /** 今のプレイに参加した人の様子（途中から入った人が観戦できるように、判定をためておく） */
   private round = new Map<string, { name: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }>();
   private seq = 0;
+  /** チャット（新しい 40 件。後から入った人にも送る） */
+  private chatLog: { p: string; name: string; x: string; at: number }[] = [];
 
   constructor(
     readonly id: string,
@@ -130,6 +134,7 @@ export class RoomCore {
       }
     }
     if (p.id === this.hostId) p.ready = !!this.song;
+    if (this.chatLog.length) this.sendTo(p, { t: 'chatlog', list: this.chatLog });
     this.roster();
     return p;
   }
@@ -281,9 +286,16 @@ export class RoomCore {
         break;
       }
       case 'chat': {
-        // 定型のスタンプだけ（自由な文字は送れない）
-        const k = Math.floor(Number(m.k));
-        if (k >= 0 && k < 16) this.broadcast({ t: 'chat', p: p.id, k });
+        // 自由な文字（80 文字まで・制御文字は除く・0.4 秒に 1 回まで）
+        const x = clean(m.x, 80);
+        if (!x) return;
+        const now = this.now();
+        if (p.chatAt && now - p.chatAt < 400) return this.sendTo(p, { t: 'err', msg: 'チャットは少し間をあけて送ってください' });
+        p.chatAt = now;
+        const c = { p: p.id, name: p.name, x, at: now };
+        this.chatLog.push(c);
+        if (this.chatLog.length > 40) this.chatLog.shift();
+        this.broadcast({ t: 'chat', ...c });
         break;
       }
     }

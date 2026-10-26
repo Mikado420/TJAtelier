@@ -187,6 +187,9 @@ export default function App() {
         automaticallyAdjustContentInsets={false}
         allowsBackForwardNavigationGestures={false}
         setSupportMultipleWindows={false}
+        // 中身の処理が落ちた（メモリ不足など）ときは、白や色だけの画面のままにせず読み込み直す
+        onContentProcessDidTerminate={() => { setPlaying(false); web.current?.reload(); }}
+        onRenderProcessGone={() => { setPlaying(false); web.current?.reload(); return true; }}
       />
       {playing && (
         <View style={StyleSheet.absoluteFill} collapsable={false}>
