@@ -80,15 +80,6 @@ function folderColor(key: string) {
   for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return FOLDER_COLORS[h % FOLDER_COLORS.length];
 }
-/** 曲のいちばん良い王冠（どの難易度でも） */
-function songCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | null {
-  let best: Crown | null = null;
-  for (const c of s.courses) {
-    const r = m[`${s.id}:${c.name}`];
-    if (r && (!best || CROWN_RANK[r.crown] > CROWN_RANK[best])) best = r.crown;
-  }
-  return best;
-}
 /** 曲の行に出す王冠: 王冠のある難易度のうち、いちばん難しいもの（かんたん→ふつう→むずかしい→おに→裏おに） */
 function topCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | null {
   let r: Crown | null = null;
@@ -100,6 +91,14 @@ function topCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | nu
 }
 /** 王冠の印（全良は虹色、フルコンボは金、クリアは銀） */
 const crownIcon = (c: Crown | null | undefined, cls = '') => (c && c !== 'fail' ? `<i class="crn cr-${c} ${cls}" aria-label="${c === 'allgood' ? '全良' : c === 'fc' ? 'フルコンボ' : 'クリア'}"></i>` : '');
+const STAT_MODE = 'malody-web:statMode';
+const STAT_MODES: { label: string; color: string; courses: string[] | null }[] = [
+  { label: '曲ごと', color: 'var(--accent)', courses: null },
+  { label: 'かんたん', color: 'var(--c-easy)', courses: ['Easy'] },
+  { label: 'ふつう', color: 'var(--c-normal)', courses: ['Normal'] },
+  { label: 'むずかしい', color: 'var(--c-hard)', courses: ['Hard'] },
+  { label: 'おに・裏おに', color: 'var(--c-oni)', courses: ['Oni', 'Edit'] },
+];
 function bestMap(): Record<string, { score: number; crown: Crown }> {
   try { return JSON.parse(localStorage.getItem(BEST) ?? '{}'); } catch { return {}; }
 }
@@ -251,17 +250,9 @@ export class Home {
 
   private render(scrollToSel = false, listToo = true) {
     const songs = this.shown();
-    // 左: 集めた王冠の数
+    // 左: 集めた王冠の数（重ならない数え方。タップで 曲ごと → かんたん → ふつう → むずかしい → おに・裏おに）
     const bm = bestMap();
-    const cnt: Record<Crown, number> = { allgood: 0, fc: 0, clear: 0, fail: 0 };
-    for (const x of this.songs) {
-      const c = songCrown(bm, x);
-      // 全良はフルコンボでもクリアでもある
-      if (c === 'allgood') { cnt.allgood++; cnt.fc++; cnt.clear++; } else if (c === 'fc') { cnt.fc++; cnt.clear++; } else if (c === 'clear') cnt.clear++;
-    }
-    const total = this.songs.length;
-    const stat = (k: Crown, label: string) => `<div class="hst-r cr-${k}"><i aria-hidden="true"></i><span>${label}</span><b>${cnt[k]}<small>/${total}</small></b><em style="--p:${total ? cnt[k] / total : 0}"></em></div>`;
-    this.foldersEl.innerHTML = `<div class="hst"><small class="hst-h">あつめた王冠</small>${stat('allgood', '全良')}${stat('fc', 'フルコンボ')}${stat('clear', 'クリア')}</div>`;
+    this.foldersEl.innerHTML = this.statHtml(bm);
 
     const pk = this.picking;
     if (listToo) {
@@ -334,6 +325,51 @@ export class Home {
     if (scrollToSel) this.centerSel(false);
     this.paintPlayer();
     this.paintCurve();
+  }
+
+  // ---------- 左: 集めた王冠 ----------
+
+  /** 0 = 曲ごと、1〜4 = 難易度ごと */
+  private statMode = (() => { try { return Math.max(0, Math.min(4, Number(localStorage.getItem(STAT_MODE)) || 0)); } catch { return 0; } })();
+  private statAnim = 0;
+
+  private statHtml(bm: Record<string, { score: number; crown: Crown }>) {
+    const m = STAT_MODES[this.statMode];
+    const cnt: Record<Crown | 'none', number> = { allgood: 0, fc: 0, clear: 0, fail: 0, none: 0 };
+    let total = 0;
+    if (!m.courses) {
+      // 曲ごと: 曲の行と同じく、王冠のある難易度のうちいちばん難しいものの王冠
+      for (const x of this.songs) { total++; cnt[topCrown(bm, x) ?? 'none']++; }
+    } else {
+      // 難易度ごと: その難易度の譜面ひとつずつ
+      for (const x of this.songs) for (const c of x.courses) {
+        if (!m.courses.includes(c.name)) continue;
+        total++;
+        const r = bm[`${x.id}:${c.name}`]?.crown;
+        cnt[r && r !== 'fail' ? r : 'none']++;
+      }
+    }
+    const rows: [Crown | 'none', string][] = [['allgood', '全良'], ['fc', 'フルコンボ'], ['clear', 'クリア'], ['none', '未クリア']];
+    const bar = rows.map(([k]) => (cnt[k] ? `<i class="cr-${k}" style="flex:${cnt[k]}"></i>` : '')).join('');
+    const dots = STAT_MODES.map((_, i) => `<i class="${i === this.statMode ? 'on' : ''}"></i>`).join('');
+    const anim = this.statAnim ? ' cst-in' : '';
+    this.statAnim = 0;
+    return `<button class="cst" data-stat style="--sc:${m.color}" aria-label="あつめた王冠（タップで切り替え）">
+      <span class="cst-h"><small>あつめた王冠</small><span class="cst-dots">${dots}</span></span>
+      <span class="cst-body${anim}">
+        <span class="cst-mode"><em>${m.label}</em><span class="cst-tot"><b>${total}</b><small>${m.courses ? '譜面' : '曲'}</small></span></span>
+        <span class="cst-bar">${bar || '<i class="cr-none" style="flex:1"></i>'}</span>
+        ${rows.map(([k, l]) => `<span class="cst-r cr-${k}"><i aria-hidden="true"></i><span>${l}</span><b>${cnt[k]}</b></span>`).join('')}
+      </span>
+      <span class="cst-tip">タップで切り替え ›</span>
+    </button>`;
+  }
+
+  private nextStat() {
+    this.statMode = (this.statMode + 1) % STAT_MODES.length;
+    try { localStorage.setItem(STAT_MODE, String(this.statMode)); } catch { /* 保存できない */ }
+    this.statAnim = 1;
+    this.foldersEl.innerHTML = this.statHtml(bestMap());
   }
 
   // ---------- まんなかの縦リスト ----------
@@ -622,6 +658,7 @@ export class Home {
     if ((x = d('[data-edit]'))) { this.stopPreview(); void this.host.open(x.dataset.edit!, 'edit'); return; }
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
+    if (d('[data-stat]')) { this.nextStat(); return; }
     if ((x = d('[data-fopen]'))) { this.toggleFolder(x.dataset.fopen!); return; }
     if ((x = d('[data-frename]'))) { void this.renameFolderAsk(x.dataset.frename!); return; }
     if ((x = d('[data-fdel]'))) { void this.deleteFolderAsk(x.dataset.fdel!); return; }

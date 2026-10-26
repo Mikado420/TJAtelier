@@ -2065,3 +2065,31 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hst-r { grid-template-columns: 16px 1fr auto; column-gap: 6px; }
 .hst-r span { grid-column: 2; font-size: 12px; }
 .hst-r b { grid-column: 3; }
+
+/* ---------- 左: あつめた王冠（重ならない数え方・タップで切り替え） ---------- */
+.home-folders { justify-content: center; padding: 4px 0; }
+.home .cst { position: relative; display: flex; flex-direction: column; gap: 6px; margin: 0 10px 0 12px; padding: 8px 10px 8px 12px; text-align: left; background: rgba(255, 255, 255, 0.04) !important; box-shadow: inset 3px 0 0 var(--sc); transition: box-shadow 0.3s; cursor: pointer; }
+.home .cst:active { background: rgba(255, 255, 255, 0.08) !important; }
+.cst-h { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.cst-h small { font-size: 11px; font-weight: 800; color: var(--sub); letter-spacing: 0.06em; white-space: nowrap; }
+.cst-dots { display: flex; gap: 3px; }
+.cst-dots i { width: 6px; height: 6px; background: rgba(255, 255, 255, 0.22); transform: skewX(calc(-1 * var(--tilt))); transition: background 0.2s, width 0.2s; }
+.cst-dots i.on { width: 14px; background: var(--sc); }
+.cst-body { display: flex; flex-direction: column; gap: 5px; }
+.cst-body.cst-in { animation: cstIn 0.28s cubic-bezier(0.2, 0.8, 0.3, 1); }
+@keyframes cstIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.cst-mode { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.cst-mode em { font-style: normal; font-size: 13px; font-weight: 900; padding: 1px 8px; background: var(--sc); color: #fff; white-space: nowrap; --sk: calc(20px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
+.cst-tot { white-space: nowrap; }
+.cst-tot b { font: italic 800 24px/1 var(--fd); }
+.cst-tot small { font-size: 10px; font-weight: 800; color: var(--sub); margin-left: 2px; }
+.cst-bar { display: flex; height: 7px; gap: 1px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.cst-bar i { display: block; min-width: 3px; background: var(--crc); transition: flex 0.3s; }
+.cst-r { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; column-gap: 6px; font-size: 12px; font-weight: 800; }
+.cst-r i { width: 15px; height: 12px; background: var(--crc); clip-path: polygon(0 100%, 6% 22%, 30% 52%, 50% 0, 70% 52%, 94% 22%, 100% 100%); }
+.cst-r span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cst-r b { font: 800 17px/1 var(--fd); }
+.cst-r.cr-none { color: var(--sub); }
+.cr-none { --crc: #4a525c; }
+.cst-bar .cr-allgood { background: linear-gradient(90deg, #ff6fb4, #ffd23f, #6fe0a0, #5ab4ff); }
+.cst-tip { font-size: 10px; font-weight: 700; color: var(--sub); text-align: right; opacity: 0.8; }
