@@ -13,6 +13,8 @@ export interface LoadedSong {
   audio: AudioFile | null;
   /** .tja のファイル名（zip の中ならフォルダ付き） */
   tjaName: string;
+  /** 同じフォルダか上のフォルダにある genre.ini の GenreName（入れるフォルダの名前） */
+  genre?: string;
 }
 
 export interface LoadResult {
@@ -55,13 +57,30 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
       for (const e of await readZip(buf)) if (!e.name.endsWith('/') && !/(^|\/)__MACOSX\//.test(e.name)) entries.push({ name: e.name, data: toBuf(e.data) });
     } else entries.push({ name: f.name, data: buf });
   }
+  // genre.ini（GenreName= がジャンル名）。置いてあるフォルダとその下の譜面に使う
+  const genres = new Map<string, string>();
+  for (const e of entries) {
+    if (base(e.name).toLowerCase() !== 'genre.ini') continue;
+    const m = /^\s*GenreName\s*=\s*(.+?)\s*$/im.exec(decodeText(e.data));
+    const name = m?.[1].replace(/^["']|["']$/g, '').trim();
+    if (name) genres.set(dir(e.name), name);
+  }
+  const genreOf = (path: string) => {
+    let d = dir(path);
+    for (;;) {
+      const g = genres.get(d);
+      if (g) return g;
+      if (!d) return undefined;
+      d = dir(d.slice(0, -1));
+    }
+  };
   const tjas: typeof entries = [];
   const audios: typeof entries = [];
   const skipped: string[] = [];
   for (const e of entries) {
     if (isAudio(e.name, e.data)) audios.push(e);
     else if (isTja(e.name, e.data)) tjas.push(e);
-    else if (!/(^|\/)\./.test(e.name)) skipped.push(base(e.name));
+    else if (!/(^|\/)\./.test(e.name) && base(e.name).toLowerCase() !== 'genre.ini') skipped.push(base(e.name));
   }
   const used = new Set<(typeof entries)[number]>();
   const songs: LoadedSong[] = [];
@@ -74,7 +93,7 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
       free.find((a) => dir(a.name) === dir(t.name) && dir(t.name) !== '' && parsed.filter((p) => dir(p.t.name) === dir(t.name)).length === 1) ??
       (parsed.length === 1 && free.length === 1 ? free[0] : undefined);
     if (audio) used.add(audio);
-    songs.push({ chart, audio: audio ? { name: base(audio.name), data: audio.data } : null, tjaName: t.name });
+    songs.push({ chart, audio: audio ? { name: base(audio.name), data: audio.data } : null, tjaName: t.name, genre: genreOf(t.name) });
   }
   return {
     songs,

@@ -28,7 +28,7 @@ import { mountTimeline } from './ui/infoTimeline';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { getCurrentId, listSongs, loadSongAudio, loadSongData, newId, saveSong, setCurrentId } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, newId, saveSong, setCurrentId } from './io/library';
 import { Home } from './home/home';
 import { writeZip } from './io/zip';
 import { isNativeHost, PlayMode } from './play/playmode';
@@ -1548,6 +1548,7 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   const r = await loadFiles(files);
   const folder = home.visible ? home.currentFolder : '';
   const added: string[] = [];
+  const genresMade = new Set<string>();
   for (const sng of r.songs) {
     let a: AudioFile | null = null;
     let len = 0;
@@ -1560,7 +1561,10 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
       } catch { r.skipped.push(sng.audio.name); }
     }
     const id = newId();
-    await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, folder);
+    // genre.ini があれば、そのジャンル名のフォルダに入れる
+    const f = sng.genre ? sng.genre.slice(0, 40) : folder;
+    if (sng.genre && !genresMade.has(f)) { genresMade.add(f); await addFolder(f).catch(() => {}); }
+    await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, f);
     added.push(id);
   }
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
