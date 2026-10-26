@@ -1823,6 +1823,7 @@ $('pauseBack').addEventListener('click', () => {
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
+play.onError = (msg) => toast(msg);
 play.onFinished = (r) => {
   if (currentSongId && lastTestFromStart) saveBest(currentSongId, ed.course.name, r.score, r.crown);
 };

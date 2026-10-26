@@ -38,6 +38,8 @@ interface Player {
   rateAt: number;
   /** 最後にチャットを送った時刻（連投を防ぐ） */
   chatAt?: number;
+  /** プレイ中の様子が最後に届いた時刻 */
+  lastSt?: number;
 }
 
 export interface SongMeta {
@@ -228,7 +230,8 @@ export class RoomCore {
         this.results.clear();
         this.round.clear();
         for (const o of this.players.values()) this.round.set(o.id, { name: o.name, s: 0, c: 0, g: 0, j: [], status: '' });
-        for (const o of this.players.values()) o.inGame = true;
+        for (const o of this.players.values()) { o.inGame = true; o.lastSt = this.zero; }
+        this.startWatchdog();
         const list = [...this.players.values()].map((o) => ({ p: o.id, name: o.name }));
         this.broadcast({ t: 'start', zero: this.zero, key: this.song.key, players: list });
         this.roster();
@@ -247,6 +250,7 @@ export class RoomCore {
             r.g = Number(m.g) || 0;
             if (r.j.length < 20000) r.j.push(...j);
           }
+          p.lastSt = this.now();
           this.broadcast({ t: 'st', p: p.id, s: r?.s ?? 0, c: r?.c ?? 0, g: r?.g ?? 0, j }, p);
         }
         break;
@@ -323,7 +327,32 @@ export class RoomCore {
     if (this.results.size > 0 && !this.finishTimer) this.finishTimer = setTimeout(() => this.endGame(), 20000);
   }
 
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * プレイ中に様子が 15 秒届かない人（アプリを閉じた・画面が止まったなど）は、抜けたことにする。
+   * 全員そうなっても部屋が「プレイ中」のまま止まらないように
+   */
+  private startWatchdog() {
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = setInterval(() => {
+      if (this.phase !== 'play') { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; return; }
+      const now = this.now();
+      let changed = false;
+      for (const o of this.players.values()) {
+        if (!o.inGame || now - (o.lastSt ?? this.zero) < 15000) continue;
+        o.inGame = false;
+        const r = this.round.get(o.id);
+        if (r && !r.status) r.status = 'lost';
+        this.broadcast({ t: 'quit', p: o.id });
+        changed = true;
+      }
+      if (changed) { this.maybeFinish(); this.roster(); }
+    }, 3000);
+  }
+
   private endGame() {
+    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
     if (this.finishTimer) clearTimeout(this.finishTimer);
     this.finishTimer = null;
     if (this.phase !== 'play') return;

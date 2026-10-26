@@ -102,6 +102,11 @@ export class OnlineScreen {
   }
 
   open() {
+    // プレイ中のはずなのにプレイが動いていない（止まった）ときは、やめた扱いにして部屋に戻す
+    if (this.playingNow && !this.host.play.isActive) {
+      this.playingNow = false;
+      this.client?.send({ t: 'quit' });
+    }
     this.root.classList.remove('hidden');
     if (!this.client) {
       this.view = 'lobby';
@@ -604,6 +609,8 @@ export class OnlineScreen {
     const c = this.client;
     if (!c || !this.song || this.song.meta.key !== key) {
       this.host.toast(spectate ? '曲を受け取ってから観戦できます' : '曲が届いていないので、今回は見学です');
+      // 遊べないことをサーバーに伝える（ほかの人がいつまでも待たないように）
+      if (!spectate) c?.send({ t: 'quit' });
       return;
     }
     const { meta, chart } = this.song;
@@ -630,6 +637,7 @@ export class OnlineScreen {
     if (spectate && !opps.length) { this.host.toast('観戦できる人がいません'); return; }
     this.playingNow = true;
     this.hide();
+    try {
     await this.host.play.startOnline(course, { title: meta.title, course: meta.course, level: meta.level }, c.toPerf(zero), {
       send: (m) => { if (!spectate) c.send(m); },
       opponents: opps,
@@ -651,5 +659,15 @@ export class OnlineScreen {
         this.open();
       },
     });
+    } catch (err) {
+      // 始められなかった: プレイ画面を閉じて部屋に戻る
+      console.error(err);
+      this.host.toast(`始められませんでした: ${(err as Error)?.message ?? err}`);
+      if (this.playingNow) {
+        this.playingNow = false;
+        this.host.play.quitOnline();
+      }
+      this.open();
+    }
   }
 }

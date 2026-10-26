@@ -357,12 +357,30 @@ export class PlayMode {
   private pausedAt = 0;
   private timeFloor = -Infinity;
 
+  /** 続けて起きたエラーの数 */
+  private loopErrors = 0;
+  /** エラーを知らせる（画面の下に出す） */
+  onError: (msg: string) => void = () => {};
+
   private runLoop() {
+    this.loopErrors = 0;
     const game = this.game!;
     const { course, info, endAt } = this.cur!;
     cancelAnimationFrame(this.raf);
     this.perf.last = 0;
     const loop = () => {
+      // 描くところなどで失敗しても、画面が止まったままにならないようにする（オンラインは結果へ進める）
+      try {
+        step();
+      } catch (err) {
+        console.error(err);
+        this.loopErrors++;
+        if (this.loopErrors === 1) this.onError(`プレイ中にエラー: ${(err as Error)?.message ?? err}`);
+        if (this.loopErrors > 30 || this.online) { this.finish(); return; }
+        this.raf = requestAnimationFrame(loop);
+      }
+    };
+    const step = () => {
       if (!this.active || this.paused) return;
       const t0 = performance.now();
       const P = this.perf;
