@@ -44,6 +44,8 @@ export interface PlaySettings {
   pointerInput?: boolean;
   /** 背景の動画: 全面・上だけ・出さない */
   videoMode?: 'full' | 'top' | 'off';
+  /** 動画の形: 16:9（縦をいっぱいに出し、左右は黒帯。16:9 でない動画は 16:9 に切り抜く）・画面いっぱい */
+  videoFit?: 'wide' | 'fill';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
 }
@@ -91,6 +93,8 @@ export class PlayMode {
     private readonly settings: PlaySettings,
   ) {
     this.renderer = new Renderer(canvas);
+    // 画面の大きさ・向きが変わったら動画を置き直す（レーンの位置が決まってから）
+    new ResizeObserver(() => requestAnimationFrame(() => this.placeVideo())).observe(root);
     this.input = bindInput(
       root,
       canvas,
@@ -577,15 +581,28 @@ export class PlayMode {
     this.placeVideo();
   }
 
-  /** 上だけに出すときは、レーンより上の範囲に置く */
+  /**
+   * 動画を置く。上だけに出すときは、レーンより上の範囲に置く。
+   * 16:9 のときは、その範囲の縦をいっぱいに使う 16:9 の枠を真ん中に置き（左右は黒帯）、動画は枠に合わせて切り抜く
+   */
   private placeVideo() {
     const v = this.video;
     if (!v) return;
     const t = this.videoMode === 'top' ? this.renderer.layout?.top : null;
+    let r = t ? { x: t.x, y: t.y, w: t.w, h: t.h } : { x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight };
+    if ((this.settings.videoFit ?? 'wide') === 'wide' && r.w > 0 && r.h > 0) {
+      let h = r.h;
+      let w = (h * 16) / 9;
+      // 縦長の画面では横をいっぱいにして、上下を黒帯にする
+      if (w > r.w) {
+        w = r.w;
+        h = (w * 9) / 16;
+      }
+      r = { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
+    }
     for (const el of [v, this.vdim]) {
       if (!el) continue;
-      if (t) Object.assign(el.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px` });
-      else Object.assign(el.style, { left: '0', top: '0', width: '100%', height: '100%' });
+      Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
     }
   }
 

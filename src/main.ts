@@ -98,6 +98,8 @@ const settings = {
   videoMode: 'full' as 'full' | 'top' | 'off',
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim: 0.5,
+  /** 動画の形: 16:9（縦をいっぱいに出し、左右は黒帯）・画面いっぱい */
+  videoFit: 'wide' as 'wide' | 'fill',
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
@@ -1445,9 +1447,11 @@ function playSettingRows() {
     ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
     ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}
     <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <div class="st-row"><span>動画の形</span><div class="st-seg two">${VIDEO_FITS.map(([v, l]) => `<button data-vfit="${v}" class="${settings.videoFit === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }
 const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['top', '上だけ'], ['off', '出さない']];
+const VIDEO_FITS: [typeof settings.videoFit, string][] = [['wide', '16:9（左右に黒帯）'], ['fill', '画面いっぱい']];
 function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}
@@ -1497,7 +1501,8 @@ function onHitModeClick(b: HTMLButtonElement) {
 
 /** 背景の動画（全面 / 上だけ / 出さない）のボタン */
 function onVideoModeClick(b: HTMLButtonElement) {
-  settings.videoMode = b.dataset.vmode as typeof settings.videoMode;
+  if (b.dataset.vfit) settings.videoFit = b.dataset.vfit as typeof settings.videoFit;
+  else settings.videoMode = b.dataset.vmode as typeof settings.videoMode;
   saveSettings();
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   play.applySettings();
@@ -1506,7 +1511,7 @@ function onVideoModeClick(b: HTMLButtonElement) {
 $('sheetBody').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
   if (b) onHitModeClick(b);
-  const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');
+  const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode], [data-vfit]');
   if (v) onVideoModeClick(v);
 });
 $('sheetBody').addEventListener('input', (e) => { onSettingInput(e.target as HTMLInputElement, false); });
@@ -2017,7 +2022,7 @@ $('pauseSettings').addEventListener('click', (e) => {
   if (pm) { play.setAuto(pm.dataset.pmode === 'auto'); return; }
   const hm = t.closest<HTMLButtonElement>('[data-hitmode]');
   if (hm) onHitModeClick(hm);
-  const vm = t.closest<HTMLButtonElement>('[data-vmode]');
+  const vm = t.closest<HTMLButtonElement>('[data-vmode], [data-vfit]');
   if (vm) onVideoModeClick(vm);
 });
 const onPauseSetting = (e: Event, commit: boolean) => {
