@@ -20,7 +20,7 @@ export async function closeCurtain(info: { title: string; sub?: string; course?:
   c.className = 'curtain';
   c.innerHTML = `<div class="cu-st">${COLORS.map((col, i) => `<i style="background:${col};transition-delay:${i * 35}ms"></i>`).join('')}</div>
     <div class="cu-band"><b>${esc(info.title)}</b><span>${esc(info.sub ?? '')}${info.course ? ` <em style="--cc:${info.color ?? 'var(--accent)'}">${esc(info.course)}</em>` : ''}</span></div>`;
-  document.body.appendChild(c);
+  (document.getElementById('root') ?? document.body).appendChild(c);
   el = c;
   void c.offsetWidth;
   c.classList.add('in');

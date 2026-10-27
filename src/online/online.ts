@@ -112,7 +112,8 @@ export class OnlineScreen {
         <span class="ol-sub"></span>
       </header>
       <div class="ol-body"></div>`;
-    document.body.appendChild(root);
+    // #root の中に置く（横画面の回転・PC の拡大をいっしょに受ける）
+    (document.getElementById('root') ?? document.body).appendChild(root);
     this.root = root;
     this.body = root.querySelector('.ol-body')!;
     root.addEventListener('click', (e) => void this.onClick(e));
