@@ -2227,3 +2227,5 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .vid-row b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .vid-row button { flex: none; }
 .ol-vprog i { background: #7b4bd0; }
+.play .play-vdim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; pointer-events: none; }
+.play .play-vdim.hidden { display: none; }

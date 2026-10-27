@@ -488,6 +488,7 @@ export class PlayMode {
   // ---------- 背景の動画 ----------
 
   private video: HTMLVideoElement | null = null;
+  private vdim: HTMLElement | null = null;
   private videoUrl = '';
   private videoOffset = 0;
   private videoCheck = 0;
@@ -512,9 +513,26 @@ export class PlayMode {
         v.setAttribute('playsinline', '');
         v.setAttribute('aria-hidden', 'true');
         v.preload = 'auto';
+        // 暗くするのは動画のフィルターではなく、上に重ねた黒い板で（iPhone ではフィルターが重い）
+        const dim = document.createElement('div');
+        dim.className = 'play-vdim';
+        this.root.prepend(dim);
         this.root.prepend(v);
         this.video = v;
+        this.vdim = dim;
+        // コマが出るたびに、その位置と時刻を覚える（ずれを正確に測るため）
+        type RVFC = (cb: (now: number, m: { mediaTime: number }) => void) => number;
+        const rvfc = (v as unknown as { requestVideoFrameCallback?: RVFC }).requestVideoFrameCallback?.bind(v);
+        if (rvfc) {
+          const onFrame = (_n: number, m: { mediaTime: number }) => {
+            this.vFrame = { media: m.mediaTime, at: performance.now() };
+            rvfc(onFrame);
+          };
+          rvfc(onFrame);
+        }
       }
+      this.vFrame = null;
+      this.vPrimed = false;
       this.videoUrl = URL.createObjectURL(src);
       this.video.src = this.videoUrl;
     }
@@ -538,7 +556,8 @@ export class PlayMode {
     const v = this.video;
     if (v) {
       v.classList.toggle('hidden', !mode);
-      v.style.filter = `brightness(${Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5))})`;
+      this.vdim?.classList.toggle('hidden', !mode);
+      if (this.vdim) this.vdim.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
       if (!mode) v.pause();
     }
     if (R.videoMode !== mode) {
@@ -553,40 +572,76 @@ export class PlayMode {
     const v = this.video;
     if (!v) return;
     const t = this.videoMode === 'top' ? this.renderer.layout?.top : null;
-    if (t) Object.assign(v.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px` });
-    else Object.assign(v.style, { left: '0', top: '0', width: '100%', height: '100%' });
+    for (const el of [v, this.vdim]) {
+      if (!el) continue;
+      if (t) Object.assign(el.style, { left: `${t.x}px`, top: `${t.y}px`, width: `${t.w}px`, height: `${t.h}px` });
+      else Object.assign(el.style, { left: '0', top: '0', width: '100%', height: '100%' });
+    }
   }
 
-  /** 動画を曲に合わせる（ずれが大きければ飛ばし、小さければ速さを少し変えて追いつく） */
+  /** 動画が最後にコマを出したときの位置（requestVideoFrameCallback。currentTime より正確） */
+  private vFrame: { media: number; at: number } | null = null;
+  /** 曲の前に、動画を最初のコマまで用意したか */
+  private vPrimed = false;
+  /** 大きくずれ始めた時刻（0 = ずれていない） */
+  private vDriftSince = 0;
+
+  /** 今の動画の位置（秒）の見積もり */
+  private videoPos(v: HTMLVideoElement) {
+    const f = this.vFrame;
+    if (f && !v.paused) return f.media + (performance.now() - f.at) / 1000;
+    return v.currentTime;
+  }
+
+  /**
+   * 動画を曲に合わせる。iPhone では速さを変えたり位置を飛ばしたりすると止まりやすいので、
+   * 最初に合わせたあとは、大きなずれ（0.4 秒）が 1 秒続いたときだけ位置を合わせ直す
+   */
   private syncVideo() {
     const v = this.video;
     if (!v || !this.videoMode) return;
     const t = this.audio.now() + this.videoOffset;
     const dur = Number.isFinite(v.duration) ? v.duration : Infinity;
-    if (t < 0 || t >= dur) {
+    if (t >= dur) {
       if (!v.paused) v.pause();
       return;
     }
     const wall = performance.now();
+    if (t < 0) {
+      // 曲が始まる前: 最初のコマまで用意しておき、再生にかかる時間のぶん少し早めに流し始める
+      if (!this.vPrimed && v.readyState >= 1) {
+        this.vPrimed = true;
+        try { v.currentTime = Math.max(0, t); } catch { /* まだ読み込み中 */ }
+      }
+      if (t >= -0.08 && v.paused) void v.play().catch(() => {});
+      else if (t < -0.2 && !v.paused) v.pause();
+      return;
+    }
     if (v.paused) {
+      // 止まっていた（ポーズから戻った・途中から）: 位置を合わせてから流す
       if (wall < this.videoCheck) return;
-      this.videoCheck = wall + 300;
-      try { v.currentTime = t; } catch { /* まだ読み込み中 */ }
+      this.videoCheck = wall + 400;
+      if (Math.abs(v.currentTime - t) > 0.15) { try { v.currentTime = t; } catch { /* まだ読み込み中 */ } }
+      if (v.playbackRate !== 1) v.playbackRate = 1;
       void v.play().catch(() => {});
       return;
     }
     if (wall < this.videoCheck) return;
-    this.videoCheck = wall + 500;
-    const d = v.currentTime - t;
-    if (Math.abs(d) > 0.25) {
-      v.playbackRate = 1;
-      v.currentTime = t + 0.05;
-    } else v.playbackRate = d > 0.03 ? 0.96 : d < -0.03 ? 1.04 : 1;
+    const d = this.videoPos(v) - t;
+    if (Math.abs(d) <= 0.4) { this.vDriftSince = 0; return; }
+    if (!this.vDriftSince) { this.vDriftSince = wall; return; }
+    if (wall - this.vDriftSince < 1000) return;
+    // 1 秒続けてずれている: 位置を合わせ直す（飛んだ先で動き出すまでの分だけ先へ）
+    this.vDriftSince = 0;
+    this.videoCheck = wall + 1500;
+    try { v.currentTime = t + 0.1; } catch { /* まだ読み込み中 */ }
   }
 
   private stopVideo() {
     this.video?.pause();
     this.videoCheck = 0;
+    this.vPrimed = false;
+    this.vDriftSince = 0;
   }
 
   /** ポーズ（曲を止めて、ポーズのメニューを出す） */
