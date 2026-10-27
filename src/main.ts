@@ -73,6 +73,7 @@ const settings = {
   // iPhone / iPad の Safari は両手交互の速い連打でタッチを落とすので、既定で指置きを使う（Expo Go の中では使わない）
   restZone: IS_IOS,
   passiveTouch: false,
+  pauseButton: true,
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
   /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
@@ -1354,6 +1355,7 @@ function playSettingRows() {
   return `
     <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
+    ${stSwitch('pauseButton', 'ポーズボタンを表示', settings.pauseButton)}
     ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
     ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
     ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}

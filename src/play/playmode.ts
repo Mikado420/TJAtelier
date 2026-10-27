@@ -34,6 +34,8 @@ export interface PlaySettings {
   hitMode?: 'on' | 'playOff' | 'off';
   /** タッチを passive で受け取る（iPhone が指を待たずに次へ進むように） */
   passiveTouch?: boolean;
+  /** プレイ中のポーズボタンを出す（出さないときは上の真ん中に触れるとポーズ） */
+  pauseButton?: boolean;
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
   padVisible?: boolean;
   /** 画面上部を指置きにする（叩いても反応しない） */
@@ -94,7 +96,9 @@ export class PlayMode {
       canvas,
       () => {
         const L = this.renderer.layout;
-        return { x: L.drumX, half: L.drumHalf, y: L.drumY, ry: L.drumRY, restBottom: L.restBottom };
+        // ポーズボタンを出さないときは、上の真ん中（レーンより上・横幅の 4 割）に触れるとポーズ
+        const pause = this.settings.pauseButton === false ? { bottom: L.laneY, half: L.w * 0.2, go: () => this.pause() } : undefined;
+        return { x: L.drumX, half: L.drumHalf, y: L.drumY, ry: L.drumRY, restBottom: L.restBottom, pause };
       },
       (kind, side, at, pt) => {
         // オートのときは叩いた入力を受け付けない
@@ -440,6 +444,7 @@ export class PlayMode {
     // オートのときは叩かないので、タッチ用の太鼓も出さない
     const touch = coarse && !this.auto && !this.spectating;
     const padVisible = this.settings.padVisible !== false;
+    this.root.classList.toggle('no-pause-btn', this.settings.pauseButton === false);
     const R = this.renderer;
     const changed = R.restZone !== restZone || R.touch !== touch || R.padVisible !== padVisible;
     R.restZone = restZone;

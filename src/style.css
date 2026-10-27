@@ -336,15 +336,24 @@ button.icon { min-width: 40px; height: 40px; padding: 0 10px; font-size: 18px; }
 /* 背景用の canvas（手前の canvas の後ろ） */
 .play canvas.game-bg { pointer-events: none; }
 .play .pause {
-  /* 左上に置く（右上は曲名） */
+  /* 左上に置く（右上は曲名）。エディタの再生ボタンと同じ水色の斜めの形 */
   position: absolute;
   left: calc(8px + var(--safe-l));
   top: calc(8px + var(--safe-t));
   z-index: 2;
-  background: rgba(0, 0, 0, 0.55);
+  width: 52px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  background: #4d9fbe;
+  clip-path: polygon(18% 0, 100% 0, 82% 100%, 0 100%);
   color: #fff;
 }
-.play .pause svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; }
+.play .pause svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 3.6; stroke-linecap: round; }
+.play.no-pause-btn .pause { display: none; }
 .pause-menu {
   position: absolute;
   inset: 0;

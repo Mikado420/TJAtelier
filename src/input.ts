@@ -58,7 +58,7 @@ export function resetTouchStats() {
 export function bindInput(
   root: HTMLElement,
   canvas: HTMLCanvasElement,
-  getDrum: () => { x: number; half: number; y: number; ry: number; restBottom?: number },
+  getDrum: () => { x: number; half: number; y: number; ry: number; restBottom?: number; pause?: { bottom: number; half: number; go: () => void } },
   onHit: HitHandler,
   /** true のときは指のタッチをポインターイベントで受け取る（タッチイベントは止めるだけ） */
   usePointer: () => boolean = () => false,
@@ -86,6 +86,11 @@ export function bindInput(
   const hitAt = (clientX: number, clientY: number, at: number) => {
     const { x: px, y: py } = localPoint({ clientX, clientY }, canvas);
     const d = getDrum();
+    // ポーズボタンを出さないとき: 上の真ん中に触れたらポーズ
+    if (d.pause && py < d.pause.bottom && Math.abs(px - d.x) < d.pause.half) {
+      d.pause.go();
+      return;
+    }
     // 指置きの場所は叩いても反応しない（指を 1 本置いておくと iPhone の取りこぼしが起きにくい）
     if (d.restBottom && py < d.restBottom) {
       touchStats.rests++;
