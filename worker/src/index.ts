@@ -4,18 +4,25 @@
  * GET  /rooms                 公開している部屋の一覧（JSON）
  * GET  /new                   新しい部屋の番号
  * GET  /ws/:id?name=&create=1&title=&pass=   部屋に入る（WebSocket）
+ *
+ * 合作（リアルタイム共同編集）:
+ * GET  /collab/ws/:id?cid=&name=&color=&key=&create=1&vkey=   プロジェクトに入る（WebSocket）
+ * GET  /collab/audio/:id/:hash?key=    共有している音源を受け取る
+ * PUT  /collab/audio/:id/:hash?key=    音源を置く（編集できる人だけ）
  */
 import { DurableObject } from 'cloudflare:workers';
 import { LOBBY_STALE_MS, LobbyCore, newRoomId, RoomCore, type Conn, type LobbyInfo, type RoomState } from './core';
+import { CollabCore, type CollabStore } from './collab';
 
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
   LOBBY: DurableObjectNamespace<Lobby>;
+  COLLAB: DurableObjectNamespace<Collab>;
 }
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
   'Access-Control-Allow-Headers': '*',
 };
 const json = (v: unknown, status = 200) =>
@@ -34,6 +41,18 @@ export default {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
       const stub = env.ROOM.get(env.ROOM.idFromName(m[1]));
       return stub.fetch(req);
+    }
+    const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{10})$/);
+    if (cw) {
+      if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
+      return env.COLLAB.get(env.COLLAB.idFromName(cw[1])).fetch(req);
+    }
+    const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{10})\/([0-9a-z]{4,64})$/i);
+    if (ca && (req.method === 'GET' || req.method === 'PUT')) {
+      const res = await env.COLLAB.get(env.COLLAB.idFromName(ca[1])).fetch(req);
+      const h = new Headers(res.headers);
+      for (const [k, v] of Object.entries(CORS)) h.set(k, v);
+      return new Response(res.body, { status: res.status, headers: h });
     }
     if (url.pathname === '/') return json({ ok: true, name: 'tjatelier-online' });
     return json({ error: 'not found' }, 404);
@@ -222,5 +241,115 @@ export class Room extends DurableObject<Env> {
     if (!core || core.empty) return;
     core.heartbeat();
     await this.ctx.storage.setAlarm(Date.now() + LOBBY_STALE_MS / 2);
+  }
+}
+
+/** Durable Object の保存場所を、合作の中身から使える形にする */
+function doStore(st: DurableObjectStorage): CollabStore {
+  return {
+    get: (k) => st.get(k),
+    async put(e) {
+      const en = Object.entries(e);
+      for (let i = 0; i < en.length; i += 100) await st.put(Object.fromEntries(en.slice(i, i + 100)));
+    },
+    async delete(ks) {
+      for (let i = 0; i < ks.length; i += 100) await st.delete(ks.slice(i, i + 100));
+    },
+    list: (prefix) => st.list({ prefix }),
+  };
+}
+
+/**
+ * 合作プロジェクト 1 つ。対戦の部屋と同じく WebSocket は「眠れる」受け方にし、起きたら保存から戻す。
+ * 変更の保存は少し待ってまとめて書く（待っている間は眠らない）
+ */
+export class Collab extends DurableObject<Env> {
+  private core: CollabCore | null = null;
+  private conns = new WeakMap<WebSocket, Conn>();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+    ctx.blockConcurrencyWhile(async () => {
+      const id = await ctx.storage.get<string>('pid');
+      if (!id) return;
+      const core = this.make(id);
+      await core.load();
+      for (const ws of ctx.getWebSockets()) {
+        const a = ws.deserializeAttachment() as { mid?: string; role?: 'edit' | 'view' } | null;
+        if (!a?.mid || !a.role || !core.attach(this.connOf(ws), { mid: a.mid, role: a.role })) {
+          try { ws.close(4100, 'reload'); } catch { /* 閉じ済み */ }
+        }
+      }
+    });
+  }
+
+  private make(id: string) {
+    this.core = new CollabCore(id, doStore(this.ctx.storage));
+    return this.core;
+  }
+
+  private connOf(ws: WebSocket): Conn {
+    let c = this.conns.get(ws);
+    if (!c) {
+      c = {
+        send: (d) => ws.send(d),
+        close: (code, reason) => {
+          try { ws.close(code, reason); } catch { /* 閉じ済み */ }
+        },
+      };
+      this.conns.set(ws, c);
+    }
+    return c;
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const q = url.searchParams;
+    const parts = url.pathname.split('/');
+    if (parts[2] === 'audio') {
+      const id = parts[3];
+      const hash = parts[4];
+      const core = this.core ?? this.make(id);
+      if (req.method === 'PUT') {
+        const err = await core.putAudio(q.get('key') ?? '', hash, new Uint8Array(await req.arrayBuffer()));
+        return err ? new Response(err, { status: 403 }) : new Response('ok');
+      }
+      const got = await core.getAudio(q.get('key') ?? '', hash);
+      if (typeof got === 'string') return new Response(got, { status: 404 });
+      return new Response(got, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, max-age=31536000, immutable' } });
+    }
+    const id = parts[3];
+    const fresh = !this.core;
+    const core = this.core ?? this.make(id);
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    const conn = this.connOf(server);
+    const r = await core.join(conn, {
+      cid: q.get('cid') ?? '', name: q.get('name') ?? '', color: q.get('color') ?? '', key: q.get('key') ?? '', create: q.get('create') === '1', vkey: q.get('vkey') ?? '',
+    });
+    if (typeof r === 'string') {
+      server.send(JSON.stringify({ t: 'denied', msg: r }));
+      server.close(4003, 'denied');
+      if (fresh && !core.exists) this.core = null;
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    if (fresh || !(await this.ctx.storage.get('pid'))) await this.ctx.storage.put('pid', id);
+    server.serializeAttachment({ mid: r.mid, role: r.role });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer) {
+    if (this.core) await this.core.message(this.connOf(ws), data);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    this.core?.leave(this.connOf(ws));
+    try { ws.close(code === 1005 || code === 1006 ? 1000 : code, 'bye'); } catch { /* 閉じ済み */ }
+  }
+
+  async webSocketError(ws: WebSocket) {
+    await this.webSocketClose(ws, 1000);
   }
 }
