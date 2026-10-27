@@ -722,7 +722,7 @@ export class PlayMode {
   /** 見比べのレーンを決める（次の start から。null で外す） */
   setCompare(list: { name: string; course: Course; pan: number }[] | null, ownPan = 0) {
     this.ownPan = list?.length ? ownPan : 0;
-    this.compare = (list ?? []).slice(0, 2).map((c, k) => ({
+    this.compare = (list ?? []).slice(0, 3).map((c, k) => ({
       o: {
         id: `cmp${k}`, name: c.name, tag: '見比べ（オート）', score: 0, combo: 0, gauge: 0, good: 0, ok: 0, bad: 0, marks: new Uint8Array(c.course.notes.length), fx: null, status: '' as const,
         course: c.course.name, lane: { game: new Game(c.course.notes), course: c.course, vis: [], bars: [] },

@@ -26,12 +26,12 @@ export interface HomeHost {
   toast(msg: string): void;
   /** 試聴を鳴らす音の仕組み */
   audio: AudioEngine;
-  /** 合作（参加しているプロジェクト・曲を共有する） */
+  /** オンライン作業（入ったことのある部屋・部屋を作る） */
   collab?: {
     list(): { id: string; title: string; role: 'edit' | 'view'; at: number }[];
     open(id: string): void;
-    /** リンクを貼って入る */
-    join(): void;
+    /** 部屋をさがす・作る画面 */
+    lobby(): void;
     forget(id: string): void;
     share(songId: string): void;
     /** その曲を共有したプロジェクト */
@@ -294,7 +294,7 @@ export class Home {
         // 詳しいところ（難易度・操作のボタン）は、選んでいる曲の帯にだけ入れる（曲が多くても軽いように）
         const on = s.id === this.sel && this.focus === 'song' && !pk;
         const d = on ? this.rowDetail(s, bm) : { x: '', acts: '' };
-        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="合作で共有中">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
+        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="オンライン作業の部屋あり">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -327,13 +327,13 @@ export class Home {
         const cl = this.host.collab?.list() ?? [];
         if (this.host.collab && !pk) {
           const col = '#e8a33c';
-          rows.push(`<div class="hr hfb ${this.collabOpen ? 'open' : ''}" data-collabbar style="--fc:${col};--dp:0"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-4 3.4-6 6.5-6s5.7 2 6.5 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.6.2 4.6 2 5.3 5"/></svg><span class="hfb-n">合作</span><small>${cl.length}<span> 件</span></small><i class="hfb-ar" aria-hidden="true"></i></div>`);
+          rows.push(`<div class="hr hfb ${this.collabOpen ? 'open' : ''}" data-collabbar style="--fc:${col};--dp:0"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-4 3.4-6 6.5-6s5.7 2 6.5 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.6.2 4.6 2 5.3 5"/></svg><span class="hfb-n">オンライン作業</span><small>${cl.length}<span> 部屋</span></small><i class="hfb-ar" aria-hidden="true"></i></div>`);
           if (this.collabOpen) {
             for (const p of cl) {
               const d = new Date(p.at);
-              rows.push(`<div class="hr in hc-row" data-collab="${esc(p.id)}" style="--dp:1;--fc:${col}"><i class="hr-mk"></i><div class="hr-t"><b>${esc(p.title || '（無題）')}</b><small>${p.role === 'view' ? '見るだけ' : '編集'} ・ ${d.getMonth() + 1}/${d.getDate()} に開いた</small></div><span class="hr-ib"><button data-collabopen="${esc(p.id)}" aria-label="開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><small>開く</small></button><button data-collabdel="${esc(p.id)}" aria-label="一覧から外す">${ICON.more}</button></span></div>`);
+              rows.push(`<div class="hr in hc-row" data-collab="${esc(p.id)}" style="--dp:1;--fc:${col}"><i class="hr-mk"></i><div class="hr-t"><b>${esc(p.title || '（無題）')}</b><small>${esc(p.id)} ・ ${p.role === 'view' ? '見学' : 'メンバー'} ・ ${d.getMonth() + 1}/${d.getDate()} に開いた</small></div><span class="hr-ib"><button data-collabopen="${esc(p.id)}" aria-label="開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><small>開く</small></button><button data-collabdel="${esc(p.id)}" aria-label="一覧から外す">${ICON.more}</button></span></div>`);
             }
-            rows.push(`<div class="hr hfb hfb-add" data-collabjoin style="--dp:1"><span class="hfb-n">＋ リンクで参加</span></div>`);
+            rows.push(`<div class="hr hfb hfb-add" data-collabjoin style="--dp:1"><span class="hfb-n">＋ 部屋をさがす・作る</span></div>`);
           }
         }
         for (const k of [ALL, UNCAT, ...this.folders.filter((f) => !f.includes('/')).sort((a, b) => a.localeCompare(b, 'ja'))]) bar(k, 0);
@@ -760,10 +760,19 @@ export class Home {
     if ((x = d('[data-analyze]'))) { this.host.analyze(x.dataset.analyze!); return; }
     if ((x = d('[data-smore]'))) { this.songMenu(x.dataset.smore!, x); return; }
     if (d('[data-collabbar]')) { this.collabOpen = !this.collabOpen; this.render(); return; }
-    if (d('[data-collabjoin]')) { this.host.collab?.join(); return; }
+    if (d('[data-collabjoin]')) { this.stopPreview(); this.host.collab?.lobby(); return; }
+    if ((x = d('[data-h="online"]')) && this.host.collab) {
+      // オンライン: 対戦（遊ぶ）と作業（いっしょに作る）は部屋の一覧が別
+      const c = this.host.collab;
+      this.popup(x, [
+        ['オンライン対戦（いっしょに遊ぶ）', () => { this.stopPreview(); this.host.online(); }],
+        ['オンライン作業（いっしょに作る）', () => { this.stopPreview(); c.lobby(); }],
+      ]);
+      return;
+    }
     if ((x = d('[data-collabdel]'))) {
       const id = x.dataset.collabdel!;
-      this.popup(x, [['一覧から外す（サーバーには残ります）', () => { this.host.collab?.forget(id); this.render(); }, true]]);
+      this.popup(x, [['自分の一覧から外す（部屋は残ります）', () => { this.host.collab?.forget(id); this.render(); }, true]]);
       return;
     }
     if ((x = d('[data-collabopen]')) || (x = d('[data-collab]'))) { this.stopPreview(); this.host.collab?.open((x.dataset.collabopen ?? x.dataset.collab)!); return; }
@@ -935,7 +944,7 @@ export class Home {
     const shared = this.host.collab?.sharedOf(id);
     const joined = shared && this.host.collab?.list().some((p) => p.id === shared);
     this.popup(anchor, [
-      ...(this.host.collab ? [[joined ? 'この曲の合作を開く' : '合作で共有する…', () => { this.stopPreview(); if (joined) this.host.collab!.open(shared!); else this.host.collab!.share(id); }] as [string, () => void]] : []),
+      ...(this.host.collab ? [[joined ? 'この曲の作業部屋を開く' : 'オンライン作業の部屋を作る…', () => { this.stopPreview(); if (joined) this.host.collab!.open(shared!); else this.host.collab!.share(id); }] as [string, () => void]] : []),
       ...(inFolder ? [[`「${this.folder}」から外す`, async () => { await removeFromFolder([id], this.folder!); await this.reload(); this.render(); }] as [string, () => Promise<void>]] : []),
       ['入れるフォルダを選ぶ…', () => this.folderPicker([id], anchor)],
       ['この曲を消す', async () => {

@@ -35,8 +35,10 @@ import { exportBackup, importBackup, isBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
 import { fitRoot, localPoint, typing } from './orient';
 import { BUILD_ID, startAutoUpdate } from './update';
-import { Collab, collabProjects, parseCollabHash, sharedMap } from './collab/controller';
+import { Collab, collabProjects, sharedMap } from './collab/controller';
+import { CollabLobby } from './collab/lobby';
 import { forgetJoined } from './collab/session';
+import type { RoomSettings } from './collab/protocol';
 
 fitRoot();
 
@@ -168,7 +170,28 @@ const collab = new Collab({
   startTest: (f) => startTest(f),
   busy: (m, p) => busy(m, p),
   busyEnd: () => busyEnd(),
+  // 入れなかった: 部屋をさがす画面に戻る（あいことばが違えば聞き直す。部屋が消えていたら一覧から外す）
+  onDenied: (id, msg) => void (async () => {
+    if (msg.includes('見つかりません')) forgetJoined(id);
+    await leaveCollab();
+    await home.show(currentSongId);
+    await collabLobby.open({ msg, retry: msg.includes('あいことば') ? id : undefined });
+  })(),
 });
+/** オンライン作業の部屋をさがす・作る画面 */
+const collabLobby = new CollabLobby({
+  toast: (m) => toast(m),
+  songs: async () => (await listSongs()).map((x) => ({ id: x.id, title: x.title, subtitle: x.subtitle })),
+  enter: (id, join) => void collab.open(id, join),
+  create: (songId, room) => void shareSong(songId, room),
+  closed: () => void home.show(currentSongId),
+});
+/** 合作を閉じて、エディタを空にする */
+async function leaveCollab() {
+  if (collab.active) collab.close(false);
+  ed.load(newChart(), null, 0);
+  await setAudio(null, false);
+}
 // 拡大率の初期値をプレイ画面と同じ音符の間隔に変えたので、前の版で自分で変えた拡大率は一度だけ初期値に戻す
 // 打音を差し替えたので、打音の音量の比率を一度だけ 0.8 にする
 if (!settings.hitVolVer) {
@@ -2059,7 +2082,6 @@ async function boot() {
   view.pos = 0;
   updateHeader();
   await home.show(await getCurrentId());
-  await openCollabFromHash();
 }
 
 /** 音源の長さ（秒）。再生できない形式なら 0 */
@@ -2166,52 +2188,31 @@ const home = new Home({
   toast,
   collab: {
     list: () => collabProjects(),
-    open: (id) => {
-      const p = collabProjects().find((x) => x.id === id);
-      if (p) void collab.open({ id: p.id, key: p.key });
-      else toast('このプロジェクトのリンクがありません');
-    },
-    join: () => {
-      const v = prompt('合作のリンクを貼ってください');
-      if (!v) return;
-      const l = parseCollabHash(v);
-      if (l) void collab.open(l);
-      else toast('リンクが読めませんでした');
-    },
+    open: (id) => void collab.open(id),
+    lobby: () => void collabLobby.open(),
     forget: (id) => forgetJoined(id),
-    share: (id) => void shareSong(id),
+    share: (id) => void collabLobby.open({ createFor: id }),
     sharedOf: (id) => sharedMap()[id],
   },
 });
 
 (window as unknown as { __collab?: Collab }).__collab = collab;
 
-/** 曲を合作で共有する（全部の難易度が本譜面になり、音源もサーバーに置く） */
-async function shareSong(id: string) {
+/** 曲からオンライン作業の部屋を作る（全部の難易度が本譜面になり、音源もサーバーに置く） */
+async function shareSong(id: string, room: RoomSettings) {
   const data = await loadSongData(id);
   if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
-  if (!confirm(`「${data.chart.title}」を合作で共有しますか？\n全部の難易度が本譜面になり、音源もサーバーに送ります。共有リンクを知っている人が編集できます。`)) return;
   stopPlayback();
   const a = await loadSongAudio(id);
-  await collab.share(data.chart, a && !isVideoName(a.name) ? a : null, id);
+  await collab.share(data.chart, a && !isVideoName(a.name) ? a : null, id, room);
 }
-
-/** 合作のリンク（#collab=…）で開かれたら、そのプロジェクトに入る */
-async function openCollabFromHash() {
-  const link = parseCollabHash();
-  if (!link) return;
-  history.replaceState(null, '', location.pathname + location.search);
-  await collab.open(link);
-}
-window.addEventListener('hashchange', () => void openCollabFromHash());
 
 $('btnHome').addEventListener('click', async () => {
   closeMenus();
   stopPlayback();
   if (collab.active) {
     collab.close();
-    ed.load(newChart(), null, 0);
-    await setAudio(null, false);
+    await leaveCollab();
   }
   await persist();
   await home.show(currentSongId);

@@ -181,6 +181,8 @@ export class EditorView {
   ghosts: GhostRow[] = [];
   /** 合作: ほかの人の見ている場所 */
   cursors: CursorMark[] = [];
+  /** 合作: 本譜面の担当（A・B…）の範囲（tick）。レーンの上の縁に色で出す */
+  bands: { a: number; b: number; color: string; label: string; mine: boolean }[] = [];
   /** 合作: ほかのレーンの名前をタップしたとき */
   onGhostTap: (id: string) => void = () => {};
   /** 最後に描いたほかのレーンの名前の位置 */
@@ -623,6 +625,26 @@ export class EditorView {
       const ranges = this.ed.gogoRanges();
       ctx.fillStyle = C.gogo;
       for (const [a, b] of ranges) for (const sp of spansX(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
+
+      // 合作: 担当の範囲（レーンの上の縁に色の帯。自分の担当は太く・頭に名前）
+      for (const bd of this.bands) {
+        const bh = Math.max(3, (bd.mine ? 12 : 5) * s);
+        for (const sp of spansX(bd.a, bd.b)) {
+          ctx.globalAlpha = bd.mine ? 0.9 : 0.55;
+          ctx.fillStyle = bd.color;
+          ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, bh);
+          ctx.globalAlpha = 1;
+        }
+        const x = xt(bd.a);
+        if (x >= L.colW - 4 && x <= this.w) {
+          const g = geomOf(bd.a);
+          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px system-ui, sans-serif`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillStyle = bd.color;
+          ctx.fillText(bd.label, Math.max(L.colW + 2, x + 3 * s), g.y + bh + 2 * s);
+        }
+      }
 
       // グラデの範囲（レーンの下の端に紫の帯。右へ行くほど濃く）
       for (const g of course.grads ?? []) {

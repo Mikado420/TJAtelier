@@ -8,7 +8,7 @@
  * - プロジェクトと送っていない変更は端末にも保存し、オフラインでも開いて編集できる
  */
 import { serverBase } from '../online/net';
-import { applyOp, type CollabDoc, type Lane, type Member, type Op } from './protocol';
+import { applyOp, type CollabDoc, type Lane, type Member, type Op, type RoomInfo, type RoomSettings } from './protocol';
 
 export interface ChatMsg {
   id: string;
@@ -22,7 +22,10 @@ export interface ChatMsg {
 
 export interface VerInfo { id: string; name: string; by: string; at: number; auto: boolean }
 
-export interface CollabLink { id: string; key: string }
+export interface CollabLink { id: string }
+
+/** 入り方: あいことば・見学・作る（部屋の設定） */
+export interface JoinOpts { pass?: string; watch?: boolean; create?: RoomSettings }
 
 export type Status = 'connecting' | 'online' | 'offline' | 'denied';
 
@@ -44,6 +47,7 @@ export interface SessionEvents {
   trash(): void;
   vers(list: VerInfo[]): void;
   status(s: Status, msg?: string): void;
+  room(): void;
   error(msg: string): void;
   rejected(n: number): void;
   kicked(): void;
@@ -104,7 +108,7 @@ export async function idbDel(k: string) {
 }
 
 /** 参加しているプロジェクトの一覧（ホームに出す） */
-export interface JoinedProject { id: string; key: string; title: string; role: 'edit' | 'view'; at: number }
+export interface JoinedProject { id: string; title: string; role: 'edit' | 'view'; at: number }
 const LIST_KEY = 'malody-web:collabList';
 export function joinedList(): JoinedProject[] {
   try {
@@ -145,7 +149,10 @@ export class CollabSession {
   me = '';
   role: 'edit' | 'view' = 'edit';
   /** 見るだけのリンクの鍵（編集できる人にだけ届く） */
-  vkey = '';
+  /** 部屋の設定（あいことばはメンバーにだけ届く） */
+  room: RoomSettings = { name: '', pass: '', unlisted: false, watch: false };
+  /** 最後にだれかが入った・出た時刻 */
+  lastActive = 0;
   status: Status = 'connecting';
   chat: ChatMsg[] = [];
   chatAll = 0;
@@ -166,7 +173,7 @@ export class CollabSession {
   private loading: CollabDoc | null = null;
   private on: Partial<SessionEvents> = {};
 
-  constructor(readonly link: CollabLink, private profile: { name: string; color: string }, private createKeys?: { vkey: string }) {}
+  constructor(readonly link: CollabLink, private profile: { name: string; color: string }, private join: JoinOpts = {}) {}
 
   handlers(h: Partial<SessionEvents>) {
     this.on = h;
@@ -182,10 +189,11 @@ export class CollabSession {
 
   /** 端末に保存したプロジェクトから開く（オフラインでも開けるように） */
   async loadCache(): Promise<boolean> {
-    const c = await idbGet<{ doc: CollabDoc; me: string; role: 'edit' | 'view'; pending: Pending[]; chat: ChatMsg[]; vkey?: string }>(`doc:${this.link.id}`);
+    const c = await idbGet<{ doc: CollabDoc; me: string; role: 'edit' | 'view'; pending: Pending[]; chat: ChatMsg[]; room?: RoomSettings }>(`doc:${this.link.id}`);
     if (!c?.doc) return false;
     this.doc = c.doc;
-    this.vkey = c.vkey ?? '';
+    this.doc.groups ??= {};
+    if (c.room) this.room = c.room;
     this.me = c.me;
     this.role = c.role;
     this.pending = c.pending ?? [];
@@ -198,7 +206,7 @@ export class CollabSession {
     clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => {
       if (!this.doc || !this.me) return;
-      void idbPut(`doc:${this.link.id}`, { doc: this.doc, me: this.me, role: this.role, pending: this.pending, chat: this.chat.slice(-200), vkey: this.vkey });
+      void idbPut(`doc:${this.link.id}`, { doc: this.doc, me: this.me, role: this.role, pending: this.pending, chat: this.chat.slice(-200), room: this.room });
     }, 800);
   }
 
@@ -206,10 +214,16 @@ export class CollabSession {
     this.closed = false;
     clearTimeout(this.retryTimer);
     const base = serverBase().replace(/^http/, 'ws');
-    const q = new URLSearchParams({ cid: collabCid(), name: this.profile.name, color: this.profile.color, key: this.link.key });
-    if (this.createKeys) {
+    const q = new URLSearchParams({ cid: collabCid(), name: this.profile.name, color: this.profile.color });
+    const j = this.join;
+    if (j.pass) q.set('pass', j.pass);
+    if (j.watch) q.set('watch', '1');
+    if (j.create) {
       q.set('create', '1');
-      q.set('vkey', this.createKeys.vkey);
+      q.set('pass', j.create.pass);
+      q.set('rname', j.create.name);
+      if (j.create.unlisted) q.set('unlisted', '1');
+      if (j.create.watch) q.set('rwatch', '1');
     }
     this.setStatus('connecting');
     let ws: WebSocket;
@@ -286,13 +300,16 @@ export class CollabSession {
       case 'hello':
         this.me = m.you;
         this.role = m.role;
-        if (m.vkey) this.vkey = m.vkey;
+        if (m.room) this.room = m.room;
+        this.lastActive = m.lastActive ?? 0;
         this.loading = m.doc;
         this.chat = m.chat;
         this.chatAll = m.chatAll;
         this.online = m.online;
         this.retry = 0;
-        this.createKeys = undefined;
+        // 一度入ったら、次からはあいことばは要らない（見学は見学のまま）
+        this.join = { watch: m.role === 'view' };
+        if (m.room) this.on.room?.();
         this.ping();
         clearInterval(this.pingTimer);
         this.pingTimer = window.setInterval(() => this.ping(), 20000);
@@ -385,10 +402,16 @@ export class CollabSession {
           this.saveCache();
         }
         return;
+      case 'room':
+        this.room = m.room;
+        this.on.room?.();
+        this.saveCache();
+        return;
       case 'members':
         if (this.doc) {
           this.doc.members = m.members;
           this.doc.leader = m.leader;
+          if (m.groups) this.doc.groups = m.groups;
           this.on.members?.();
           this.saveCache();
         }
@@ -550,7 +573,7 @@ export class CollabSession {
 
   async uploadAudio(hash: string, data: ArrayBuffer): Promise<boolean> {
     try {
-      const r = await fetch(`${serverBase()}/collab/audio/${this.link.id}/${hash}?key=${encodeURIComponent(this.link.key)}`, { method: 'PUT', body: data });
+      const r = await fetch(`${serverBase()}/collab/audio/${this.link.id}/${hash}?cid=${encodeURIComponent(collabCid())}`, { method: 'PUT', body: data });
       return r.ok;
     } catch {
       return false;
@@ -559,10 +582,18 @@ export class CollabSession {
 
   async downloadAudio(hash: string): Promise<ArrayBuffer | null> {
     try {
-      const r = await fetch(`${serverBase()}/collab/audio/${this.link.id}/${hash}?key=${encodeURIComponent(this.link.key)}`);
+      const r = await fetch(`${serverBase()}/collab/audio/${this.link.id}/${hash}?cid=${encodeURIComponent(collabCid())}`);
       return r.ok ? await r.arrayBuffer() : null;
     } catch {
       return null;
     }
   }
+}
+
+/** 部屋の一覧（ids を渡すとその部屋。一覧に出さない部屋も） */
+export async function fetchRooms(ids?: string[]): Promise<RoomInfo[]> {
+  const q = ids ? `?ids=${ids.map(encodeURIComponent).join(',')}` : '';
+  const r = await fetch(`${serverBase()}/collab/rooms${q}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(String(r.status));
+  return r.json();
 }

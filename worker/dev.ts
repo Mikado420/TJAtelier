@@ -3,16 +3,21 @@
  * Web 版は ?online=http://127.0.0.1:8787 で、こちらにつなぐ。
  */
 import { LobbyCore, newRoomId, RoomCore, type Conn } from './src/core';
-import { CollabCore, MemoryStore } from './src/collab';
+import { CollabCore, CollabLobbyCore, MemoryStore } from './src/collab';
 
 const lobby = new LobbyCore();
 const rooms = new Map<string, RoomCore>();
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS', 'Access-Control-Allow-Headers': '*' };
 /** 合作プロジェクト（保存はメモリだけ） */
 const collabs = new Map<string, CollabCore>();
+const collabLobby = new CollabLobbyCore();
 const collabOf = (id: string) => {
   let c = collabs.get(id);
-  if (!c) collabs.set(id, (c = new CollabCore(id, new MemoryStore())));
+  if (!c) {
+    c = new CollabCore(id, new MemoryStore());
+    c.onLobby = (i) => collabLobby.update(i);
+    collabs.set(id, c);
+  }
   return c;
 };
 
@@ -23,12 +28,16 @@ Bun.serve<Data, undefined>({
   async fetch(req, server) {
     const url = new URL(req.url);
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
-    const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{10})$/);
+    if (url.pathname === '/collab/rooms') {
+      const ids = url.searchParams.get('ids');
+      return Response.json(collabLobby.list(Date.now(), ids ? ids.split(',') : undefined), { headers: CORS });
+    }
+    const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{6,10})$/);
     if (cw && server.upgrade(req, { data: { id: cw[1], q: url.searchParams, collab: true } })) return undefined;
-    const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{10})\/([0-9a-z]{4,64})$/i);
+    const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{6,10})\/([0-9a-z]{4,64})$/i);
     if (ca) {
       const core = collabOf(ca[1]);
-      const key = url.searchParams.get('key') ?? '';
+      const key = url.searchParams.get('cid') ?? '';
       if (req.method === 'PUT') {
         const err = await core.putAudio(key, ca[2], new Uint8Array(await req.arrayBuffer()));
         return new Response(err ?? 'ok', { status: err ? 403 : 200, headers: CORS });
@@ -49,7 +58,10 @@ Bun.serve<Data, undefined>({
       if (ws.data.collab) {
         const conn: Conn = { send: (d) => { ws.send(d); }, close: (c, r) => ws.close(c, r) };
         ws.data.conn = conn;
-        const r = await collabOf(id).join(conn, { cid: q.get('cid') ?? '', name: q.get('name') ?? '', color: q.get('color') ?? '', key: q.get('key') ?? '', create: q.get('create') === '1', vkey: q.get('vkey') ?? '' });
+        const r = await collabOf(id).join(conn, {
+          cid: q.get('cid') ?? '', name: q.get('name') ?? '', color: q.get('color') ?? '', pass: q.get('pass') ?? '', watch: q.get('watch') === '1',
+          create: q.get('create') === '1' ? { name: q.get('rname') ?? '', pass: q.get('pass') ?? '', unlisted: q.get('unlisted') === '1', watch: q.get('rwatch') === '1' } : undefined,
+        });
         if (typeof r === 'string') {
           ws.send(JSON.stringify({ t: 'denied', msg: r }));
           ws.close(4003, 'denied');

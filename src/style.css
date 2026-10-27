@@ -2349,3 +2349,42 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hr-share { font-style: normal; font-size: 0.85em; margin-left: 4px; }
 .hc-row .hr-ib { grid-template-columns: 64px 40px; margin-left: auto; }
 .hc-row .hr-ib [data-collabdel] svg { fill: #14181b; }
+
+/* オンライン作業: 部屋をさがす・作る */
+.clobby { z-index: 14; }
+.clobby .sheet-panel { width: min(760px, 100%); max-height: 94%; }
+.cl-hbtns { display: flex; gap: 6px; }
+.cl-top { display: flex; gap: 8px; }
+.cl-top input { flex: 1; min-width: 0; padding: 9px 10px; font-size: 16px; background: var(--inp); color: #fff; border: 1px solid var(--line); border-radius: 0; }
+.cl-new { flex: none; padding: 0 14px; background: var(--accent); color: #fff; font-weight: 800; }
+.cl-room { cursor: pointer; }
+.cl-room b { font-size: 15px; }
+.cl-tag { font-size: 10px; padding: 1px 6px; background: rgba(255, 255, 255, 0.12); color: var(--sub); }
+.cl-cs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cl-c { font-style: normal; font-size: 11px; font-weight: 800; padding: 1px 7px; color: #fff; background: #555; font-family: var(--fd); }
+.cl-c.cd-easy { background: var(--c-easy); }
+.cl-c.cd-normal { background: var(--c-normal); }
+.cl-c.cd-hard { background: var(--c-hard); }
+.cl-c.cd-oni { background: var(--c-oni); }
+.cl-c.cd-edit { background: var(--c-edit); }
+.cp-ck2 { gap: 10px; }
+.cp-ck2 input { width: 20px; height: 20px; flex: none; }
+.cp-ck2 span { width: auto !important; color: #fff !important; }
+.cp-roomid { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; align-items: baseline; padding: 10px 12px; background: rgba(0, 0, 0, 0.25); border-left: 3px solid var(--accent); }
+.cp-roomid small { color: var(--sub); font-size: 12px; }
+.cp-roomid b { font-family: var(--fd); font-size: 22px; letter-spacing: 0.08em; -webkit-user-select: text; user-select: text; }
+
+/* 担当（A・B・C…） */
+.cp-group { flex-direction: column; align-items: stretch !important; border-left: 5px solid var(--gc); gap: 6px; }
+.cp-ghead { display: flex; align-items: center; gap: 6px; }
+.cp-gname { flex: 1; font-size: 18px; font-family: var(--fd); color: var(--gc); }
+.cp-granges { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-rg { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 4px 2px 8px; background: rgba(255, 255, 255, 0.08); }
+.cp-rg button { padding: 0 6px !important; font-size: 13px !important; background: none; border: 0; color: #fff; }
+.cp-gadd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; }
+.cp-gadd select, .cp-gadd input { height: 30px; font-size: 14px; background: var(--inp); color: #fff; border: 1px solid var(--line); border-radius: 0; }
+.cp-gadd input { width: 58px; padding: 0 6px; }
+.cp-gmems { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; }
+.cp-gm { display: inline-flex; align-items: center; gap: 4px; }
+.cp-gm input { width: 18px; height: 18px; }
+.cp-gm i { width: 8px; height: 8px; border-radius: 50%; }

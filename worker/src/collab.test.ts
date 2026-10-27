@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CollabCore, MemoryStore } from './collab';
+import { CollabCore, CollabLobbyCore, MemoryStore } from './collab';
 import { emptyHead, type Lane } from '../../src/collab/protocol';
 
 type Msg = Record<string, any>;
@@ -9,8 +9,9 @@ function conn() {
 }
 const last = (c: ReturnType<typeof conn>, t: string) => [...c.got].reverse().find((m) => m.t === t);
 const lane = (id: string, owner: string, main: boolean, course = 'Oni'): Lane => ({ id, course, name: id, owner, color: '#fff', main, order: 0, head: emptyHead(), notes: {}, events: {}, grads: {} });
-const KEY = 'editkey123';
-const VKEY = 'viewkey123';
+const PASS = 'たいこ';
+const ROOM = { name: '部屋', pass: PASS, unlisted: false, watch: true };
+const q = (cid: string, extra: Record<string, unknown> = {}) => ({ cid, name: cid.toUpperCase(), color: '', pass: '', watch: false, ...extra });
 
 describe('合作プロジェクト（サーバー）', () => {
   beforeEach(() => vi.useFakeTimers());
@@ -21,19 +22,24 @@ describe('合作プロジェクト（サーバー）', () => {
     const core = new CollabCore('P', store);
     const ca = conn();
     const cb = conn();
-    const A = await core.join(ca, { cid: 'a', name: 'A', color: '', key: KEY, vkey: VKEY, create: true });
-    const B = await core.join(cb, { cid: 'b', name: 'B', color: '', key: KEY, vkey: '', create: false });
+    const A = await core.join(ca, q('a', { create: ROOM }));
+    const B = await core.join(cb, q('b', { pass: PASS }));
     if (typeof A === 'string' || typeof B === 'string') throw new Error(String(A) + B);
     const send = (c: typeof ca, m: Msg) => core.message(c, JSON.stringify(m));
     return { store, core, ca, cb, A: A.mid, B: B.mid, send };
   };
 
-  it('作った人がリーダー。鍵が違えば入れない。見るだけの鍵では変更できない', async () => {
-    const { core, A, ca } = await setup();
+  it('作った人がリーダー。あいことばが違えば入れない。一度入った端末は次から要らない。見学は変更できない', async () => {
+    const { core, A, ca, store } = await setup();
     expect(last(ca, 'hello')!.doc.leader).toBe(A);
-    expect(await core.join(conn(), { cid: 'x', name: 'X', color: '', key: 'wrong', vkey: '', create: false })).toBe('リンクの鍵が違います');
+    expect(last(ca, 'hello')!.room.pass).toBe(PASS);
+    expect(await core.join(conn(), q('x', { pass: 'ちがう' }))).toBe('あいことばが違います');
+    expect(await core.join(conn(), q('x'))).toBe('あいことばを入れてください');
+    expect(typeof (await core.join(conn(), q('b')))).toBe('object');
+    expect(await new CollabCore('Q', store).join(conn(), q('a'))).toContain('見つかりません');
     const cv = conn();
-    const V = await core.join(cv, { cid: 'v', name: 'V', color: '', key: VKEY, vkey: '', create: false });
+    const V = await core.join(cv, q('v', { watch: true }));
+    expect(last(cv, 'hello')!.room.pass).toBe('');
     expect(typeof V !== 'string' && V.role).toBe('view');
     await core.message(cv, JSON.stringify({ t: 'ops', c: 1, ops: [{ o: 'm', v: { title: 'x' } }] }));
     expect(last(cv, 'ack')!.rej).toBe('all');
@@ -48,19 +54,27 @@ describe('合作プロジェクト（サーバー）', () => {
     await put(0);
     expect(last(cb, 'ack')!.rej).toEqual([0]);
     expect(last(cb, 'lanes')!.lanes.M.id).toBe('M');
-    await send(ca, { t: 'cmd', x: 'perm', mid: B, perms: { main: true, any: false } });
-    await send(ca, { t: 'cmd', x: 'ranges', mid: B, ranges: [{ lane: 'M', from: 1000, to: 2000 }] });
+    // 担当 A = 2 小節目。B を割り当てる
+    await send(ca, { t: 'cmd', x: 'groups', groups: { A: { id: 'A', name: 'A', color: '#f00', ranges: [{ lane: 'M', from: 2, to: 2 }], members: [B] } } });
+    const BAR = 6720 * 4;
     await put(500);
     expect(last(cb, 'ack')!.rej).toEqual([0]);
-    await put(1500);
+    await put(BAR + 1500);
     expect(last(cb, 'ack')!.rej).toEqual([]);
-    expect(core.state.doc.lanes.M.notes['1500']).toEqual({ type: 'don' });
+    expect(core.state.doc.lanes.M.notes[String(BAR + 1500)]).toEqual({ type: 'don' });
     // A（リーダー）に届く
-    expect(last(ca, 'ops')!.ops[0].k).toBe('1500');
+    expect(last(ca, 'ops')!.ops[0].k).toBe(String(BAR + 1500));
+    // 3 小節目の頭は範囲の外
+    await put(BAR * 2);
+    expect(last(cb, 'ack')!.rej).toEqual([0]);
+    // 1 小節目を 3/4 にすると、2 小節目が前にずれる（小節で合わせる）
+    await send(ca, { t: 'ops', c: 2, ops: [{ o: 'e', l: 'M', k: '0:measure', v: { tick: 0, kind: 'measure', num: 3, den: 4 } }] });
+    await put(BAR * 3 / 4 + 10);
+    expect(last(cb, 'ack')!.rej).toEqual([]);
     // ヘッダーは範囲外も持っている人だけ
     await send(cb, { t: 'ops', c: 9, ops: [{ o: 'h', l: 'M', v: { bpm: 200 } }] });
     expect(core.state.doc.lanes.M.head.bpm).toBe(120);
-    await send(ca, { t: 'cmd', x: 'perm', mid: B, perms: { main: true, any: true } });
+    await send(ca, { t: 'cmd', x: 'perm', mid: B, perms: { any: true } });
     await put(500);
     expect(core.state.doc.lanes.M.notes['500']).toBeTruthy();
   });
@@ -98,10 +112,10 @@ describe('合作プロジェクト（サーバー）', () => {
 
   it('9 人目は入れない。リーダーを渡せる。外すとつながりが切れる', async () => {
     const { core, B, ca, cb, send } = await setup();
-    for (let i = 0; i < 6; i++) expect(typeof (await core.join(conn(), { cid: 'c' + i, name: 'n', color: '', key: KEY, vkey: '', create: false }))).toBe('object');
-    expect(await core.join(conn(), { cid: 'z', name: 'Z', color: '', key: KEY, vkey: '', create: false })).toContain('満員');
+    for (let i = 0; i < 6; i++) expect(typeof (await core.join(conn(), q('c' + i, { pass: PASS })))).toBe('object');
+    expect(await core.join(conn(), q('z', { pass: PASS }))).toContain('満員');
     // 前からいる人は入り直せる
-    expect(typeof (await core.join(conn(), { cid: 'b', name: 'B', color: '', key: KEY, vkey: '', create: false }))).toBe('object');
+    expect(typeof (await core.join(conn(), q('b')))).toBe('object');
     await send(ca, { t: 'cmd', x: 'leader', mid: B });
     expect(core.state.doc.leader).toBe(B);
     await send(cb, { t: 'cmd', x: 'kick', mid: last(ca, 'hello')!.you });
@@ -117,7 +131,7 @@ describe('合作プロジェクト（サーバー）', () => {
     await core.flush();
     const core2 = new CollabCore('P', store);
     const c = conn();
-    await core2.join(c, { cid: 'a', name: 'A', color: '', key: KEY, vkey: '', create: false });
+    await core2.join(c, q('a'));
     expect(core2.state.doc.meta.title).toBe('曲2');
     expect(core2.state.doc.lanes.M.notes['0']).toBeTruthy();
     expect(last(c, 'lane')!.lane.id).toBe('M');
@@ -160,10 +174,52 @@ describe('合作プロジェクト（サーバー）', () => {
   it('音源をかけらに分けて保存し、戻せる', async () => {
     const { core } = await setup();
     const bytes = new Uint8Array(2_000_000).map((_, i) => i % 251);
-    expect(await core.putAudio('bad', 'abcd', bytes)).toBe('リンクの鍵が違います');
-    expect(await core.putAudio(KEY, 'abcd', bytes)).toBeNull();
-    const got = await core.getAudio(VKEY, 'abcd');
+    expect(await core.putAudio('nobody', 'abcd', bytes)).toBe('この部屋のメンバーではありません');
+    expect(await core.putAudio('a', 'abcd', bytes)).toBeNull();
+    // 見学できる部屋なら、メンバーでなくても受け取れる
+    const got = await core.getAudio('nobody', 'abcd');
     expect(got instanceof Uint8Array && got.byteLength).toBe(2_000_000);
     expect((got as Uint8Array)[1_500_000]).toBe(1_500_000 % 251);
+  });
+
+  it('部屋の一覧に知らせる。設定を変えられる。2 週間だれも入らなければ消える', async () => {
+    let now = 1_000_000;
+    const store = new MemoryStore();
+    const core = new CollabCore('P', store, { now: () => now });
+    const got: Record<string, unknown>[] = [];
+    core.onLobby = (i) => got.push(i as never);
+    const ca = conn();
+    await core.join(ca, q('a', { create: ROOM }));
+    expect(got.at(-1)!.online).toBe(1);
+    await core.message(ca, JSON.stringify({ t: 'cmd', x: 'room', pass: '新しい', unlisted: true, watch: false }));
+    expect(got.at(-1)!.unlisted).toBe(true);
+    expect(await core.join(conn(), q('x', { pass: PASS }))).toBe('あいことばが違います');
+    expect(await core.join(conn(), q('x', { watch: true }))).toBe('この部屋は見学できません');
+    const cy = conn();
+    expect(typeof (await core.join(cy, q('y', { pass: '新しい' })))).toBe('object');
+    core.leave(ca);
+    core.leave(cy);
+    await core.flush();
+    now += 13 * 86400_000;
+    expect(core.expired()).toBe(false);
+    now += 2 * 86400_000;
+    expect(core.expired()).toBe(true);
+    await core.destroy();
+    expect(got.at(-1)!.gone).toBe(true);
+    expect(store.m.size).toBe(0);
+  });
+
+  it('部屋の一覧: 一覧に出さない部屋は番号で探したときだけ。2 週間たった部屋は出さない', () => {
+    const lb = new CollabLobbyCore();
+    const now = 100 * 86400_000;
+    const r = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, title: '', leader: '', members: 1, online: 0, viewers: 0, watch: false, unlisted: false, lastActive: now, updatedAt: now, courses: [], ...extra }) as never;
+    lb.update(r('AAAAAA'));
+    lb.update(r('BBBBBB', { unlisted: true }));
+    lb.update(r('CCCCCC', { lastActive: now - 15 * 86400_000 }));
+    expect(lb.list(now).map((x) => x.id)).toEqual(['AAAAAA']);
+    expect(lb.list(now, ['BBBBBB']).map((x) => x.id)).toEqual(['BBBBBB']);
+    expect(lb.list(now, ['CCCCCC'])).toEqual([]);
+    lb.update({ id: 'AAAAAA', gone: true });
+    expect(lb.list(now)).toEqual([]);
   });
 });

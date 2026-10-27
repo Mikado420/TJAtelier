@@ -6,6 +6,7 @@
  *   → 違う位置を触っている限り、変更がぶつからない。同じ所はサーバーに後から届いた方が残る
  * - 変更（Op）は「その値にする（null なら消す）」だけなので、何度当てても同じ結果になる（入り直しで送り直しても大丈夫）
  */
+import { TPB } from '../chart/model';
 
 /** レーンに置く音符（tick は鍵の方に持つ） */
 export interface NoteVal {
@@ -76,17 +77,26 @@ export interface SongMetaC {
 }
 
 export interface Perms {
-  /** 本譜面を編集できる */
+  /** （前の版の値。今は any と同じ） */
   main: boolean;
-  /** 担当範囲の外も編集できる（本譜面のヘッダーや丸ごとの書き換えもこれが要る） */
+  /** 本譜面のどこでも編集できる（担当の外も。本譜面のヘッダーや丸ごとの書き換えもこれが要る） */
   any: boolean;
 }
 
-/** 担当範囲（本譜面のレーンの tick の範囲 [from, to)） */
-export interface Range {
+/** 担当の範囲（本譜面のレーンの小節 from〜to。1 から数える・両端を含む。#MEASURE で小節の長さが変わっても小節で合わせる） */
+export interface BarRange {
   lane: string;
   from: number;
   to: number;
+}
+
+/** 担当（A・B・C…）。リーダーが範囲を決めて、人を割り当てる */
+export interface Group {
+  id: string;
+  name: string;
+  color: string;
+  ranges: BarRange[];
+  members: string[];
 }
 
 export interface Member {
@@ -94,8 +104,7 @@ export interface Member {
   name: string;
   color: string;
   perms: Perms;
-  ranges: Range[];
-  /** 見るだけのリンクで入った人 */
+  /** 見学の人（メンバーには入らない。前の版の値） */
   viewer: boolean;
   lastSeen: number;
 }
@@ -114,6 +123,8 @@ export interface CollabDoc {
   members: Record<string, Member>;
   leader: string;
   trash: TrashItem[];
+  /** 担当（A・B・C…） */
+  groups: Record<string, Group>;
 }
 
 /** 変更 1 つ */
@@ -132,6 +143,40 @@ export type Op =
 
 /** 1 プロジェクトに入れる人数 */
 export const MAX_MEMBERS = 8;
+/** 見比べ（自分のレーンも入れて何本まで） */
+export const COMPARE_MAX = 4;
+/** だれも入らないまま、この日数がたった部屋は消える */
+export const ROOM_DAYS = 14;
+
+/** 部屋の設定（リーダーが変える） */
+export interface RoomSettings {
+  name: string;
+  /** あいことば（一度入った端末は、次から要らない） */
+  pass: string;
+  /** 一覧に出さない（部屋番号で探した人だけ） */
+  unlisted: boolean;
+  /** 見学（あいことばなしで、見るだけで入れる） */
+  watch: boolean;
+}
+
+/** 部屋の一覧に出す内容 */
+export interface RoomInfo {
+  id: string;
+  name: string;
+  title: string;
+  leader: string;
+  members: number;
+  online: number;
+  viewers: number;
+  watch: boolean;
+  unlisted: boolean;
+  /** 最後にだれかが入った・出た時刻（ここから ROOM_DAYS 日で消える） */
+  lastActive: number;
+  /** 最後に編集した時刻 */
+  updatedAt: number;
+  /** 難易度ごとの本譜面のノーツ数 */
+  courses: [string, number][];
+}
 /** ごみ箱に残す日数 */
 export const TRASH_DAYS = 30;
 /** チャットを残す数 */
@@ -158,7 +203,10 @@ function cleanHead(h: Partial<LaneHead> | undefined, base: LaneHead): LaneHead {
   return out;
 }
 
-/** その変更が触る tick（範囲の確認用）。null = レーン全体（ヘッダー・丸ごと） */
+/**
+ * その変更が触る tick（範囲の確認用）。null = レーン全体（ヘッダー・丸ごと）。
+ * 1 つ目が置く位置、2 つ目からは終わりの位置（連打の終わり・グラデの終わり。範囲の終わりちょうどでもよい）
+ */
 export function opTicks(op: Op): number[] | null {
   if (op.o === 'n') {
     const t = Number(op.k);
@@ -169,14 +217,74 @@ export function opTicks(op: Op): number[] | null {
   return null;
 }
 
+/** 1 小節の tick（エディタの measureTicks と同じ） */
+const barTicks = (num: number, den: number) => Math.max(1, Math.round((TPB * 4 * num) / den));
+
+/** 小節の頭の tick の表（n 小節目の頭 = starts[n - 1]）。#MEASURE で長さが変わっても合う */
+export function barStarts(lane: Lane, upto: number): number[] {
+  const ms = Object.values(lane.events)
+    .filter((e): e is Extract<EventVal, { kind: 'measure' }> => e.kind === 'measure')
+    .sort((a, b) => a.tick - b.tick);
+  const out: number[] = [];
+  let num = 4;
+  let den = 4;
+  let start = 0;
+  let mi = 0;
+  for (let i = 0; i <= upto && i < 100000; i++) {
+    while (mi < ms.length && ms[mi].tick <= start) {
+      num = ms[mi].num;
+      den = ms[mi].den;
+      mi++;
+    }
+    out.push(start);
+    start += barTicks(num, den);
+  }
+  return out;
+}
+
+/** その tick が何小節目か（1 から） */
+export function barAt(lane: Lane, tick: number): number {
+  let upto = 64;
+  for (;;) {
+    const st = barStarts(lane, upto);
+    if (st[st.length - 1] > tick || upto >= 100000) {
+      let i = 0;
+      while (i + 1 < st.length && st[i + 1] <= tick) i++;
+      return i + 1;
+    }
+    upto *= 4;
+  }
+}
+
+/** 小節の範囲の tick [頭, 終わり) */
+export function barSpan(lane: Lane, from: number, to: number): [number, number] {
+  const st = barStarts(lane, Math.max(from, to) + 1);
+  return [st[Math.max(0, from - 1)] ?? 0, st[Math.max(0, to)] ?? st[st.length - 1]];
+}
+
+/** その人が本譜面のそのレーンで担当している tick の範囲 */
+export function mySpans(doc: CollabDoc, mid: string, laneId: string): [number, number][] {
+  const lane = doc.lanes[laneId];
+  if (!lane) return [];
+  const out: [number, number][] = [];
+  for (const g of Object.values(doc.groups ?? {})) {
+    if (!g.members.includes(mid)) continue;
+    for (const r of g.ranges) if (r.lane === laneId) out.push(barSpan(lane, r.from, r.to));
+  }
+  return out;
+}
+
 /** 本譜面の、その tick を編集できるか */
 export function canEditMainAt(doc: CollabDoc, mid: string, lane: string, ticks: number[] | null): boolean {
   if (mid === doc.leader) return true;
   const m = doc.members[mid];
-  if (!m || m.viewer || !m.perms.main) return false;
+  if (!m || m.viewer) return false;
   if (m.perms.any) return true;
   if (!ticks) return false;
-  return ticks.every((t) => m.ranges.some((r) => r.lane === lane && t >= r.from && t < r.to));
+  const spans = mySpans(doc, mid, lane);
+  if (!spans.length) return false;
+  // 置く位置は範囲の中、終わりの位置は範囲の終わりちょうどでもよい
+  return ticks.every((t, i) => spans.some(([a, b]) => t >= a && (i === 0 ? t < b : t <= b)));
 }
 
 /** そのレーンのその tick を編集できるか（アプリのタップの判定にも使う） */
@@ -204,15 +312,15 @@ export function canApply(doc: CollabDoc, mid: string, op: Op): boolean {
     case 'lm': {
       const lane = doc.lanes[op.l];
       if (!lane) return false;
-      if (lane.main) return leader || (m.perms.main && m.perms.any);
+      if (lane.main) return leader || m.perms.any;
       return leader || lane.owner === mid;
     }
     case 'new':
       // 本譜面を足せるのはリーダーと、本譜面を自由に編集できる人。下書きは誰でも（自分のもの）
-      if (op.lane.main) return leader || (m.perms.main && m.perms.any);
+      if (op.lane.main) return leader || m.perms.any;
       return op.lane.owner === mid;
     case 'm':
-      return leader || (m.perms.main && m.perms.any);
+      return leader || m.perms.any;
   }
 }
 
@@ -293,7 +401,7 @@ export function applyOp(doc: CollabDoc, op: Op): boolean {
 
 /** 新しい空のプロジェクト */
 export function emptyDoc(): CollabDoc {
-  return { meta: { title: '', subtitle: '', demoStart: 0, extra: [], audio: null }, lanes: {}, members: {}, leader: '', trash: [] };
+  return { meta: { title: '', subtitle: '', demoStart: 0, extra: [], audio: null }, lanes: {}, members: {}, leader: '', trash: [], groups: {} };
 }
 
 /** 本譜面・レーンの並び（難易度の順 → 本譜面 → order） */

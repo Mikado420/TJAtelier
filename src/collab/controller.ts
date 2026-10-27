@@ -17,9 +17,9 @@ import type { AudioFile } from '../io/load';
 import { courseToLane, diff, laneToChart, stateOf, type LaneState } from './bridge';
 import {
   canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes, TRASH_DAYS,
-  type CollabDoc, type Lane, type Member, type NoteVal, type Op,
+  barSpan, COMPARE_MAX, ROOM_DAYS, type CollabDoc, type Group, type Lane, type Member, type NoteVal, type Op, type RoomSettings,
 } from './protocol';
-import { CollabSession, forgetJoined, joinedList, rememberJoined, type ChatMsg, type CollabLink, type JoinedProject } from './session';
+import { CollabSession, forgetJoined, joinedList, rememberJoined, type ChatMsg, type CollabLink, type JoinedProject, type JoinOpts } from './session';
 
 export interface CollabHost {
   ed: Editor;
@@ -42,6 +42,8 @@ export interface CollabHost {
   startTest(fromStart: boolean): Promise<void>;
   busy(msg: string, p?: number): void;
   busyEnd(): void;
+  /** 入れなかった（あいことばが違う・部屋が無いなど） */
+  onDenied(id: string, msg: string): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -54,15 +56,8 @@ const fmtDate = (t: number) => {
   const d = new Date(t);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
-const linkOf = (id: string, key: string) => `${location.origin}${location.pathname}#collab=${id}.${key}`;
 
-/** #collab=ID.KEY のリンクを読む */
-export function parseCollabHash(h = location.hash): CollabLink | null {
-  const m = h.match(/collab=([A-Z0-9]{10})\.([A-Za-z0-9]{8,40})/);
-  return m ? { id: m[1], key: m[2] } : null;
-}
-
-type Panel = 'menu' | 'lanes' | 'members' | 'vers' | 'share' | 'newLane' | 'ranges';
+type Panel = 'menu' | 'lanes' | 'members' | 'vers' | 'room' | 'newLane' | 'groups';
 
 export class Collab {
   s: CollabSession | null = null;
@@ -82,7 +77,6 @@ export class Collab {
   private chatOpen = false;
   private chatAt: { l: string; tick: number } | null = null;
   private panel: Panel | null = null;
-  private rangeFor = '';
   /** レーンの中身が変わった回数（再生用の譜面・タイミングを作り直すため） */
   private laneVer = new Map<string, number>();
   private cache = new Map<string, { v: number; chart: EChart; course: Course; timing: Timing }>();
@@ -144,7 +138,7 @@ export class Collab {
   /** 本譜面を自由に編集できる（リーダーか、本譜面＋範囲外の権限） */
   get free() {
     const m = this.meM;
-    return this.isLeader || (!!m && m.perms.main && m.perms.any);
+    return this.isLeader || (!!m && m.perms.any);
   }
   get canUndo() {
     return this.undoSt.length > 0;
@@ -165,12 +159,10 @@ export class Collab {
     return { name, color: '' };
   }
 
-  /** ふつうの曲から合作を始める（全部の難易度を本譜面にして、音源も置く） */
-  async share(chart: EChart, audio: AudioFile | null, songId?: string) {
-    const id = newCollabId(10);
+  /** ふつうの曲から部屋を作る（全部の難易度を本譜面にして、音源も置く） */
+  async share(chart: EChart, audio: AudioFile | null, songId: string | undefined, room: RoomSettings) {
+    const id = newCollabId(6);
     if (songId) markShared(songId, id);
-    const key = newCollabId(16);
-    const vkey = newCollabId(16);
     const lanes: Lane[] = chart.courses.map((c, i) => courseToLane(chart, c, { id: newCollabId(8), name: COURSE_JA[c.name] ?? c.name, owner: '', color: COLORS[i % COLORS.length], main: true, order: i }));
     // 同じ難易度が 2 つあるときは、2 つ目からは下書き
     const seen = new Set<string>();
@@ -179,13 +171,15 @@ export class Collab {
       seen.add(l.course);
     }
     this.seed = { lanes, meta: { o: 'm', v: { title: chart.title, subtitle: chart.subtitle, demoStart: chart.demoStart, extra: chart.extra } }, audio };
-    await this.open({ id, key }, vkey);
+    await this.open(id, { create: room });
   }
 
-  /** プロジェクトを開く（vkey を渡すと新しく作る） */
-  async open(link: CollabLink, createVkey?: string) {
+  /** 部屋に入る（メンバーの端末はあいことばなし。join.create を渡すと新しく作る） */
+  async open(id: string, join: JoinOpts = {}) {
     this.close(false);
-    const s = new CollabSession(link, this.profile(), createVkey ? { vkey: createVkey } : undefined);
+    const link: CollabLink = { id };
+    const createVkey = !!join.create;
+    const s = new CollabSession(link, this.profile(), join);
     this.s = s;
     this.laneId = '';
     this.base = null;
@@ -210,7 +204,7 @@ export class Collab {
         this.refreshGhosts();
         this.rerenderPanel();
       },
-      members: () => { this.renderChip(); this.rerenderPanel(); },
+      members: () => { this.renderChip(); this.refreshBands(); this.h.view.invalidate(); this.rerenderPanel(); },
       online: () => { this.renderChip(); this.rerenderPanel(); },
       chat: (m) => this.onChat(m),
       cursor: (by, l, tick, play) => { this.cursors.set(by, { l, tick, play, at: Date.now() }); },
@@ -221,17 +215,15 @@ export class Collab {
       status: (st, msg) => {
         this.renderChip();
         if (st === 'denied') {
-          this.h.toast(msg ?? '入れませんでした');
-          if (!this.doc) {
-            this.close(false);
-            void this.h.showHome();
-          }
+          this.close(false);
+          this.h.onDenied(id, msg ?? '入れませんでした');
         }
       },
+      room: () => { this.renderChip(); this.rerenderPanel(); },
       error: (msg) => this.h.toast(msg),
       rejected: (n) => this.h.toast(`${n} 個の変更は、権限が無いので戻しました`),
       kicked: () => {
-        this.h.toast('このプロジェクトから外されました');
+        this.h.toast('この部屋から外されました');
         forgetJoined(link.id);
         this.close(false);
         void this.h.showHome();
@@ -271,11 +263,10 @@ export class Collab {
       this.seed = null;
       s.apply([seed.meta, ...seed.lanes.map((l) => ({ o: 'new', lane: { ...l, owner: this.me } }) as Op)]);
       if (seed.audio) await this.uploadAudio(seed.audio, 0, '');
-      rememberJoined({ id: s.link.id, key: s.link.key, title: doc.meta.title, role: 'edit', at: Date.now() });
-      this.h.toast('合作を始めました。メニューの「共有リンク」から仲間を呼べます');
+      this.h.toast(`部屋 ${s.link.id} を作りました。部屋番号とあいことばを仲間に伝えてください`);
     }
     for (const id of Object.keys(doc.lanes)) this.bump(id);
-    rememberJoined({ id: s.link.id, key: s.link.key, title: doc.meta.title || '（無題）', role: s.role, at: Date.now() });
+    rememberJoined({ id: s.link.id, title: s.room.name || doc.meta.title || '（無題）', role: s.role, at: Date.now() });
     if (!this.laneId || !doc.lanes[this.laneId]) this.openLane(this.defaultLane());
     else this.reloadLane();
     void this.syncAudio();
@@ -470,7 +461,9 @@ export class Collab {
     if (!doc || !this.s) return true;
     if (this.h.ed.tool === 'select') return true;
     if (this.s.role !== 'edit') return false;
-    return canEditLane(doc, this.me, this.laneId, [Math.round(tick)]);
+    // 置く位置はグリッドに寄せた位置（範囲の端の近くをタップしたとき、外に置かないように）
+    const t = this.h.ed.snap(tick);
+    return canEditLane(doc, this.me, this.laneId, [Math.round(t)]);
   }
 
   /** 今のレーンを全部編集できるか（できなければ 🔒） */
@@ -567,7 +560,25 @@ export class Collab {
       });
     }
     this.h.view.ghosts = rows;
+    this.refreshBands();
     this.h.view.invalidate();
+  }
+
+  /** 本譜面の担当（A・B…）の小節を、レーンの上の縁に色で出す（自分の担当は太く） */
+  private refreshBands() {
+    const doc = this.doc;
+    const lane = this.lane;
+    const bands: { a: number; b: number; color: string; label: string; mine: boolean }[] = [];
+    if (doc && lane?.main) {
+      for (const g of Object.values(doc.groups ?? {})) {
+        for (const r of g.ranges) {
+          if (r.lane !== lane.id) continue;
+          const [a, b] = barSpan(lane, r.from, r.to);
+          bands.push({ a, b, color: g.color, label: g.name, mine: g.members.includes(this.me) });
+        }
+      }
+    }
+    this.h.view.bands = bands;
   }
 
   /** 毎フレーム（main.ts の loop から）: 自分の場所を知らせ、ほかの人の場所を描く */
@@ -612,7 +623,8 @@ export class Collab {
   mix(): { own: number; others: { course: Course; pan: number }[] } {
     const doc = this.doc;
     if (!doc || this.playMode !== 'compare') return { own: 0, others: [] };
-    const ids = sortedLanes(doc).map((l) => l.id).filter((id) => id === this.laneId || this.compare.has(id));
+    const picked = sortedLanes(doc).map((l) => l.id).filter((id) => id !== this.laneId && this.compare.has(id)).slice(0, COMPARE_MAX - 1);
+    const ids = sortedLanes(doc).map((l) => l.id).filter((id) => id === this.laneId || picked.includes(id));
     if (ids.length < 2) return { own: 0, others: [] };
     // 上のレーンほど左。2 つなら左右、3 つ以上は左 → 真ん中 → 右
     const pans = ids.length === 2 ? [-0.7, 0.7] : ids.map((_, i) => -0.8 + (1.6 * i) / (ids.length - 1));
@@ -628,13 +640,13 @@ export class Collab {
     return { own, others };
   }
 
-  /** 見比べのテストプレイ（ほかのレーンを 2 つまで） */
+  /** 見比べのテストプレイ（ほかのレーンを 3 つまで） */
   compareCourses(): { list: { name: string; course: Course; pan: number }[]; own: number } | null {
     const doc = this.doc;
     if (!doc || this.playMode !== 'compare') return null;
     const mix = this.mix();
     if (!mix.others.length) return null;
-    const ids = sortedLanes(doc).map((l) => l.id).filter((id) => id !== this.laneId && this.compare.has(id)).slice(0, 2);
+    const ids = sortedLanes(doc).map((l) => l.id).filter((id) => id !== this.laneId && this.compare.has(id)).slice(0, COMPARE_MAX - 1);
     return {
       own: mix.own,
       list: ids.map((id) => {
@@ -714,7 +726,7 @@ export class Collab {
     const p = this.panel;
     const doc = this.doc;
     if (!p || !doc || !this.s) return;
-    const titles: Record<Panel, string> = { menu: '合作', lanes: 'レーン', members: 'メンバーと権限', vers: '版の記録', share: '共有リンク', newLane: 'レーンを足す', ranges: '担当範囲' };
+    const titles: Record<Panel, string> = { menu: 'オンライン作業', lanes: 'レーン', members: 'メンバーと権限', vers: '版の記録', room: '部屋', newLane: 'レーンを足す', groups: '担当' };
     const scroll = this.panelEl.querySelector('.sheet-body')?.scrollTop ?? 0;
     this.panelEl.innerHTML = `<div class="sheet-panel"><div class="sheet-head"><div class="sheet-title">${p !== 'menu' ? '<button data-cp="back" class="icon cp-back" aria-label="戻る">‹</button>' : ''}<h2>${titles[p]}</h2></div><button data-cp="close" class="icon" aria-label="閉じる">×</button></div><div class="sheet-body">${this.panelBody(p, doc)}</div></div>`;
     const body = this.panelEl.querySelector('.sheet-body');
@@ -737,12 +749,13 @@ export class Collab {
           <button data-cp="members">メンバー・権限</button>
           <button data-cp="chat">チャット${this.unread ? `（${this.unread}）` : ''}</button>
           <button data-cp="vers">版の記録</button>
-          <button data-cp="share">共有リンク</button>
+          <button data-cp="room">部屋（番号・あいことば）</button>
+          <button data-cp="groups">担当（${Object.keys(doc.groups ?? {}).length}）</button>
           <button data-cp="follow">${this.follow ? `ついていくのをやめる（${esc(this.memberName(this.follow))}）` : 'ついていく…'}</button>
         </div>
         <h3>再生</h3>
         <div class="st-seg two cp-seg"><button data-cp="pmine" class="${this.playMode === 'mine' ? 'on' : ''}">このレーンだけ</button><button data-cp="pcmp" class="${this.playMode === 'compare' ? 'on' : ''}">見比べ（${this.compare.size}）</button></div>
-        <p class="note">見比べ: 「レーン」でチェックしたレーンの打音もいっしょに鳴らします（上のレーンほど左に聞こえます）。テストプレイでは 2 つまで下に並べます。</p>
+        <p class="note">見比べ: 「レーン」でチェックしたレーンの打音もいっしょに鳴らします（自分のレーンも入れて ${COMPARE_MAX} 本まで。上のレーンほど左に聞こえます）。テストプレイでは下に並べてオートで流します。</p>
         <div class="btns"><button data-cp="playall">みんなで同時に再生</button><button data-cp="stopall">みんなの再生を止める</button></div>
         <h3>書き出し</h3>
         <div class="btns">
@@ -751,7 +764,7 @@ export class Collab {
           <button data-cp="expMainZip">本譜面をまとめて .zip</button>
           ${lane && !lane.main ? '<button data-cp="adoptSel">選んだ範囲を本譜面へ</button>' : ''}
         </div>
-        <h3>このプロジェクト</h3>
+        <h3>この部屋</h3>
         <div class="btns">
           ${edit ? '<button data-cp="rename">名前（自分）を変える</button>' : ''}
           <button data-cp="leave">閉じる（ホームへ）</button>
@@ -780,49 +793,61 @@ export class Collab {
     }
     if (p === 'members') {
       const list = Object.values(doc.members).sort((a, b) => Number(b.id === doc.leader) - Number(a.id === doc.leader) || a.name.localeCompare(b.name, 'ja'));
+      const groupsOf = (mid: string) => Object.values(doc.groups ?? {}).filter((g) => g.members.includes(mid)).map((g) => g.name).sort();
       const rows = list.map((m) => {
         const on = s.online.ids.includes(m.id);
         const lead = m.id === doc.leader;
         const me = m.id === this.me;
-        const perm = lead ? 'リーダー（全部編集できる）' : `${m.perms.main ? '本譜面を編集できる' : '自分のレーンだけ'}${m.perms.main ? (m.perms.any ? '・範囲外も' : `・担当範囲 ${m.ranges.length} か所`) : ''}`;
+        const gs = groupsOf(m.id);
+        const perm = lead ? 'リーダー（全部編集できる）' : m.perms.any ? '本譜面をどこでも編集できる' : gs.length ? `担当 ${gs.join('・')} の本譜面を編集できる` : '自分のレーンだけ';
         const ctl = this.isLeader && !lead
           ? `<div class="cp-perm">
-              <label><input type="checkbox" data-perm="main" data-mid="${m.id}" ${m.perms.main ? 'checked' : ''}> 本譜面を編集</label>
-              <label><input type="checkbox" data-perm="any" data-mid="${m.id}" ${m.perms.any ? 'checked' : ''} ${m.perms.main ? '' : 'disabled'}> 範囲外も（確認なし）</label>
-              <button data-cp="ranges" data-mid="${m.id}" ${m.perms.main ? '' : 'disabled'}>担当範囲</button>
+              <label><input type="checkbox" data-perm="any" data-mid="${m.id}" ${m.perms.any ? 'checked' : ''}> 本譜面をどこでも編集（担当の外も・確認なし）</label>
               <button data-cp="leader" data-mid="${m.id}">リーダーを渡す</button>
               <button data-cp="kick" data-mid="${m.id}" class="danger">外す</button>
             </div>`
           : '';
         return `<div class="item cp-mem"><i class="cp-mdot ${on ? 'on' : ''}" style="--mc:${m.color}"></i><div class="grow"><b>${esc(m.name)}</b>${me ? ' <small>（自分）</small>' : ''}<div class="pos">${perm}${on ? '' : ` ・ ${fmtDate(m.lastSeen)}`}</div>${ctl}</div>${!me && on ? `<button data-cp="followOne" data-mid="${m.id}">${this.follow === m.id ? 'やめる' : 'ついていく'}</button>` : ''}</div>`;
       }).join('');
-      return `<div class="list">${rows}</div>
-        ${s.online.viewers ? `<p class="note">見るだけのリンクで ${s.online.viewers} 人が見ています</p>` : ''}
-        <p class="note">本譜面: リーダーと、リーダーが権限を渡した人が編集できます。「範囲外も」が無い人は、担当範囲の外をタップしても何も起きません（レーン名に 🔒）。自分のレーンは本人だけが編集でき、ほかの人は見る・取り込むことができます。最大 8 人。</p>`;
+      return `<div class="btns"><button data-cp="groups">担当（A・B・C…）を${this.isLeader ? '決める' : '見る'}</button></div>
+        <div class="list">${rows}</div>
+        ${s.online.viewers ? `<p class="note">見学で ${s.online.viewers} 人が見ています</p>` : ''}
+        <p class="note">本譜面: リーダーと、「どこでも編集」の人、担当の人（担当の小節の中だけ）が編集できます。担当の外をタップしても何も起きません（レーン名に 🔒）。自分のレーンは本人だけが編集でき、ほかの人は見る・取り込むことができます。最大 8 人。外した人は、次に入るときにまたあいことばが要ります。</p>`;
     }
-    if (p === 'ranges') {
-      const m = doc.members[this.rangeFor];
-      if (!m) return '<p class="note">メンバーがいません</p>';
+    if (p === 'groups') {
+      const lead = this.isLeader;
       const mains = sortedLanes(doc).filter((l) => l.main);
-      const barOf = (laneId: string, tick: number) => {
-        const d = this.laneData(laneId);
-        if (!d) return 0;
-        const ms = measures(d.chart.courses[0], tick + 1);
-        let i = 0;
-        while (i + 1 < ms.length && ms[i + 1].start <= tick) i++;
-        return i + 1;
+      const laneName = (id: string) => {
+        const l = doc.lanes[id];
+        return l ? `${l.course}` : '（消えたレーン）';
       };
-      const rows = m.ranges.map((r, i) => {
-        const l = doc.lanes[r.lane];
-        return `<div class="item"><div class="grow">${esc(l?.course ?? '?')} ${esc(l?.name ?? '')} ・ ${barOf(r.lane, r.from)} 〜 ${barOf(r.lane, r.to - 1)} 小節</div><button data-cp="rangeDel" data-i="${i}" class="danger">外す</button></div>`;
+      const groups = Object.values(doc.groups ?? {}).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+      const others = Object.values(doc.members).filter((m) => m.id !== doc.leader);
+      const blocks = groups.map((g) => {
+        const ranges = g.ranges.map((r, i) => `<span class="cp-rg">${esc(laneName(r.lane))} ${r.from}〜${r.to} 小節${lead ? `<button data-cp="grDel" data-g="${g.id}" data-i="${i}" aria-label="外す">×</button>` : ''}</span>`).join('');
+        const mem = lead
+          ? others.map((m) => `<label class="cp-gm"><input type="checkbox" data-gmem="${g.id}" data-mid="${m.id}" ${g.members.includes(m.id) ? 'checked' : ''}><i style="background:${m.color}"></i>${esc(m.name)}</label>`).join('') || '<small>（リーダーのほかにメンバーがいません）</small>'
+          : g.members.map((x) => esc(this.memberName(x))).join('・') || '（まだだれもいません）';
+        const add = lead
+          ? `<div class="cp-gadd">
+              <select id="cpGl-${g.id}"><option value="*">全部の本譜面</option>${mains.map((l) => `<option value="${l.id}" ${l.id === this.laneId ? 'selected' : ''}>${l.course}</option>`).join('')}</select>
+              <input id="cpGf-${g.id}" type="number" min="1" inputmode="numeric" placeholder="から" aria-label="何小節目から">
+              <span>〜</span>
+              <input id="cpGt-${g.id}" type="number" min="1" inputmode="numeric" placeholder="まで" aria-label="何小節目まで">
+              <button data-cp="grAdd" data-g="${g.id}">小節を足す</button>
+              <button data-cp="grHere" data-g="${g.id}">今の小節</button>
+            </div>`
+          : '';
+        return `<div class="item cp-group" style="--gc:${g.color}">
+          <div class="cp-ghead"><b class="cp-gname">${esc(g.name)}</b>${lead ? `<button data-cp="grRename" data-g="${g.id}">名前</button><button data-cp="grRemove" data-g="${g.id}" class="danger">消す</button>` : ''}</div>
+          <div class="cp-granges">${ranges || '<small>小節がまだありません</small>'}</div>
+          ${add}
+          <div class="cp-gmems">${mem}</div>
+        </div>`;
       }).join('');
-      return `<p class="note">${esc(m.name)} さんが編集できる、本譜面の範囲（小節）</p>
-        <div class="list">${rows || '<p class="note">まだありません</p>'}</div>
-        <h3>範囲を足す</h3>
-        <label class="field"><span>本譜面</span><select id="cpRgLane">${mains.map((l) => `<option value="${l.id}" ${l.id === this.laneId ? 'selected' : ''}>${l.course} ${esc(l.name)}</option>`).join('')}</select></label>
-        <label class="field"><span>何小節目から</span><input id="cpRgFrom" type="number" min="1" inputmode="numeric" value="1"></label>
-        <label class="field"><span>何小節目まで</span><input id="cpRgTo" type="number" min="1" inputmode="numeric" value="16"></label>
-        <div class="btns"><button data-cp="rangeAdd">足す</button><button data-cp="rangeHere">今の位置の小節を足す</button></div>`;
+      return `<p class="note">担当: リーダーが本譜面の小節（例: A = 1〜16 小節）を決めて、人を割り当てます。割り当てられた人は、その小節の中だけ本譜面を編集できます。#MEASURE で小節の長さが変わっても、小節の番号で合わせます。</p>
+        ${lead ? '<div class="btns"><button data-cp="grNew">＋ 担当を足す</button></div>' : ''}
+        <div class="list">${blocks || '<p class="note">まだ担当はありません</p>'}</div>`;
     }
     if (p === 'vers') {
       const rows = [...s.vers].reverse().map((v) => `<div class="item"><div class="grow">${esc(v.name)}${v.auto ? ' <small>（自動）</small>' : ''}<div class="pos">${fmtDate(v.at)}${v.by ? ` ・ ${esc(this.memberName(v.by))}` : ''}</div></div>${this.isLeader ? `<button data-cp="verRestore" data-id="${v.id}">この版に戻す</button>` : ''}</div>`).join('');
@@ -830,14 +855,22 @@ export class Collab {
         <p class="note">10 分ごとに、変わっていれば自動で残します（30 個まで。古い自動のものから消えます）。戻せるのはリーダーだけで、戻す前の状態も版として残ります。</p>
         <div class="list">${rows || '<p class="note">まだありません</p>'}</div>`;
     }
-    if (p === 'share') {
-      const e = linkOf(s.link.id, s.link.key);
-      const v = s.vkey ? linkOf(s.link.id, s.vkey) : '';
-      return `<p class="note">リンクを送った相手は、開くとこのプロジェクトに入れます（アプリの中で開いてください）。</p>
-        <h3>編集できるリンク</h3>
-        <div class="cp-link"><input type="text" readonly value="${esc(e)}"><button data-cp="copy" data-v="${esc(e)}">コピー</button></div>
-        ${v ? `<h3>見るだけのリンク</h3><div class="cp-link"><input type="text" readonly value="${esc(v)}"><button data-cp="copy" data-v="${esc(v)}">コピー</button></div>` : ''}
-        ${typeof navigator.share === 'function' ? `<div class="btns"><button data-cp="nshare" data-v="${esc(e)}">ほかのアプリで送る</button></div>` : ''}`;
+    if (p === 'room') {
+      const r = s.room;
+      const left = Math.max(0, Math.ceil(ROOM_DAYS - (Date.now() - (s.lastActive || Date.now())) / 86400_000));
+      const head = `<div class="cp-roomid"><small>部屋番号</small><b>${s.link.id}</b>${edit && r.pass ? `<small>あいことば</small><b>${esc(r.pass)}</b>` : ''}</div>
+        ${edit ? '<div class="btns"><button data-cp="copyRoom">部屋番号とあいことばをコピー</button></div>' : ''}
+        <p class="note">ホームの地球儀 →「オンライン作業」で部屋番号を探して、あいことばを入れると入れます。一度入った端末は、次からあいことばは要りません。</p>
+        <p class="note">だれも入らないまま ${ROOM_DAYS} 日たつと、この部屋は消えます（今は ${s.online.ids.length ? 'だれかが入っています' : `あと約 ${left} 日`}）。残したいときは本譜面を書き出しておいてください。</p>`;
+      if (!this.isLeader) return `${head}<p class="note">部屋の名前: ${esc(r.name)} ・ ${r.unlisted ? '一覧に出さない' : '一覧に出す'} ・ 見学 ${r.watch ? 'できる' : 'できない'}</p>`;
+      return `${head}
+        <h3>部屋の設定（リーダー）</h3>
+        <label class="field"><span>部屋の名前</span><input id="cpRmName" type="text" value="${esc(r.name)}" autocomplete="off"></label>
+        <label class="field"><span>あいことば</span><input id="cpRmPass" type="text" value="${esc(r.pass)}" autocomplete="off"></label>
+        <label class="field cp-ck2"><input id="cpRmUnl" type="checkbox" ${r.unlisted ? 'checked' : ''}><span>一覧に出さない（部屋番号で探した人だけ）</span></label>
+        <label class="field cp-ck2"><input id="cpRmWatch" type="checkbox" ${r.watch ? 'checked' : ''}><span>見学（あいことばなしで、見るだけで入れる）</span></label>
+        <div class="btns"><button data-cp="roomSave">設定を保存</button></div>
+        <p class="note">あいことばを変えても、もう入ったことのある人はそのまま入れます。</p>`;
     }
     return '';
   }
@@ -870,6 +903,11 @@ export class Collab {
     const doc = this.doc;
     if (!s || !doc) return;
     if (t.dataset.cmp) {
+      if (t.checked && this.compare.size + 1 >= COMPARE_MAX) {
+        t.checked = false;
+        this.h.toast(`見比べは自分のレーンも入れて ${COMPARE_MAX} 本までです`);
+        return;
+      }
       if (t.checked) this.compare.add(t.dataset.cmp);
       else this.compare.delete(t.dataset.cmp);
       if (this.compare.size && this.playMode === 'mine') this.playMode = 'compare';
@@ -879,9 +917,12 @@ export class Collab {
     if (t.dataset.perm && t.dataset.mid) {
       const m = doc.members[t.dataset.mid];
       if (!m) return;
-      const perms = { ...m.perms, [t.dataset.perm]: t.checked };
-      if (!perms.main) perms.any = false;
-      s.cmd('perm', { mid: m.id, perms });
+      s.cmd('perm', { mid: m.id, perms: { main: t.checked, any: t.checked } });
+      return;
+    }
+    if (t.dataset.gmem && t.dataset.mid) {
+      const mid = t.dataset.mid;
+      this.editGroup(t.dataset.gmem, (g) => { g.members = t.checked ? [...new Set([...g.members, mid])] : g.members.filter((x) => x !== mid); });
     }
   }
 
@@ -899,8 +940,8 @@ export class Collab {
     const go = (p: Panel) => { this.panel = p; this.renderPanel(); };
     switch (k) {
       case 'close': this.closePanel(); return;
-      case 'back': go(this.panel === 'ranges' ? 'members' : this.panel === 'newLane' ? 'lanes' : 'menu'); return;
-      case 'lanes': case 'members': case 'share': go(k); return;
+      case 'back': go(this.panel === 'newLane' ? 'lanes' : 'menu'); return;
+      case 'lanes': case 'members': case 'room': case 'groups': go(k); return;
       case 'vers': s.cmd('vers'); go('vers'); return;
       case 'chat': this.closePanel(); this.toggleChat(true); return;
       case 'newLane': go('newLane'); return;
@@ -967,31 +1008,71 @@ export class Collab {
       }
       case 'makeMain': s.cmd('main', { l: id }); return;
       case 'newLaneGo': this.newLane(); return;
-      case 'ranges': this.rangeFor = mid; go('ranges'); return;
-      case 'rangeDel': {
-        const m = doc.members[this.rangeFor];
-        if (!m) return;
-        const ranges = m.ranges.filter((_, i) => i !== Number(b.dataset.i));
-        s.cmd('ranges', { mid: m.id, ranges });
+      case 'grNew': {
+        const used = new Set(Object.values(doc.groups ?? {}).map((g) => g.name));
+        const name = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').find((c) => !used.has(c)) ?? '?';
+        const color = COLORS[Object.keys(doc.groups ?? {}).length % COLORS.length];
+        const id = newCollabId(6);
+        this.sendGroups({ ...(doc.groups ?? {}), [id]: { id, name, color, ranges: [], members: [] } });
         return;
       }
-      case 'rangeAdd': case 'rangeHere': {
-        const m = doc.members[this.rangeFor];
-        if (!m) return;
-        const laneId = (this.panelEl.querySelector('#cpRgLane') as HTMLSelectElement | null)?.value ?? '';
-        const d = this.laneData(laneId);
-        if (!d) return;
+      case 'grRename': {
+        const g = doc.groups[b.dataset.g!];
+        const name = g && prompt('担当の名前', g.name);
+        if (!g || !name?.trim()) return;
+        this.editGroup(g.id, (x) => { x.name = name.trim().slice(0, 20); });
+        return;
+      }
+      case 'grRemove': {
+        const g = doc.groups[b.dataset.g!];
+        if (!g || !confirm(`担当「${g.name}」を消しますか？`)) return;
+        const next = { ...doc.groups };
+        delete next[g.id];
+        this.sendGroups(next);
+        return;
+      }
+      case 'grDel': this.editGroup(b.dataset.g!, (x) => { x.ranges.splice(Number(b.dataset.i), 1); }); return;
+      case 'grAdd': case 'grHere': {
+        const gid = b.dataset.g!;
+        const q = (pre: string) => this.panelEl.querySelector<HTMLInputElement & HTMLSelectElement>(`#${pre}-${gid}`);
+        const sel = q('cpGl')?.value ?? '*';
+        const lanes = sel === '*' ? sortedLanes(doc).filter((l) => l.main).map((l) => l.id) : [sel];
         let a: number;
         let z: number;
-        if (k === 'rangeHere') {
-          const tick = d.timing.timeToTick(this.h.ed.timing.tickToTime(this.h.view.pos));
-          a = z = this.barIndexAt(laneId, tick);
-        } else {
-          a = Math.max(1, Number((this.panelEl.querySelector('#cpRgFrom') as HTMLInputElement).value) || 1);
-          z = Math.max(a, Number((this.panelEl.querySelector('#cpRgTo') as HTMLInputElement).value) || a);
+        if (k === 'grHere') {
+          // 今見ている時刻の小節（それぞれの本譜面で）
+          const t = this.h.ed.timing.tickToTime(this.h.view.pos);
+          const add = lanes.map((l) => {
+            const d = this.laneData(l)!;
+            const bar = this.barIndexAt(l, d.timing.timeToTick(t));
+            return { lane: l, from: bar, to: bar };
+          });
+          this.editGroup(gid, (x) => { x.ranges.push(...add); });
+          return;
         }
-        const r = this.barRange(laneId, a, z);
-        s.cmd('ranges', { mid: m.id, ranges: [...m.ranges, { lane: laneId, from: r[0], to: r[1] }] });
+        a = Math.max(1, Math.round(Number(q('cpGf')?.value)) || 0);
+        z = Math.max(1, Math.round(Number(q('cpGt')?.value)) || 0);
+        if (!a || !z) { this.h.toast('何小節目から・まで を入れてください'); return; }
+        if (z < a) [a, z] = [z, a];
+        this.editGroup(gid, (x) => { x.ranges.push(...lanes.map((l) => ({ lane: l, from: a, to: z }))); });
+        return;
+      }
+      case 'roomSave': {
+        const v = (id: string) => this.panelEl.querySelector<HTMLInputElement>(`#${id}`);
+        const pass = v('cpRmPass')?.value.trim() ?? '';
+        if (!pass) { this.h.toast('あいことばを入れてください'); return; }
+        s.cmd('room', { name: v('cpRmName')?.value.trim(), pass, unlisted: !!v('cpRmUnl')?.checked, watch: !!v('cpRmWatch')?.checked });
+        this.h.toast('部屋の設定を保存しました');
+        return;
+      }
+      case 'copyRoom': {
+        const text = `TJAtelier オンライン作業\n部屋番号: ${s.link.id}\nあいことば: ${s.room.pass}`;
+        try {
+          await navigator.clipboard.writeText(text);
+          this.h.toast('部屋番号とあいことばをコピーしました');
+        } catch {
+          this.h.toast(`部屋番号 ${s.link.id} ・ あいことば ${s.room.pass}`);
+        }
         return;
       }
       case 'leader': if (confirm(`${this.memberName(mid)} さんにリーダーを渡しますか？`)) s.cmd('leader', { mid }); return;
@@ -1007,20 +1088,6 @@ export class Collab {
         if (!v || !confirm(`版「${v.name}」（${fmtDate(v.at)}）に戻しますか？（全員の画面が戻ります。今の状態も版として残ります）`)) return;
         s.cmd('restoreVer', { id });
         this.closePanel();
-        return;
-      }
-      case 'copy': {
-        try {
-          await navigator.clipboard.writeText(b.dataset.v ?? '');
-          this.h.toast('リンクをコピーしました');
-        } catch {
-          (b.previousElementSibling as HTMLInputElement | null)?.select();
-          this.h.toast('選んでコピーしてください');
-        }
-        return;
-      }
-      case 'nshare': {
-        try { await navigator.share({ title: `合作: ${doc.meta.title}`, url: b.dataset.v }); } catch { /* やめた */ }
         return;
       }
       case 'expLane': {
@@ -1050,7 +1117,7 @@ export class Collab {
         await this.h.showHome();
         return;
       case 'forget':
-        if (!confirm('このプロジェクトを一覧から外しますか？（サーバーには残ります。リンクがあればまた入れます）')) return;
+        if (!confirm('この部屋を自分の一覧から外しますか？（部屋は残ります。部屋番号で探せばまた入れます）')) return;
         forgetJoined(s.link.id);
         this.closePanel();
         this.close(false);
@@ -1059,19 +1126,18 @@ export class Collab {
     }
   }
 
-  /** 本譜面の n 小節目（1 から）の tick 範囲 [a 小節目の頭, z 小節目の終わり) */
-  private barRange(laneId: string, a: number, z: number): [number, number] {
-    const d = this.laneData(laneId)!;
-    const c = d.chart.courses[0];
-    let until = TPB * 4 * (z + 2);
-    let ms = measures(c, until);
-    while (ms.length < z + 1 && until < TPB * 4 * 100000) {
-      until *= 2;
-      ms = measures(c, until);
-    }
-    const from = ms[a - 1]?.start ?? 0;
-    const to = ms[z - 1] ? ms[z - 1].start + ms[z - 1].length : from + TPB * 4;
-    return [from, to];
+  private sendGroups(groups: Record<string, Group>) {
+    this.s?.cmd('groups', { groups });
+  }
+
+  /** 担当を 1 つ変えて送る */
+  private editGroup(id: string, fn: (g: Group) => void) {
+    const doc = this.doc;
+    const g = doc?.groups?.[id];
+    if (!doc || !g) return;
+    const next = structuredClone(doc.groups);
+    fn(next[id]);
+    this.sendGroups(next);
   }
 
   private barIndexAt(laneId: string, tick: number) {

@@ -6,13 +6,15 @@
  * GET  /ws/:id?name=&create=1&title=&pass=   部屋に入る（WebSocket）
  *
  * 合作（リアルタイム共同編集）:
- * GET  /collab/ws/:id?cid=&name=&color=&key=&create=1&vkey=   プロジェクトに入る（WebSocket）
- * GET  /collab/audio/:id/:hash?key=    共有している音源を受け取る
- * PUT  /collab/audio/:id/:hash?key=    音源を置く（編集できる人だけ）
+ * GET  /collab/rooms[?ids=A,B]   部屋の一覧（ids で一覧に出さない部屋も）
+ * GET  /collab/ws/:id?cid=&name=&color=&pass=&watch=1&create=1&rname=&unlisted=1&rwatch=1   部屋に入る（WebSocket）
+ * GET  /collab/audio/:id/:hash?cid=    共有している音源を受け取る（メンバー・見学できる部屋）
+ * PUT  /collab/audio/:id/:hash?cid=    音源を置く（メンバーだけ）
  */
 import { DurableObject } from 'cloudflare:workers';
 import { LOBBY_STALE_MS, LobbyCore, newRoomId, RoomCore, type Conn, type LobbyInfo, type RoomState } from './core';
-import { CollabCore, type CollabStore } from './collab';
+import { CollabCore, CollabLobbyCore, type CollabStore } from './collab';
+import { ROOM_DAYS, type RoomInfo } from '../../src/collab/protocol';
 
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
@@ -29,6 +31,8 @@ const json = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...CORS } });
 
 const lobbyStub = (env: Env) => env.LOBBY.get(env.LOBBY.idFromName('main'));
+/** 合作の部屋の一覧（対戦の一覧とは別） */
+const collabLobby = (env: Env) => env.LOBBY.get(env.LOBBY.idFromName('collab'));
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -42,12 +46,16 @@ export default {
       const stub = env.ROOM.get(env.ROOM.idFromName(m[1]));
       return stub.fetch(req);
     }
-    const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{10})$/);
+    if (url.pathname === '/collab/rooms') {
+      const ids = url.searchParams.get('ids');
+      return json(await collabLobby(env).collabList(ids ? ids.split(',').slice(0, 100) : undefined));
+    }
+    const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{6,10})$/);
     if (cw) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
       return env.COLLAB.get(env.COLLAB.idFromName(cw[1])).fetch(req);
     }
-    const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{10})\/([0-9a-z]{4,64})$/i);
+    const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{6,10})\/([0-9a-z]{4,64})$/i);
     if (ca && (req.method === 'GET' || req.method === 'PUT')) {
       const res = await env.COLLAB.get(env.COLLAB.idFromName(ca[1])).fetch(req);
       const h = new Headers(res.headers);
@@ -80,6 +88,26 @@ export class Lobby extends DurableObject<Env> {
     await this.load();
     this.core.update(info);
     await this.ctx.storage.put('rooms', [...this.core.rooms.values()]);
+  }
+
+  // ───── 合作の部屋の一覧（名前 'collab' の Lobby で使う） ─────
+  private collab: CollabLobbyCore | null = null;
+  private async loadCollab() {
+    if (this.collab) return this.collab;
+    const c = new CollabLobbyCore();
+    for (const r of (await this.ctx.storage.get<RoomInfo[]>('collabRooms')) ?? []) c.rooms.set(r.id, r);
+    this.collab = c;
+    return c;
+  }
+
+  async collabList(ids?: string[]): Promise<RoomInfo[]> {
+    return (await this.loadCollab()).list(Date.now(), ids);
+  }
+
+  async collabUpdate(info: RoomInfo | { id: string; gone: true }) {
+    const c = await this.loadCollab();
+    c.update(info);
+    await this.ctx.storage.put('collabRooms', [...c.rooms.values()]);
   }
 }
 
@@ -256,6 +284,10 @@ function doStore(st: DurableObjectStorage): CollabStore {
       for (let i = 0; i < ks.length; i += 100) await st.delete(ks.slice(i, i + 100));
     },
     list: (prefix) => st.list({ prefix }),
+    async clear() {
+      await st.deleteAlarm();
+      await st.deleteAll();
+    },
   };
 }
 
@@ -285,8 +317,25 @@ export class Collab extends DurableObject<Env> {
   }
 
   private make(id: string) {
-    this.core = new CollabCore(id, doStore(this.ctx.storage));
-    return this.core;
+    const core = new CollabCore(id, doStore(this.ctx.storage));
+    core.onLobby = (info) => this.ctx.waitUntil(collabLobby(this.env).collabUpdate(info).catch(() => {}));
+    this.core = core;
+    return core;
+  }
+
+  /** 2 週間だれも入らなかったら片付ける（入るたびに目覚ましを先へ延ばす） */
+  async alarm() {
+    const id = await this.ctx.storage.get<string>('pid');
+    const core = this.core ?? (id ? this.make(id) : null);
+    if (!core) return;
+    await core.load();
+    if (core.expired()) {
+      await core.destroy();
+      this.core = null;
+      return;
+    }
+    const next = core.connections ? Date.now() + ROOM_DAYS * 86400_000 : core.lastActive + ROOM_DAYS * 86400_000 + 60_000;
+    await this.ctx.storage.setAlarm(Math.max(Date.now() + 60_000, next));
   }
 
   private connOf(ws: WebSocket): Conn {
@@ -312,10 +361,10 @@ export class Collab extends DurableObject<Env> {
       const hash = parts[4];
       const core = this.core ?? this.make(id);
       if (req.method === 'PUT') {
-        const err = await core.putAudio(q.get('key') ?? '', hash, new Uint8Array(await req.arrayBuffer()));
+        const err = await core.putAudio(q.get('cid') ?? '', hash, new Uint8Array(await req.arrayBuffer()));
         return err ? new Response(err, { status: 403 }) : new Response('ok');
       }
-      const got = await core.getAudio(q.get('key') ?? '', hash);
+      const got = await core.getAudio(q.get('cid') ?? '', hash);
       if (typeof got === 'string') return new Response(got, { status: 404 });
       return new Response(got, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, max-age=31536000, immutable' } });
     }
@@ -327,7 +376,8 @@ export class Collab extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     const conn = this.connOf(server);
     const r = await core.join(conn, {
-      cid: q.get('cid') ?? '', name: q.get('name') ?? '', color: q.get('color') ?? '', key: q.get('key') ?? '', create: q.get('create') === '1', vkey: q.get('vkey') ?? '',
+      cid: q.get('cid') ?? '', name: q.get('name') ?? '', color: q.get('color') ?? '', pass: q.get('pass') ?? '', watch: q.get('watch') === '1',
+      create: q.get('create') === '1' ? { name: q.get('rname') ?? '', pass: q.get('pass') ?? '', unlisted: q.get('unlisted') === '1', watch: q.get('rwatch') === '1' } : undefined,
     });
     if (typeof r === 'string') {
       server.send(JSON.stringify({ t: 'denied', msg: r }));
@@ -337,6 +387,8 @@ export class Collab extends DurableObject<Env> {
     }
     if (fresh || !(await this.ctx.storage.get('pid'))) await this.ctx.storage.put('pid', id);
     server.serializeAttachment({ mid: r.mid, role: r.role });
+    // 入るたびに片付けの目覚ましを 2 週間後へ
+    await this.ctx.storage.setAlarm(Date.now() + ROOM_DAYS * 86400_000 + 60_000);
     return new Response(null, { status: 101, webSocket: client });
   }
 
