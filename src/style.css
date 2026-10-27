@@ -1057,7 +1057,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .pos-info {
   position: absolute;
   left: calc(205px * var(--es, 0.45) + 6px);
-  top: calc((336px - var(--eup, 0) * 1px) * var(--es, 0.45) - 30px);
+  top: calc(336px * var(--es, 0.45) - 30px);
   display: flex;
   gap: 4px;
   pointer-events: none;
