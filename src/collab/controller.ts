@@ -18,7 +18,7 @@ import { uiScale } from '../orient';
 import { courseToLane, diff, laneToChart, stateOf, type LaneState } from './bridge';
 import {
   canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes, TRASH_DAYS,
-  barSpan, COMPARE_MAX, ROOM_DAYS, type CollabDoc, type Group, type Lane, type Member, type NoteVal, type Op, type RoomSettings,
+  barSpan, COMPARE_MAX, type CollabDoc, type Group, type Lane, type Member, type NoteVal, type Op, type RoomSettings,
 } from './protocol';
 import { CollabSession, forgetJoined, joinedList, rememberJoined, type ChatMsg, type CollabLink, type JoinedProject, type JoinOpts } from './session';
 
@@ -750,13 +750,12 @@ export class Collab {
           <button data-cp="members">メンバー・権限</button>
           <button data-cp="chat">チャット${this.unread ? `（${this.unread}）` : ''}</button>
           <button data-cp="vers">版の記録</button>
-          <button data-cp="room">部屋（番号・あいことば）</button>
+          <button data-cp="room">部屋</button>
           <button data-cp="groups">担当（${Object.keys(doc.groups ?? {}).length}）</button>
           <button data-cp="follow">${this.follow ? `ついていくのをやめる（${esc(this.memberName(this.follow))}）` : 'ついていく…'}</button>
         </div>
         <h3>再生</h3>
         <div class="st-seg two cp-seg"><button data-cp="pmine" class="${this.playMode === 'mine' ? 'on' : ''}">このレーンだけ</button><button data-cp="pcmp" class="${this.playMode === 'compare' ? 'on' : ''}">見比べ（${this.compare.size}）</button></div>
-        <p class="note">見比べ: 「レーン」でチェックしたレーンの打音もいっしょに鳴らします（自分のレーンも入れて ${COMPARE_MAX} 本まで。上のレーンほど左に聞こえます）。テストプレイでは下に並べてオートで流します。</p>
         <div class="btns"><button data-cp="playall">みんなで同時に再生</button><button data-cp="stopall">みんなの再生を止める</button></div>
         <h3>書き出し</h3>
         <div class="btns">
@@ -767,8 +766,8 @@ export class Collab {
         </div>
         <h3>この部屋</h3>
         <div class="btns">
-          ${edit ? '<button data-cp="rename">名前（自分）を変える</button>' : ''}
-          <button data-cp="leave">閉じる（ホームへ）</button>
+          ${edit ? '<button data-cp="rename">名前を変える</button>' : ''}
+          <button data-cp="leave">閉じる</button>
           <button data-cp="forget" class="danger">一覧から外す</button>
         </div>`;
     }
@@ -779,7 +778,7 @@ export class Collab {
         return `<h3>${c}（${COURSE_JA[c]}）</h3><div class="list">${ls.map((l) => this.laneRow(l, doc)).join('')}</div>`;
       }).join('');
       const trash = doc.trash.length
-        ? `<h3>ごみ箱（${TRASH_DAYS} 日で消えます）</h3><div class="list">${doc.trash.map((t) => `<div class="item"><div class="grow">${esc(t.name)} <small>${t.course}</small><div class="pos">${esc(this.memberName(t.by))} ・ ${fmtDate(t.at)}</div></div><button data-cp="tview" data-id="${t.id}">見る</button>${edit ? `<button data-cp="restore" data-id="${t.id}">戻す</button>` : ''}${this.isLeader ? `<button data-cp="purge" data-id="${t.id}" class="danger">消す</button>` : ''}</div>`).join('')}</div>`
+        ? `<h3>ごみ箱</h3><div class="list">${doc.trash.map((t) => `<div class="item"><div class="grow">${esc(t.name)} <small>${t.course}</small><div class="pos">${esc(this.memberName(t.by))} ・ ${fmtDate(t.at)}</div></div><button data-cp="tview" data-id="${t.id}">見る</button>${edit ? `<button data-cp="restore" data-id="${t.id}">戻す</button>` : ''}${this.isLeader ? `<button data-cp="purge" data-id="${t.id}" class="danger">消す</button>` : ''}</div>`).join('')}</div>`
         : '';
       return `${edit ? '<div class="btns"><button data-cp="newLane">＋ レーンを足す</button></div>' : ''}${rows || '<p class="note">まだレーンがありません</p>'}${trash}`;
     }
@@ -788,8 +787,8 @@ export class Collab {
       return `
         <label class="field"><span>難易度</span><select id="cpNlCourse">${COURSES.map((c) => `<option ${c === (cur?.course ?? 'Oni') ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         <label class="field"><span>名前</span><input id="cpNlName" type="text" value="${esc(this.memberName(this.me))}の案" autocomplete="off"></label>
-        <label class="field"><span>中身</span><select id="cpNlFrom"><option value="main">その難易度の本譜面をコピー</option><option value="cur">今のレーンをコピー</option><option value="empty">空（BPM・OFFSET は本譜面と同じ）</option></select></label>
-        ${this.free ? '<label class="field"><span>本譜面</span><select id="cpNlMain"><option value="0">下書き（自分のレーン）</option><option value="1">本譜面にする（その難易度に無いとき）</option></select></label>' : ''}
+        <label class="field"><span>中身</span><select id="cpNlFrom"><option value="main">その難易度の本譜面をコピー</option><option value="cur">今のレーンをコピー</option><option value="empty">空</option></select></label>
+        ${this.free ? '<label class="field"><span>本譜面</span><select id="cpNlMain"><option value="0">下書き</option><option value="1">本譜面</option></select></label>' : ''}
         <div class="btns"><button data-cp="newLaneGo">足す</button></div>`;
     }
     if (p === 'members') {
@@ -800,20 +799,19 @@ export class Collab {
         const lead = m.id === doc.leader;
         const me = m.id === this.me;
         const gs = groupsOf(m.id);
-        const perm = lead ? 'リーダー（全部編集できる）' : m.perms.any ? '本譜面をどこでも編集できる' : gs.length ? `担当 ${gs.join('・')} の本譜面を編集できる` : '自分のレーンだけ';
+        const perm = lead ? 'リーダー' : m.perms.any ? '本譜面をどこでも編集できる' : gs.length ? `担当 ${gs.join('・')} の本譜面を編集できる` : '自分のレーンだけ';
         const ctl = this.isLeader && !lead
           ? `<div class="cp-perm">
-              <label><input type="checkbox" data-perm="any" data-mid="${m.id}" ${m.perms.any ? 'checked' : ''}> 本譜面をどこでも編集（担当の外も・確認なし）</label>
+              <label><input type="checkbox" data-perm="any" data-mid="${m.id}" ${m.perms.any ? 'checked' : ''}> 本譜面をどこでも編集</label>
               <button data-cp="leader" data-mid="${m.id}">リーダーを渡す</button>
               <button data-cp="kick" data-mid="${m.id}" class="danger">外す</button>
             </div>`
           : '';
         return `<div class="item cp-mem"><i class="cp-mdot ${on ? 'on' : ''}" style="--mc:${m.color}"></i><div class="grow"><b>${esc(m.name)}</b>${me ? ' <small>（自分）</small>' : ''}<div class="pos">${perm}${on ? '' : ` ・ ${fmtDate(m.lastSeen)}`}</div>${ctl}</div>${!me && on ? `<button data-cp="followOne" data-mid="${m.id}">${this.follow === m.id ? 'やめる' : 'ついていく'}</button>` : ''}</div>`;
       }).join('');
-      return `<div class="btns"><button data-cp="groups">担当（A・B・C…）を${this.isLeader ? '決める' : '見る'}</button></div>
+      return `<div class="btns"><button data-cp="groups">担当</button></div>
         <div class="list">${rows}</div>
-        ${s.online.viewers ? `<p class="note">見学で ${s.online.viewers} 人が見ています</p>` : ''}
-        <p class="note">本譜面: リーダーと、「どこでも編集」の人、担当の人（担当の小節の中だけ）が編集できます。担当の外をタップしても何も起きません（レーン名に 🔒）。自分のレーンは本人だけが編集でき、ほかの人は見る・取り込むことができます。最大 8 人。外した人は、次に入るときにまたあいことばが要ります。</p>`;
+        ${s.online.viewers ? `<p class="note">見学 ${s.online.viewers} 人</p>` : ''}`;
     }
     if (p === 'groups') {
       const lead = this.isLeader;
@@ -828,7 +826,7 @@ export class Collab {
         const ranges = g.ranges.map((r, i) => `<span class="cp-rg">${esc(laneName(r.lane))} ${r.from}〜${r.to} 小節${lead ? `<button data-cp="grDel" data-g="${g.id}" data-i="${i}" aria-label="外す">×</button>` : ''}</span>`).join('');
         const mem = lead
           ? others.map((m) => `<label class="cp-gm"><input type="checkbox" data-gmem="${g.id}" data-mid="${m.id}" ${g.members.includes(m.id) ? 'checked' : ''}><i style="background:${m.color}"></i>${esc(m.name)}</label>`).join('') || '<small>（リーダーのほかにメンバーがいません）</small>'
-          : g.members.map((x) => esc(this.memberName(x))).join('・') || '（まだだれもいません）';
+          : g.members.map((x) => esc(this.memberName(x))).join('・') || '—';
         const add = lead
           ? `<div class="cp-gadd">
               <select id="cpGl-${g.id}"><option value="*">全部の本譜面</option>${mains.map((l) => `<option value="${l.id}" ${l.id === this.laneId ? 'selected' : ''}>${l.course}</option>`).join('')}</select>
@@ -846,32 +844,26 @@ export class Collab {
           <div class="cp-gmems">${mem}</div>
         </div>`;
       }).join('');
-      return `<p class="note">担当: リーダーが本譜面の小節（例: A = 1〜16 小節）を決めて、人を割り当てます。割り当てられた人は、その小節の中だけ本譜面を編集できます。#MEASURE で小節の長さが変わっても、小節の番号で合わせます。</p>
-        ${lead ? '<div class="btns"><button data-cp="grNew">＋ 担当を足す</button></div>' : ''}
+      return `${lead ? '<div class="btns"><button data-cp="grNew">＋ 担当を足す</button></div>' : ''}
         <div class="list">${blocks || '<p class="note">まだ担当はありません</p>'}</div>`;
     }
     if (p === 'vers') {
       const rows = [...s.vers].reverse().map((v) => `<div class="item"><div class="grow">${esc(v.name)}${v.auto ? ' <small>（自動）</small>' : ''}<div class="pos">${fmtDate(v.at)}${v.by ? ` ・ ${esc(this.memberName(v.by))}` : ''}</div></div>${this.isLeader ? `<button data-cp="verRestore" data-id="${v.id}">この版に戻す</button>` : ''}</div>`).join('');
       return `${edit ? `<label class="field"><span>名前</span><input id="cpVerName" type="text" placeholder="例: サビまで完成" autocomplete="off"></label><div class="btns"><button data-cp="verSave">今の状態を版として残す</button></div>` : ''}
-        <p class="note">10 分ごとに、変わっていれば自動で残します（30 個まで。古い自動のものから消えます）。戻せるのはリーダーだけで、戻す前の状態も版として残ります。</p>
         <div class="list">${rows || '<p class="note">まだありません</p>'}</div>`;
     }
     if (p === 'room') {
       const r = s.room;
-      const left = Math.max(0, Math.ceil(ROOM_DAYS - (Date.now() - (s.lastActive || Date.now())) / 86400_000));
       const head = `<div class="cp-roomid"><small>部屋番号</small><b>${s.link.id}</b>${edit && r.pass ? `<small>あいことば</small><b>${esc(r.pass)}</b>` : ''}</div>
-        ${edit ? '<div class="btns"><button data-cp="copyRoom">部屋番号とあいことばをコピー</button></div>' : ''}
-        <p class="note">ホームの地球儀 →「オンライン作業」で部屋番号を探して、あいことばを入れると入れます。一度入った端末は、次からあいことばは要りません。</p>
-        <p class="note">だれも入らないまま ${ROOM_DAYS} 日たつと、この部屋は消えます（今は ${s.online.ids.length ? 'だれかが入っています' : `あと約 ${left} 日`}）。残したいときは本譜面を書き出しておいてください。</p>`;
+        ${edit ? '<div class="btns"><button data-cp="copyRoom">部屋番号とあいことばをコピー</button></div>' : ''}`;
       if (!this.isLeader) return `${head}<p class="note">部屋の名前: ${esc(r.name)} ・ ${r.unlisted ? '一覧に出さない' : '一覧に出す'} ・ 見学 ${r.watch ? 'できる' : 'できない'}</p>`;
       return `${head}
-        <h3>部屋の設定（リーダー）</h3>
+        <h3>部屋の設定</h3>
         <label class="field"><span>部屋の名前</span><input id="cpRmName" type="text" value="${esc(r.name)}" autocomplete="off"></label>
         <label class="field"><span>あいことば</span><input id="cpRmPass" type="text" value="${esc(r.pass)}" autocomplete="off"></label>
-        <label class="field cp-ck2"><input id="cpRmUnl" type="checkbox" ${r.unlisted ? 'checked' : ''}><span>一覧に出さない（部屋番号で探した人だけ）</span></label>
-        <label class="field cp-ck2"><input id="cpRmWatch" type="checkbox" ${r.watch ? 'checked' : ''}><span>見学（あいことばなしで、見るだけで入れる）</span></label>
-        <div class="btns"><button data-cp="roomSave">設定を保存</button></div>
-        <p class="note">あいことばを変えても、もう入ったことのある人はそのまま入れます。</p>`;
+        <label class="field cp-ck2"><input id="cpRmUnl" type="checkbox" ${r.unlisted ? 'checked' : ''}><span>一覧に出さない</span></label>
+        <label class="field cp-ck2"><input id="cpRmWatch" type="checkbox" ${r.watch ? 'checked' : ''}><span>見学できる</span></label>
+        <div class="btns"><button data-cp="roomSave">設定を保存</button></div>`;
     }
     return '';
   }

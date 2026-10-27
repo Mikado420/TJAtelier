@@ -1193,7 +1193,7 @@ function renderSheet() {
       <label class="field"><span>動画のずれ (秒)</span><input type="number" step="0.01" inputmode="decimal" data-voff value="${currentVideo.offset}"></label>` : ''}
 
       <h3>${collab.active ? `レーン（${esc(ed.course.name)}）` : '難易度'}</h3>
-      ${collab.active ? '<p class="note">合作中: BPM・OFFSET・レベル・流れ方は、このレーンだけの値です。難易度の追加・切り替えは「レーン」から。</p>' : `<div class="list">${courses}</div>
+      ${collab.active ? '' : `<div class="list">${courses}</div>
       <label class="field"><span>難易度名</span>
         <select data-course-name>${COURSE_NAMES.map((n) => `<option ${n === ed.course.name ? 'selected' : ''}>${n}</option>`).join('')}</select>
       </label>`}
@@ -1451,7 +1451,7 @@ function playSettingRows() {
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }
 const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['top', '上だけ'], ['off', '出さない']];
-const VIDEO_FITS: [typeof settings.videoFit, string][] = [['wide', '16:9（左右に黒帯）'], ['fill', '画面いっぱい']];
+const VIDEO_FITS: [typeof settings.videoFit, string][] = [['wide', '16:9'], ['fill', '画面いっぱい']];
 function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}

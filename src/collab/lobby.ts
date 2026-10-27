@@ -144,24 +144,21 @@ export class CollabLobby {
     const v = this.view;
     if (v.k === 'list') {
       return `<div class="cl-top"><input id="clQuery" type="search" placeholder="部屋の名前・曲名・リーダー・部屋番号" value="${esc(this.query)}" autocomplete="off"><button data-cl="create" class="cl-new">＋ 部屋を作る</button></div>
-        <div id="clLists"></div>
-        <p class="note">だれも入らないまま ${ROOM_DAYS} 日たった部屋は消えます。オンライン対戦の部屋はホームの地球儀 →「オンライン対戦」から。</p>`;
+        <div id="clLists"></div>`;
     }
     if (v.k === 'join') {
       const r = v.room;
       return `${this.row(r, false)}
         <label class="field"><span>あいことば</span><input id="clPass" type="text" autocomplete="off" enterkeyhint="go"></label>
-        <div class="btns"><button data-cl="joinGo">入る</button>${r.watch ? '<button data-cl="watchGo">見学する（見るだけ）</button>' : ''}</div>
-        <p class="note">一度入ると、この端末では次からあいことばは要りません。${r.members >= 8 ? '（この部屋は満員です）' : ''}</p>`;
+        <div class="btns"><button data-cl="joinGo">入る</button>${r.watch ? '<button data-cl="watchGo">見学する</button>' : ''}</div>`;
     }
     const songs = this.songList;
     const sel = songs.find((x) => x.id === v.song);
-    return `<p class="note">選んだ曲の全部の難易度が本譜面になり、音源もサーバーに置きます。作った人がリーダーです。</p>
-      <label class="field"><span>曲</span><select id="clSong">${songs.length ? songs.map((x) => `<option value="${x.id}" ${x.id === v.song ? 'selected' : ''}>${esc(x.title)}</option>`).join('') : '<option value="">読み込み中…</option>'}</select></label>
+    return `<label class="field"><span>曲</span><select id="clSong">${songs.length ? songs.map((x) => `<option value="${x.id}" ${x.id === v.song ? 'selected' : ''}>${esc(x.title)}</option>`).join('') : '<option value="">読み込み中…</option>'}</select></label>
       <label class="field"><span>部屋の名前</span><input id="clName" type="text" value="${esc(sel?.title ?? '')}" autocomplete="off"></label>
-      <label class="field"><span>あいことば</span><input id="clNewPass" type="text" autocomplete="off" placeholder="仲間に伝える言葉"></label>
-      <label class="field cp-ck2"><input id="clUnl" type="checkbox"><span>一覧に出さない（部屋番号で探した人だけ）</span></label>
-      <label class="field cp-ck2"><input id="clWatch" type="checkbox"><span>見学（あいことばなしで、見るだけで入れる）</span></label>
+      <label class="field"><span>あいことば</span><input id="clNewPass" type="text" autocomplete="off"></label>
+      <label class="field cp-ck2"><input id="clUnl" type="checkbox"><span>一覧に出さない</span></label>
+      <label class="field cp-ck2"><input id="clWatch" type="checkbox"><span>見学できる</span></label>
       <div class="btns"><button data-cl="createGo">作る</button></div>`;
   }
 
@@ -192,12 +189,12 @@ export class CollabLobby {
     const gone = this.gone.map((id) => joinedList().find((p) => p.id === id)).filter((p) => !!p);
     box.innerHTML = `
       ${this.found.length ? `<h3>部屋番号で見つかった部屋</h3><div class="list">${this.found.map((r) => this.row(r)).join('')}</div>` : ''}
-      <h3>自分の部屋（あいことばなしで入れる）</h3>
+      <h3>自分の部屋</h3>
       <div class="list">${mine.map((r) => this.row(r)).join('') || `<p class="note">${this.loading ? '読み込み中…' : 'まだありません'}</p>`}
-        ${gone.map((p) => `<div class="item"><div class="grow">${esc(p!.title)}<div class="pos">${p!.id} ・ 見つかりません（${ROOM_DAYS} 日だれも入らずに消えたかもしれません）</div></div><button data-cl="forget" data-id="${p!.id}">一覧から外す</button></div>`).join('')}
+        ${gone.map((p) => `<div class="item"><div class="grow">${esc(p!.title)}<div class="pos">${p!.id} ・ 見つかりません</div></div><button data-cl="forget" data-id="${p!.id}">一覧から外す</button></div>`).join('')}
       </div>
       <h3>公開の部屋</h3>
-      <div class="list">${pub.map((r) => this.row(r)).join('') || `<p class="note">${this.loading ? '読み込み中…' : this.query ? '見つかりません（一覧に出さない部屋は、部屋番号をそのまま入れると探せます）' : 'いまは公開の部屋がありません'}</p>`}</div>`;
+      <div class="list">${pub.map((r) => this.row(r)).join('') || `<p class="note">${this.loading ? '読み込み中…' : this.query ? '見つかりません' : 'いまは公開の部屋がありません'}</p>`}</div>`;
   }
 
   private join(watch: boolean) {
