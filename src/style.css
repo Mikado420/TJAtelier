@@ -2347,3 +2347,5 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 
 /* ホームの合作 */
 .hr-share { font-style: normal; font-size: 0.85em; margin-left: 4px; }
+.hc-row .hr-ib { grid-template-columns: 64px 40px; margin-left: auto; }
+.hc-row .hr-ib [data-collabdel] svg { fill: #14181b; }
