@@ -35,6 +35,8 @@ import { exportBackup, importBackup, isBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
 import { fitRoot, localPoint, typing } from './orient';
 import { BUILD_ID, startAutoUpdate } from './update';
+import { Collab, collabProjects, parseCollabHash, sharedMap } from './collab/controller';
+import { forgetJoined } from './collab/session';
 
 fitRoot();
 
@@ -140,6 +142,33 @@ const gridOk = (n: number) => Number.isSafeInteger(n) && n >= 1;
 if (!settings.grid && settings.divisor) settings.grid = settings.divisor * 4;
 ed.divisor = gridOk(settings.grid) ? settings.grid : 16;
 const view = new EditorView($<HTMLCanvasElement>('editor'), ed);
+/** 合作（リアルタイム共同編集）。開いている間は、エディタの譜面 = 開いているレーン */
+const collab = new Collab({
+  ed,
+  view,
+  toast: (m) => toast(m),
+  setAudio: (f) => setAudio(f, false),
+  showEditor: () => {
+    clearTimeout(saveTimer);
+    currentSongId = null;
+    playFromHome = false;
+    currentVideo = null;
+    play.setVideo(null, 0);
+    home.hide();
+    updateHeader();
+  },
+  showHome: async () => { await home.show(currentSongId); },
+  isPlaying: () => playing,
+  startPlayback: () => startPlayback(),
+  stopPlayback: () => stopPlayback(),
+  updateHeader: () => updateHeader(),
+  rebuildHits: () => rebuildHits(),
+  saveTja: (c, name) => saveTjaOf(c, name),
+  saveZip: (c) => saveZipOf(c),
+  startTest: (f) => startTest(f),
+  busy: (m, p) => busy(m, p),
+  busyEnd: () => busyEnd(),
+});
 // 拡大率の初期値をプレイ画面と同じ音符の間隔に変えたので、前の版で自分で変えた拡大率は一度だけ初期値に戻す
 // 打音を差し替えたので、打音の音量の比率を一度だけ 0.8 にする
 if (!settings.hitVolVer) {
@@ -211,7 +240,10 @@ async function setAudio(file: AudioFile | null, save = true) {
     await audio.loadMusic(null);
     toast(`「${file?.name}」は再生できません`);
   }
-  if (save) void persist(file);
+  if (save) {
+    if (collab.active) void collab.audioChanged(file);
+    else void persist(file);
+  }
   view.setWave(...computePeaks());
   view.duration = audio.musicDuration;
   updateHeader();
@@ -254,6 +286,18 @@ function endTime() {
 
 let hitEvents: AutoEvent[] = [];
 let hitIdx = 0;
+/** 合作の見比べ: 自分のレーンの打音の左右と、いっしょに鳴らすほかのレーンの打音 */
+let ownPan = 0;
+let extraHits: (AutoEvent & { pan: number })[] = [];
+let extraIdx = 0;
+function buildExtraHits(after: number, strict: boolean) {
+  const mix = collab.active ? collab.mix() : { own: 0, others: [] };
+  ownPan = mix.own;
+  extraHits = mix.others
+    .flatMap((o) => buildAutoEvents(o.course.notes, after).filter((e) => (strict ? e.t > after : e.t >= after - 0.001)).map((e) => ({ ...e, pan: o.pan })))
+    .sort((a, b) => a.t - b.t);
+  extraIdx = 0;
+}
 let metroEvents: { t: number; strong: boolean }[] = [];
 let metroIdx = 0;
 
@@ -265,6 +309,7 @@ async function startPlayback() {
   // 判定枠にちょうど乗っている音符（再生を始めた位置の音符）も鳴らす
   hitEvents = buildAutoEvents(playable, from).filter((e) => e.t >= from - 0.001);
   hitIdx = 0;
+  buildExtraHits(from, false);
   // メトロノーム: 拍子に合わせて 1 小節に「分子」の回数（4/4 なら 4 回、7/8 なら 8 分音符で 7 回）
   metroEvents = [];
   metroIdx = 0;
@@ -302,8 +347,14 @@ function scheduleAhead(t: number) {
   while (hitIdx < hitEvents.length && hitEvents[hitIdx].t <= until) {
     const e = hitEvents[hitIdx++];
     if (settings.hitMode === 'off') continue;
-    audio.scheduleHit(e.kind, e.t);
-    if (e.pop) audio.scheduleHit('balloon', e.t);
+    audio.scheduleHit(e.kind, e.t, ownPan);
+    if (e.pop) audio.scheduleHit('balloon', e.t, ownPan);
+  }
+  while (extraIdx < extraHits.length && extraHits[extraIdx].t <= until) {
+    const e = extraHits[extraIdx++];
+    if (settings.hitMode === 'off') continue;
+    audio.scheduleHit(e.kind, e.t, e.pan);
+    if (e.pop) audio.scheduleHit('balloon', e.t, e.pan);
   }
   while (metroIdx < metroEvents.length && metroEvents[metroIdx].t <= until) {
     const e = metroEvents[metroIdx++];
@@ -319,6 +370,7 @@ function rebuildHits() {
   const after = hitHorizon;
   hitEvents = buildAutoEvents(playable, after).filter((e) => e.t > after);
   hitIdx = 0;
+  if (collab.active) buildExtraHits(after, true);
 }
 
 function stopPlayback() {
@@ -344,6 +396,7 @@ function tickPlayback() {
 
 function loop() {
   if (playing && !play.isActive) tickPlayback();
+  if (collab.active && !play.isActive) collab.frame(playing);
   if (tempoPreview.on) tickTempoPreview();
   if (arrPlay.on) tickArrPlay();
   // プレイ画面を出している間は、隠れているエディタを描き直さない
@@ -358,8 +411,8 @@ requestAnimationFrame(loop);
 // ---------- ヘッダ・ツールバー ----------
 
 function updateHeader() {
-  $<HTMLButtonElement>('btnUndo').disabled = !ed.canUndo;
-  $<HTMLButtonElement>('btnRedo').disabled = !ed.canRedo;
+  $<HTMLButtonElement>('btnUndo').disabled = collab.active ? !collab.canUndo : !ed.canUndo;
+  $<HTMLButtonElement>('btnRedo').disabled = collab.active ? !collab.canRedo : !ed.canRedo;
   // 再生速度（右のバーのボタン）。1.0 以外は色を変える
   $('rateLabel').textContent = `${settings.rate.toFixed(settings.rate === 1 ? 1 : 2)}x`;
   $('btnRate').classList.toggle('on', settings.rate !== 1);
@@ -658,14 +711,19 @@ view.onZoomChange = (z) => {
   settings.zoomSet = true;
   saveSettings();
 };
-$('btnUndo').addEventListener('click', () => ed.undo());
-$('btnRedo').addEventListener('click', () => ed.redo());
+// 合作中は自分の変更だけを戻す
+const undo = () => (collab.active ? collab.undo() : ed.undo());
+const redo = () => (collab.active ? collab.redo() : ed.redo());
+$('btnUndo').addEventListener('click', undo);
+$('btnRedo').addEventListener('click', redo);
 view.onPlayToggle = () => (playing ? stopPlayback() : void startPlayback());
 
 // ---------- 編集 ----------
 
 view.onUserScroll = () => stopPlayback();
 view.onTap = (tick, tol) => {
+  // 合作: 編集できない所（担当範囲の外など）は、タップしても何もしない
+  if (collab.active && !collab.canTap(tick)) return;
   const r = ed.tap(tick, tol);
   if (r.message) toast(r.message);
   updateSelBar();
@@ -704,9 +762,11 @@ function updateSelBar() {
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
     b.disabled = k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : !has || !n;
+    if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
   });
 }
 function selAction(k: string) {
+  if (k === 'adopt') { collab.adoptSelection(); updateSelBar(); view.invalidate(); return; }
   if (k === 'copy') { const n = ed.copySelection(); toast(`${n} 個コピーしました`); }
   else if (k === 'cut') { const n = ed.cutSelection(); toast(`${n} 個切り取りました`); }
   else if (k === 'del') { const n = ed.deleteSelection(); toast(`${n} 個消しました`); }
@@ -948,7 +1008,8 @@ ed.onChange((structural) => {
   view.invalidate();
   updateHeader();
   if (structural) {
-    syncAudioName();
+    collab.onEdit();
+    if (!collab.active) syncAudioName();
     rebuildHits();
     updateSelBar();
     clearTimeout(saveTimer);
@@ -969,8 +1030,8 @@ window.addEventListener('keydown', (e) => {
   if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
   if (play.isActive || !$('sheet').classList.contains('hidden') || !$('home').classList.contains('hidden')) return;
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? ed.redo() : ed.undo(); return; }
-  if (mod && e.code === 'KeyY') { e.preventDefault(); ed.redo(); return; }
+  if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
   if (mod && (e.code === 'KeyC' || e.code === 'KeyX' || e.code === 'KeyV')) {
     if (e.code !== 'KeyV' && !ed.sel) return;
     e.preventDefault();
@@ -1106,11 +1167,11 @@ function renderSheet() {
       ${currentVideo ? `<div class="field"><span>背景の動画</span><div class="vid-row"><b>${esc(currentVideo.name)}</b><button data-act="rmVideo" class="danger">外す</button></div></div>
       <label class="field"><span>動画のずれ (秒)</span><input type="number" step="0.01" inputmode="decimal" data-voff value="${currentVideo.offset}"></label>` : ''}
 
-      <h3>難易度</h3>
-      <div class="list">${courses}</div>
+      <h3>${collab.active ? `レーン（${esc(ed.course.name)}）` : '難易度'}</h3>
+      ${collab.active ? '<p class="note">合作中: BPM・OFFSET・レベル・流れ方は、このレーンだけの値です。難易度の追加・切り替えは「レーン」から。</p>' : `<div class="list">${courses}</div>
       <label class="field"><span>難易度名</span>
         <select data-course-name>${COURSE_NAMES.map((n) => `<option ${n === ed.course.name ? 'selected' : ''}>${n}</option>`).join('')}</select>
-      </label>
+      </label>`}
       <label class="field"><span>レベル</span><input type="number" min="1" max="10" inputmode="numeric" data-course-level value="${ed.course.level}"></label>
       <label class="field"><span>流れ方</span>
         <select data-course-scroll>
@@ -1118,11 +1179,11 @@ function renderSheet() {
           <option value="hb" ${ed.course.scrollMode ? 'selected' : ''}>#HBSCROLL</option>
         </select>
       </label>
-      <div class="btns three">
+      ${collab.active ? '' : `<div class="btns three">
         <button data-act="addCourse">追加</button>
         <button data-act="dupCourse">複製</button>
         <button data-act="delCourse" class="danger" ${c.courses.length <= 1 ? 'disabled' : ''}>削除</button>
-      </div>`;
+      </div>`}`;
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
     body.innerHTML = `
@@ -1647,11 +1708,11 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   for (const raw of r.audios) {
     let c: { file: AudioFile; length: number };
     try { c = await convertAudio(raw); } catch { r.skipped.push(raw.name); continue; }
-    if (mode === 'audio' && currentSongId && !home.visible) {
+    if (mode === 'audio' && (currentSongId || collab.active) && !home.visible) {
       busyEnd();
       await applyAudioOnly(c.file);
       // 動画なら、背景の動画にも使う
-      if (isVideoName(c.file.name)) {
+      if (isVideoName(c.file.name) && currentSongId) {
         await saveSongVideo(currentSongId, { name: c.file.name, data: null, fromAudio: true });
         ed.mutate(() => setBgMovie(ed.chart, c.file.name));
         await refreshVideo(currentSongId);
@@ -1761,10 +1822,27 @@ async function exportAudioData(a: AudioFile): Promise<ArrayBuffer> {
   }
 }
 
+/** 譜面を .tja で保存する */
+function saveTjaOf(chart: EChart, name = chart.title) {
+  download(new Blob([encodeSJIS(tjaText(chart)).buffer as ArrayBuffer], { type: 'text/plain' }), `${safeName(name)}.tja`);
+}
+/** 譜面と音源を .zip で保存する */
+async function saveZipOf(chart: EChart) {
+  const name = safeName(chart.title);
+  const files: { name: string; data: Uint8Array; compress?: boolean }[] = [];
+  if (ed.audio) {
+    chart.wave = ed.audio.name;
+    files.push({ name: `${name}/${ed.audio.name}`, data: new Uint8Array(await exportAudioData(ed.audio)) });
+  }
+  const tja = encodeSJIS(tjaText(chart));
+  files.unshift({ name: `${name}/${name}.tja`, data: tja, compress: true });
+  download(await writeZip(files), `${name}.zip`);
+}
+
 async function fileAction(act: string) {
   if (act === 'open') pickFiles('any');
-  else if (act === 'audio') pickFiles('audio');
-  else if (act === 'cut') openCut();
+  else if (act === 'audio') { if (collab.canChangeAudio()) pickFiles('audio'); }
+  else if (act === 'cut') { if (collab.canChangeAudio()) openCut(); }
   else if (act === 'tempo') startTempo();
   else if (act === 'new') {
     await createSong(newChart());
@@ -1773,17 +1851,9 @@ async function fileAction(act: string) {
     await createSong(parseTJA(DEMO_TJA));
     closeSheet();
   } else if (act === 'saveTja') {
-    download(new Blob([encodeSJIS(tjaText(ed.chart)).buffer as ArrayBuffer], { type: 'text/plain' }), `${safeName(ed.chart.title)}.tja`);
+    saveTjaOf(ed.chart);
   } else if (act === 'saveZip') {
-    const name = safeName(ed.chart.title);
-    const files: { name: string; data: Uint8Array; compress?: boolean }[] = [];
-    if (ed.audio) {
-      ed.chart.wave = ed.audio.name;
-      files.push({ name: `${name}/${ed.audio.name}`, data: new Uint8Array(await exportAudioData(ed.audio)) });
-    }
-    const tja = encodeSJIS(tjaText(ed.chart));
-    files.unshift({ name: `${name}/${name}.tja`, data: tja, compress: true });
-    download(await writeZip(files), `${name}.zip`);
+    await saveZipOf(ed.chart);
   } else if (act === 'copy') {
     try {
       await navigator.clipboard.writeText(tjaText(ed.chart));
@@ -1855,6 +1925,9 @@ async function startTest(fromStart = lastTestFromStart) {
     return;
   }
   const from = fromStart ? -Infinity : ed.timing.tickToTime(ed.snap(Math.max(0, view.pos)));
+  // 合作の見比べ: ほかのレーンを 2 つまで下に並べてオートで流す
+  const cmp = collab.active ? collab.compareCourses() : null;
+  play.setCompare(cmp?.list ?? null, cmp?.own ?? 0);
   await play.start(course, from, {
     title: ed.chart.title,
     course: ed.course.name,
@@ -1986,6 +2059,7 @@ async function boot() {
   view.pos = 0;
   updateHeader();
   await home.show(await getCurrentId());
+  await openCollabFromHash();
 }
 
 /** 音源の長さ（秒）。再生できない形式なら 0 */
@@ -2013,6 +2087,7 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   playFromHome = mode === 'play';
   clearTimeout(saveTimer);
   stopPlayback();
+  if (collab.active) collab.close(false);
   currentSongId = id;
   void setCurrentId(id);
   ed.load(data.chart, null, data.courseIndex);
@@ -2089,11 +2164,55 @@ const home = new Home({
     openSheet('analysis');
   })(),
   toast,
+  collab: {
+    list: () => collabProjects(),
+    open: (id) => {
+      const p = collabProjects().find((x) => x.id === id);
+      if (p) void collab.open({ id: p.id, key: p.key });
+      else toast('このプロジェクトのリンクがありません');
+    },
+    join: () => {
+      const v = prompt('合作のリンクを貼ってください');
+      if (!v) return;
+      const l = parseCollabHash(v);
+      if (l) void collab.open(l);
+      else toast('リンクが読めませんでした');
+    },
+    forget: (id) => forgetJoined(id),
+    share: (id) => void shareSong(id),
+    sharedOf: (id) => sharedMap()[id],
+  },
 });
+
+(window as unknown as { __collab?: Collab }).__collab = collab;
+
+/** 曲を合作で共有する（全部の難易度が本譜面になり、音源もサーバーに置く） */
+async function shareSong(id: string) {
+  const data = await loadSongData(id);
+  if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
+  if (!confirm(`「${data.chart.title}」を合作で共有しますか？\n全部の難易度が本譜面になり、音源もサーバーに送ります。共有リンクを知っている人が編集できます。`)) return;
+  stopPlayback();
+  const a = await loadSongAudio(id);
+  await collab.share(data.chart, a && !isVideoName(a.name) ? a : null, id);
+}
+
+/** 合作のリンク（#collab=…）で開かれたら、そのプロジェクトに入る */
+async function openCollabFromHash() {
+  const link = parseCollabHash();
+  if (!link) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  await collab.open(link);
+}
+window.addEventListener('hashchange', () => void openCollabFromHash());
 
 $('btnHome').addEventListener('click', async () => {
   closeMenus();
   stopPlayback();
+  if (collab.active) {
+    collab.close();
+    ed.load(newChart(), null, 0);
+    await setAudio(null, false);
+  }
   await persist();
   await home.show(currentSongId);
 });
@@ -4410,6 +4529,8 @@ async function applyCut() {
     // 新しい音源は start（0 か、0 より前のいちばん前のクリップ）から始まる。1 小節目の所に OFFSET を合わせる
     const demo = (mapTime(a.clips, ed.chart.demoStart) ?? ed.chart.demoStart + shift) - start;
     const newOffset = arrNewOffset();
+    // 合作: ほかのレーンの OFFSET も同じだけずらす
+    if (collab.active) collab.noteShift(newOffset - ed.chart.offset);
     ed.mutate(() => {
       ed.chart.offset = newOffset;
       ed.chart.demoStart = Math.max(0, Math.round(demo * 1000) / 1000);

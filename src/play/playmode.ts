@@ -327,6 +327,10 @@ export class PlayMode {
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
     this.renderer.donWidth = this.settings.donWidth ?? 0.6;
+    // 合作の見比べ: ほかのレーンを下に並べる（タイミング調整のときは出さない）
+    const cmp = !this.calibrating && this.compare.length > 0;
+    this.renderer.setOpponents(cmp ? this.compare.map((c) => c.o) : []);
+    if (cmp) this.resetCompare(from - 2);
     this.applyInputMode();
     this.input.refresh();
     resetTouchStats();
@@ -413,6 +417,7 @@ export class PlayMode {
         this.autoPlay(game, now);
       }
       game.update(now);
+      if (this.compare.length && !this.online && !this.calibrating) this.stepCompare(now);
       if (this.online && !this.spectating) this.sendOnline(game);
       this.renderer.draw(game, course, now, info);
       const w = performance.now() - t0;
@@ -687,6 +692,10 @@ export class PlayMode {
     // 止めたときに予約して鳴らなかった打音を、もう一度予約し直す
     this.soundIdx = this.autoEvents.findIndex((e) => e.t >= at);
     if (this.soundIdx < 0) this.soundIdx = this.autoEvents.length;
+    for (const c of this.compare) {
+      c.sidx = c.ev.findIndex((e) => e.t >= at);
+      if (c.sidx < 0) c.sidx = c.ev.length;
+    }
     // ポーズ中にオートへ切り替えたときは、止めた所から自動で叩く（それより前は叩かない）
     this.autoIdx = this.soundIdx;
     this.runLoop();
@@ -705,6 +714,73 @@ export class PlayMode {
 
   /** オートで叩く予定（時刻順）。音はこの時刻に予約して鳴らす */
   private autoEvents: AutoEvent[] = [];
+  /** 合作の見比べテストプレイ: いっしょに流すほかのレーン（オートで叩く。打音は左右に分ける） */
+  private compare: { o: Opponent; ev: AutoEvent[]; sidx: number; nidx: number; pan: number }[] = [];
+  /** 見比べのときの、自分のレーンの打音の左右 */
+  private ownPan = 0;
+
+  /** 見比べのレーンを決める（次の start から。null で外す） */
+  setCompare(list: { name: string; course: Course; pan: number }[] | null, ownPan = 0) {
+    this.ownPan = list?.length ? ownPan : 0;
+    this.compare = (list ?? []).slice(0, 2).map((c, k) => ({
+      o: {
+        id: `cmp${k}`, name: c.name, tag: '見比べ（オート）', score: 0, combo: 0, gauge: 0, good: 0, ok: 0, bad: 0, marks: new Uint8Array(c.course.notes.length), fx: null, status: '' as const,
+        course: c.course.name, lane: { game: new Game(c.course.notes), course: c.course, vis: [], bars: [] },
+      },
+      ev: buildAutoEvents(c.course.notes), sidx: 0, nidx: 0, pan: c.pan,
+    }));
+  }
+
+  /** 見比べのレーンをオートで進める（音を予約し、叩いた印を付ける） */
+  private stepCompare(now: number) {
+    for (const c of this.compare) {
+      while (c.sidx < c.ev.length && c.ev[c.sidx].t <= now + 0.3) {
+        const e = c.ev[c.sidx++];
+        if (!this.hitOn || e.t < now - 0.05) continue;
+        this.audio.scheduleHit(e.kind, e.t, c.pan);
+        if (e.pop) this.audio.scheduleHit('balloon', e.t, c.pan);
+      }
+      const notes = c.o.lane!.course.notes;
+      while (c.nidx < notes.length && notes[c.nidx].time <= now) {
+        const i = c.nidx++;
+        const n = notes[i];
+        if (n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon') continue;
+        c.o.marks[i] = 1;
+        c.o.good++;
+        c.o.combo++;
+        c.o.score += 1000;
+        c.o.gauge = Math.min(100, c.o.gauge + 100 / Math.max(1, notes.length) * 1.4);
+        c.o.fx = { j: 1, t: performance.now(), i };
+      }
+    }
+  }
+
+  /** 見比べのレーンを、from 秒の位置から始める */
+  private resetCompare(from: number) {
+    for (const c of this.compare) {
+      c.sidx = c.ev.findIndex((e) => e.t >= from);
+      if (c.sidx < 0) c.sidx = c.ev.length;
+      c.nidx = 0;
+      c.o.marks.fill(0);
+      c.o.good = c.o.ok = c.o.bad = c.o.combo = c.o.score = 0;
+      c.o.gauge = 0;
+      c.o.fx = null;
+      // 始める位置より前は叩いたことにする
+      this.stepCompareMarks(c, from);
+    }
+  }
+
+  private stepCompareMarks(c: PlayMode['compare'][number], until: number) {
+    const notes = c.o.lane!.course.notes;
+    while (c.nidx < notes.length && notes[c.nidx].time < until) {
+      const i = c.nidx++;
+      if (notes[i].type === 'roll' || notes[i].type === 'bigRoll' || notes[i].type === 'balloon') continue;
+      c.o.marks[i] = 1;
+      c.o.good++;
+      c.o.combo++;
+      c.o.score += 1000;
+    }
+  }
   private autoIdx = 0;
   private soundIdx = 0;
   private autoSide: 'L' | 'R' = 'L';
@@ -716,8 +792,8 @@ export class PlayMode {
     while (this.soundIdx < ev.length && ev[this.soundIdx].t <= now + 0.3) {
       const e = ev[this.soundIdx++];
       if (!on || e.t < now - 0.05) continue;
-      this.audio.scheduleHit(e.kind, e.t);
-      if (e.pop) this.audio.scheduleHit('balloon', e.t);
+      this.audio.scheduleHit(e.kind, e.t, this.ownPan);
+      if (e.pop) this.audio.scheduleHit('balloon', e.t, this.ownPan);
     }
   }
 

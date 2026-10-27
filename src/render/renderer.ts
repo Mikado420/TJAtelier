@@ -91,6 +91,8 @@ export interface Opponent {
   status: '' | 'fin' | 'quit' | 'lost';
   /** 遊んでいる難易度（パネルに出す。Easy / Normal / Hard / Oni / Edit） */
   course?: string;
+  /** パネルに出す説明（無ければ「オンライン対戦」） */
+  tag?: string;
   /** 自分と違う難易度で遊んでいるとき: その難易度の譜面（音符の位置はこれで求める） */
   lane?: { game: Game; course: Course; vis: number[]; bars: number[] };
 }
@@ -1062,7 +1064,7 @@ export class Renderer {
     // コンボ太鼓
     this.paintComboDrum(o.combo, 1);
     // 名札（色の丸・状態の帯・名前の帯）
-    const state = o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '通信が切れた' : 'オンライン対戦';
+    const state = o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '通信が切れた' : o.tag ?? 'オンライン対戦';
     this.drawNameplate(`${no}P`, badge, state, o.name);
     void wall;
   }

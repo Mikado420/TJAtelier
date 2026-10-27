@@ -138,6 +138,21 @@ const SCROLL_GAIN = 1.6;
 
 interface Box { x: number; y: number; r: number }
 
+/** 合作: ほかのレーン（波形の所に、時刻をそろえて小さく並べる） */
+export interface GhostRow {
+  id: string;
+  name: string;
+  color: string;
+  main: boolean;
+  /** 音符（秒） */
+  notes: { t: number; e?: number; type: string }[];
+  /** 小節線（秒） */
+  bars: number[];
+}
+
+/** 合作: ほかの人が見ている場所 */
+export interface CursorMark { color: string; name: string; t: number }
+
 export class EditorView {
   private readonly ctx: CanvasRenderingContext2D;
   w = 0;
@@ -162,6 +177,14 @@ export class EditorView {
   /** 最後に描いたイベントの文字の位置（タップの判定用） */
   private evBoxes: { x1: number; x2: number; items: EventItem[] }[] = [];
   onUserScroll: () => void = () => {};
+  /** 合作: ほかのレーン（最大 3 段） */
+  ghosts: GhostRow[] = [];
+  /** 合作: ほかの人の見ている場所 */
+  cursors: CursorMark[] = [];
+  /** 合作: ほかのレーンの名前をタップしたとき */
+  onGhostTap: (id: string) => void = () => {};
+  /** 最後に描いたほかのレーンの名前の位置 */
+  private ghostBoxes: { x1: number; x2: number; y1: number; y2: number; id: string }[] = [];
   onPlayToggle: () => void = () => {};
   onZoomChange: (z: number) => void = () => {};
   onResize: () => void = () => {};
@@ -511,6 +534,9 @@ export class EditorView {
     if (this.inBox(L.play, x, y)) return this.onPlayToggle();
     if (x <= L.colW) return;
     if (y >= L.waveY && y <= L.waveY + L.waveH) {
+      // ほかのレーンの名前をタップ → そのレーンへ
+      const g = this.ghostBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
+      if (g) return this.onGhostTap(g.id);
       // 波形をタップ → その位置へ移動
       this.onUserScroll();
       const t = this.tickOf(x);
@@ -573,6 +599,7 @@ export class EditorView {
     ctx.fillStyle = 'rgba(29,32,35,0.9)';
     ctx.fillRect(L.waveX, L.waveY, this.w - L.waveX, L.waveH);
     this.drawWave(L);
+    this.drawGhosts(L);
 
     laneClip(() => {
       // レーン（#DELAY の段は、重なった所だけ緑がかった色。それ以外は何もない所なので暗く）
@@ -911,7 +938,98 @@ export class EditorView {
     }
     ctx.restore();
 
+    this.drawCursors(L);
     this.drawColumn(L);
+  }
+
+  /** 秒 → x（今の表示で） */
+  private xOfTime(t: number) {
+    return this.xOfD(this.lanes.dispOfTime(t));
+  }
+
+  /** 合作: ほかのレーンを、波形の下の方に小さく並べる（時刻をそろえる） */
+  private drawGhosts(L: Lay) {
+    this.ghostBoxes = [];
+    const rows = this.ghosts.slice(0, 3);
+    if (!rows.length) return;
+    const ctx = this.ctx;
+    const s = L.s;
+    // 上は合作の帯、下は小節・BPM の表示の分をあける
+    const top = L.waveY + 72 * s;
+    const bottom = L.waveY + L.waveH - 70 * s;
+    const rh = Math.min(76 * s, (bottom - top) / rows.length);
+    const x0 = L.waveX;
+    const tL = this.lanes.timeOfDisp(this.dOf(x0 - 40 * s));
+    const tR = this.lanes.timeOfDisp(this.dOf(this.w + 40 * s));
+    rows.forEach((g, k) => {
+      const y = top + k * rh;
+      const cy = y + rh / 2;
+      ctx.fillStyle = 'rgba(16,20,24,0.78)';
+      ctx.fillRect(x0, y + 2 * s, this.w - x0, rh - 4 * s);
+      ctx.fillStyle = g.color;
+      ctx.fillRect(x0, y + 2 * s, Math.max(2, 4 * s), rh - 4 * s);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x0, y, this.w - x0, rh);
+      ctx.clip();
+      // 小節線
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      for (const b of g.bars) {
+        if (b < tL || b > tR) continue;
+        const x = this.xOfTime(b);
+        ctx.fillRect(x - 0.5, y + 4 * s, 1, rh - 8 * s);
+      }
+      // 音符（小さく）
+      const r = Math.max(3, Math.min(rh * 0.3, 15 * s));
+      for (const n of g.notes) {
+        if ((n.e ?? n.t) < tL || n.t > tR) continue;
+        const x = this.xOfTime(n.t);
+        const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
+        const ex = n.e !== undefined ? this.xOfTime(n.e) : undefined;
+        drawAny(ctx, n.type as never, x, cy, big ? r * 1.4 : r, ex, null);
+      }
+      ctx.restore();
+      // 名前（右の端。タップでそのレーンへ）
+      const label = `${g.main ? '★' : ''}${g.name}`;
+      ctx.font = `600 ${Math.round(Math.max(10, 17 * s))}px system-ui, sans-serif`;
+      const tw = ctx.measureText(label).width;
+      const pw = tw + 22 * s;
+      const ph = Math.min(rh - 8 * s, 30 * s);
+      const px = x0 + 10 * s;
+      const py = cy - ph / 2;
+      ctx.fillStyle = 'rgba(8,10,12,0.85)';
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = g.color;
+      ctx.lineWidth = Math.max(1, 1.5 * s);
+      ctx.strokeRect(px, py, pw, ph);
+      ctx.fillStyle = '#f4f4f4';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, px + 11 * s, cy);
+      this.ghostBoxes.push({ x1: px - 6 * s, x2: px + pw + 6 * s, y1: y, y2: y + rh, id: g.id });
+    });
+  }
+
+  /** 合作: ほかの人の見ている場所（色の縦線と名前） */
+  private drawCursors(L: Lay) {
+    if (!this.cursors.length) return;
+    const ctx = this.ctx;
+    const s = L.s;
+    ctx.font = `600 ${Math.round(Math.max(9, 14 * s))}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (const c of this.cursors) {
+      const x = this.xOfTime(c.t);
+      if (x < L.colW || x > this.w) continue;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = c.color;
+      ctx.fillRect(x - Math.max(1, 1.5 * s), L.waveY, Math.max(2, 3 * s), L.evTop + L.evH - L.waveY);
+      const tw = ctx.measureText(c.name).width + 12 * s;
+      ctx.fillRect(x - tw / 2, L.waveY, tw, 20 * s);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#111';
+      ctx.fillText(c.name, x, L.waveY + 18 * s);
+    }
   }
 
   private drawWave(L: Lay) {

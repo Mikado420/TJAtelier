@@ -233,7 +233,7 @@ export class CollabCore {
   private hello(conn: Conn, mid: string, role: 'edit' | 'view') {
     const lanes = Object.values(this.doc.lanes);
     this.send(conn, {
-      t: 'hello', you: mid, role, now: this.now(), id: this.id,
+      t: 'hello', you: mid, role, now: this.now(), id: this.id, vkey: role === 'edit' ? this.info?.vkey : undefined,
       doc: { meta: this.doc.meta, members: this.doc.members, leader: this.doc.leader, trash: this.doc.trash, lanes: {} },
       lanes: lanes.length, chat: this.chat.slice(-CHAT_SEND), chatAll: this.chat.length, online: this.onlineIds(),
     });
@@ -470,6 +470,29 @@ export class CollabCore {
         this.schedule();
         this.broadcast({ t: 'lane', lane: dst });
         this.sys(`${name} さんが「${src.name || '無題'}」を ${dst.course} の本譜面に丸ごと採用しました（前の本譜面はごみ箱にあります）`);
+        return;
+      }
+      case 'audioSet': {
+        // 音源を変える。切り貼りで頭の位置が変わったら、全部のレーンの OFFSET を同じだけずらす（skip のレーンは送った人が合わせ済み）
+        if (!free) return this.err(conn, '音源を変えられるのは、リーダーと本譜面を自由に編集できる人だけです');
+        const a = m.audio as { hash?: unknown; name?: unknown; size?: unknown } | null;
+        if (a && typeof a.hash !== 'string') return;
+        const audio = a ? { hash: String(a.hash), name: clampStr(a.name, 200), size: Number(a.size) || 0 } : null;
+        const shift = Number(m.shift) || 0;
+        const skip = String(m.skip ?? '');
+        const ops: Op[] = [{ o: 'm', v: { audio } }];
+        if (shift && Math.abs(shift) < 3600) {
+          for (const l of Object.values(this.doc.lanes)) if (l.id !== skip) ops.push({ o: 'h', l: l.id, v: { offset: Math.round((l.head.offset + shift) * 1e6) / 1e6 } });
+        }
+        for (const op of ops) {
+          applyOp(this.doc, op);
+          if (op.o === 'h') this.dirtyLanes.add(op.l);
+        }
+        this.dirtyInfo = true;
+        this.changed();
+        this.schedule();
+        this.broadcast({ t: 'ops', by: mid, ops });
+        this.sys(`${name} さんが音源を「${audio?.name ?? 'なし'}」にしました${ops.length > 1 ? '（全部のレーンの OFFSET を合わせました）' : ''}`);
         return;
       }
       case 'adoptNote': {

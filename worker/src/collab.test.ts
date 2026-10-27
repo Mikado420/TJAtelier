@@ -144,6 +144,19 @@ describe('合作プロジェクト（サーバー）', () => {
     expect(last(cb, 'pong')!.c).toBe(5);
   });
 
+  it('音源を変えると全部のレーンの OFFSET がずれる（送った人のレーンは除く）', async () => {
+    const { core, A, B, ca, cb, send } = await setup();
+    await send(ca, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('M', A, true) }] });
+    await send(cb, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('L', B, false) }] });
+    await send(cb, { t: 'cmd', x: 'audioSet', audio: { hash: 'h1', name: 'a.ogg', size: 1 }, shift: 1 });
+    expect(core.state.doc.meta.audio).toBeNull();
+    await send(ca, { t: 'cmd', x: 'audioSet', audio: { hash: 'h1', name: 'a.ogg', size: 1 }, shift: -0.5, skip: 'M' });
+    expect(core.state.doc.meta.audio!.hash).toBe('h1');
+    expect(core.state.doc.lanes.L.head.offset).toBe(-0.5);
+    expect(core.state.doc.lanes.M.head.offset).toBe(0);
+    expect(last(ca, 'ops')!.ops.length).toBe(2);
+  });
+
   it('音源をかけらに分けて保存し、戻せる', async () => {
     const { core } = await setup();
     const bytes = new Uint8Array(2_000_000).map((_, i) => i % 251);

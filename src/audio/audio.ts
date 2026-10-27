@@ -483,27 +483,42 @@ export class AudioEngine {
     return buf;
   }
 
-  private lastScheduled: Partial<Record<HitSound, { g: GainNode; end: number }>> = {};
+  /** 種類（と左右の位置）ごとの、最後に予約した音 */
+  private lastScheduled: Record<string, { g: GainNode; end: number }> = {};
+  /** 左右の位置ごとのつなぎ先（合作で複数のレーンの打音を左右に分ける） */
+  private panNodes = new Map<number, AudioNode>();
+  private panOut(pan: number): AudioNode {
+    if (!pan) return this.sfxGain;
+    let n = this.panNodes.get(pan);
+    if (!n) {
+      const p = this.ctx.createStereoPanner();
+      p.pan.value = Math.max(-1, Math.min(1, pan));
+      p.connect(this.sfxGain);
+      this.panNodes.set(pan, (n = p));
+    }
+    return n;
+  }
 
   /**
    * 曲の時刻 songTime ちょうどに打音を鳴らす予約（オートで音符の位置に正確に鳴らす）。
    * 同じ種類の前の音がまだ鳴っていれば、新しい音の瞬間に素早く消す（連打で音が重なりすぎないように）
    */
-  scheduleHit(kind: HitSound, songTime: number) {
+  scheduleHit(kind: HitSound, songTime: number, pan = 0) {
     const ctx = this.ctx;
     const when = this.startedAt + (songTime - this.songStart) / this.rate;
     if (when < ctx.currentTime - 0.005) return;
     const at = Math.max(when, ctx.currentTime);
-    const prev = this.lastScheduled[kind];
+    const lk = pan ? `${kind}:${pan}` : kind;
+    const prev = this.lastScheduled[lk];
     if (prev && prev.end > at) prev.g.gain.setTargetAtTime(0, at, 0.006);
     const src = ctx.createBufferSource();
     src.buffer = this.customHit[kind] ?? this.builtinHit(kind);
     const g = ctx.createGain();
     if (!this.hitLevel[kind]) this.measureHit(kind);
     g.gain.value = this.hitNorm(kind);
-    src.connect(g).connect(this.sfxGain);
+    src.connect(g).connect(this.panOut(pan));
     src.start(at);
-    this.lastScheduled[kind] = { g, end: at + src.buffer.duration };
+    this.lastScheduled[lk] = { g, end: at + src.buffer.duration };
     this.scheduled.push(src);
     src.onended = () => {
       const i = this.scheduled.indexOf(src);

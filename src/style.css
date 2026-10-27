@@ -2238,3 +2238,112 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .ol-vprog i { background: #7b4bd0; }
 .play .play-vdim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; pointer-events: none; }
 .play .play-vdim.hidden { display: none; }
+
+/* ───────── 合作（リアルタイム共同編集） ───────── */
+/* 波形の左上の帯: メニュー・開いているレーン・メンバー・チャット */
+.cchip {
+  position: absolute;
+  left: calc(205px * var(--es, 0.45) + 6px);
+  top: calc(40px * var(--es, 0.45) + 4px);
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  z-index: 3;
+  max-width: calc(100% - 205px * var(--es, 0.45) - 80px);
+}
+.cchip > button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(10, 14, 18, 0.88);
+  color: #fff;
+  font-size: 12px;
+  clip-path: polygon(4px 0, 100% 0, calc(100% - 4px) 100%, 0 100%);
+  white-space: nowrap;
+}
+.cchip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.cchip .cc-lane { border-left: 3px solid var(--lc); min-width: 0; overflow: hidden; }
+.cchip .cc-lane b { overflow: hidden; text-overflow: ellipsis; max-width: 9em; }
+.cchip .cc-lane small { color: var(--sub); font-family: var(--fd); font-weight: 700; }
+.cchip .cc-lock { font-size: 11px; }
+.cchip .cc-mem b { font-family: var(--fd); }
+.cchip .cc-chat { position: relative; }
+.cchip .cc-chat em {
+  position: absolute; right: -2px; top: -5px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: #ff5b5b; color: #fff; font: 700 10px/16px var(--fd); font-style: normal; text-align: center;
+}
+.cchip .cc-dot { width: 8px; height: 8px; border-radius: 50%; background: #888; }
+.cchip .cc-dot.on { background: #4cd964; box-shadow: 0 0 6px #4cd964; }
+.cchip .cc-dot.wait { background: #ffcc00; }
+.cchip .cc-dot.off { background: #ff5b5b; }
+.cchip .cc-pend, .cchip .cc-off {
+  align-self: center; padding: 2px 7px; font-size: 11px; color: #ffd166; background: rgba(10, 14, 18, 0.8);
+}
+
+/* 合作の画面（シートと同じ形） */
+.cpanel { z-index: 12; }
+.cpanel .sheet-title { display: flex; align-items: center; gap: 6px; }
+.cpanel .cp-back { font-size: 22px; line-height: 1; padding: 0 8px; }
+.cp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cp-grid button, .cpanel .btns button { min-height: 38px; font-size: 13px; }
+.cp-seg button { padding: 8px 6px; font-size: 13px; }
+.cp-seg button.on { background: var(--btn-on); outline: 1px solid var(--accent-hi); }
+.cpanel .list .item { flex-wrap: wrap; }
+.cp-lane { border-left: 4px solid var(--lc); }
+.cp-ck { display: flex; flex-direction: column; align-items: center; font-size: 10px; color: var(--sub); gap: 1px; }
+.cp-ck input { width: 18px; height: 18px; }
+.cp-cur { font-style: normal; font-size: 10px; padding: 2px 5px; background: var(--accent); color: #fff; }
+.cp-mem { align-items: flex-start; }
+.cp-mem .cp-mdot { margin-top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--mc); opacity: 0.35; flex: none; }
+.cp-mem .cp-mdot.on { opacity: 1; box-shadow: 0 0 6px var(--mc); }
+.cp-perm { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 12px; }
+.cp-perm label { display: flex; align-items: center; gap: 4px; }
+.cp-perm input { width: 16px; height: 16px; }
+.cp-link { display: flex; gap: 6px; }
+.cp-link input { flex: 1; min-width: 0; font-size: 12px; padding: 8px; background: var(--inp); color: #fff; border: 1px solid var(--line); }
+
+/* チャット（右から出る） */
+.cchat {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 88vw);
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #0a1628, #1d2023 140px);
+  border-left: 1px solid rgba(30, 136, 255, 0.55);
+  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.6);
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) 0;
+}
+.cchat .cc-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.cchat .cc-head button { background: none; border: 0; color: #fff; font-size: 22px; padding: 0 6px; }
+.cchat .cc-list { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; touch-action: pan-y; -webkit-user-select: text; user-select: text; }
+.cchat .cc-empty { color: var(--sub); font-size: 12px; text-align: center; }
+.cchat .cc-more { align-self: center; font-size: 12px; padding: 4px 10px; }
+.cm { background: rgba(255, 255, 255, 0.06); padding: 6px 8px; font-size: 13px; position: relative; }
+.cm.me { background: rgba(77, 159, 190, 0.18); }
+.cm b { font-size: 12px; margin-right: 6px; }
+.cm small { color: var(--sub); font-size: 10px; }
+.cm p { margin: 2px 0 0; white-space: pre-wrap; word-break: break-word; }
+.cm.sys { background: none; color: var(--sub); font-size: 11px; text-align: center; padding: 2px 4px; }
+.cm.sys small { margin-left: 6px; }
+.cm .cm-at { margin-top: 4px; font-size: 12px; padding: 3px 8px; background: rgba(255, 209, 102, 0.15); color: #ffd166; border: 0; }
+.cm-re { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cm-re button { font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.25); color: #fff; }
+.cm-re button.on { border-color: var(--accent-hi); background: rgba(77, 159, 190, 0.3); }
+.cm-re .cm-add { opacity: 0.6; }
+.cchat .cc-pick { position: absolute; left: 10px; right: 10px; display: flex; justify-content: space-around; padding: 6px; background: #0d1a2a; border: 1px solid var(--accent); z-index: 2; }
+.cchat .cc-pick button { font-size: 20px; background: none; border: 0; }
+.cchat .cc-in { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }
+.cchat .cc-in input { flex: 1; min-width: 0; padding: 8px; font-size: 16px; background: var(--inp); color: #fff; border: 1px solid var(--line); }
+.cchat .cc-in button { padding: 0 10px; }
+.cchat .cc-in button.on { background: rgba(255, 209, 102, 0.3); }
+
+/* ホームの合作 */
+.hr-share { font-style: normal; font-size: 0.85em; margin-left: 4px; }
