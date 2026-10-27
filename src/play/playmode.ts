@@ -112,7 +112,9 @@ export class PlayMode {
         this.renderer.pushHit(kind, side);
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
-        const r = this.game.hit(kind, this.time(at), pt?.ring);
+        const hitT = this.time(at);
+        this.pushTap(kind, side, hitT);
+        const r = this.game.hit(kind, hitT, pt?.ring);
         if (this.settings.showTiming) {
           const ms = (d: number) => `${d > 0 ? '+' : ''}${Math.round(d * 1000)}ms`;
           if (r.type === 'judged') this.renderer.pushTiming(ms(r.delta), r.delta > 0 ? '#ffb070' : '#8fd0ff');
@@ -150,9 +152,10 @@ export class PlayMode {
 
   /** オンライン対戦中なら、そのやりとり */
   private online: OnlineHooks | null = null;
-  /** オンライン: まだ送っていない判定 [音符の番号, 0 良 / 1 可 / 2 不可] */
-  private outbox: [number, number][] = [];
-  private sendQueued = false;
+  /** オンライン: まだ送っていない判定 [音符の番号, 0 良 / 1 可 / 2 不可, 判定した曲の時刻（ms）] */
+  private outbox: [number, number, number][] = [];
+  /** オンライン: まだ送っていない入力（何もない所を叩いたものも） [曲の時刻（ms）, 0 ドン左 / 1 ドン右 / 2 カッ左 / 3 カッ右] */
+  private tapbox: [number, number][] = [];
   private lastSent = 0;
   private lastSentKey = '';
 
@@ -172,6 +175,7 @@ export class PlayMode {
   async startOnline(course: Course, info: { title: string; course: string; level: number; genre?: string }, zeroPerf: number, hooks: OnlineHooks) {
     this.online = hooks;
     this.outbox = [];
+    this.tapbox = [];
     this.lastSent = 0;
     this.lastSentKey = '';
     this.calibrating = false;
@@ -183,15 +187,8 @@ export class PlayMode {
     game.onJudge = (e) => {
       this.renderer.pushJudge(e);
       const i = index.get(e.note);
-      if (i !== undefined) this.outbox.push([i, CODE[e.judge]]);
-      // 判定はすぐに送る（同じ瞬間の判定はまとめて 1 回で）
-      if (!this.sendQueued) {
-        this.sendQueued = true;
-        queueMicrotask(() => {
-          this.sendQueued = false;
-          if (this.online && this.game === game) this.sendOnline(game, true);
-        });
-      }
+      // 判定した時刻（叩いた時刻。見逃しは判定が終わった時刻）もいっしょに送る（相手の画面で、音符とずれずに出す）
+      if (i !== undefined) this.outbox.push([i, CODE[e.judge], Math.round((e.note.time + e.delta) * 1000)]);
     };
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
@@ -232,19 +229,29 @@ export class PlayMode {
     this.runLoop();
   }
 
-  /** オンライン: 自分の様子を 0.1 秒ごとに送る */
+  /**
+   * オンライン: 自分の様子を送る（毎フレーム呼ぶ）。判定・入力があれば 25ms ごと（1 秒に 40 回まで）にまとめて、
+   * 点数などの変化だけなら 50ms ごと。送りすぎてサーバーに捨てられないよう、1 回にまとめる
+   */
   private sendOnline(game: Game, force = false) {
     const o = this.online;
     if (!o) return;
     const t = performance.now();
-    // 判定があればすぐ、点数などの変化だけなら 50ms ごと
-    if (!force && !this.outbox.length && t - this.lastSent < 50) return;
+    const has = this.outbox.length > 0 || this.tapbox.length > 0;
+    if (!force && t - this.lastSent < (has ? 25 : 50)) return;
     const st = game.stats;
     const key = `${st.score}|${st.combo}|${Math.round(st.gauge)}`;
-    if (!this.outbox.length && key === this.lastSentKey && t - this.lastSent < 2000) return;
+    if (!force && !has && key === this.lastSentKey && t - this.lastSent < 2000) return;
     this.lastSent = t;
     this.lastSentKey = key;
-    o.send({ t: 'st', s: st.score, c: st.combo, g: Math.round(st.gauge * 10) / 10, j: this.outbox.splice(0, 200) });
+    o.send({ t: 'st', s: st.score, c: st.combo, g: Math.round(st.gauge * 10) / 10, j: this.outbox.splice(0, 300), h: this.tapbox.splice(0, 120) });
+  }
+
+  /** オンライン: 叩いた入力を送る準備（何もない所を叩いたものも） */
+  private pushTap(kind: 'don' | 'ka', side: 'L' | 'R', t: number) {
+    if (!this.online || this.spectating) return;
+    this.tapbox.push([Math.round(t * 1000), (kind === 'ka' ? 2 : 0) + (side === 'R' ? 1 : 0)]);
+    if (this.tapbox.length > 400) this.tapbox.shift();
   }
 
   /** オンライン: 途中でやめる */
@@ -821,6 +828,7 @@ export class PlayMode {
       const e = ev[this.autoIdx++];
       this.autoSide = this.autoSide === 'L' ? 'R' : 'L';
       this.renderer.pushHit(e.kind, this.autoSide);
+      this.pushTap(e.kind, this.autoSide, e.t);
       game.hit(e.kind, e.t);
     }
   }

@@ -94,6 +94,17 @@ export interface Opponent {
   course?: string;
   /** パネルに出す説明（無ければ「オンライン対戦」） */
   tag?: string;
+  /**
+   * オンライン: 届いた判定（曲の時刻つき）。その時刻になったら（delay 遅らせて描く）印・光・数を当てる。
+   * t が無い（前の版の相手）ときはすぐ当てる
+   */
+  queue?: { i: number; j: number; t?: number }[];
+  /** オンライン: 相手が叩いたすべての入力（何もない所を叩いたものも）。t = 曲の時刻、k = 0 ドン左 / 1 ドン右 / 2 カッ左 / 3 カッ右 */
+  taps?: { t: number; k: number }[];
+  /** 相手のレーンを何秒遅らせて描くか（届くまでの遅れ。判定・叩いた所が音符とずれないように） */
+  delay?: number;
+  /** 届いたときの遅れの記録（秒） */
+  lags?: number[];
   /** 自分と違う難易度で遊んでいるとき: その難易度の譜面（音符の位置はこれで求める） */
   lane?: { game: Game; course: Course; vis: number[]; bars: number[] };
 }
@@ -674,8 +685,7 @@ export class Renderer {
     this.drawTitle(info);
     if (this.spectate) {
       // 観戦: 自分のレーンは無く、参加している人のレーンを上から並べる
-      this.computeVis(game, bars, now, V.x1);
-      this.drawOpponents(V, game, bars, now, gogo, wall);
+      this.drawOpponents(V, game, course, now, wall);
       ctx.font = `900 40px ${FONT}`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
@@ -691,7 +701,7 @@ export class Renderer {
     }
     this.drawLane(V, game, bars, now, gogo, wall);
     if (this.opponents.length) {
-      this.drawOpponents(V, game, bars, now, gogo, wall);
+      this.drawOpponents(V, game, course, now, wall);
     }
     this.drawBursts(wall);
     this.drawPanel(st.score, st.combo, info, wall);
@@ -784,6 +794,17 @@ export class Renderer {
       ctx.fillStyle = f.kind === 'don' ? `rgba(170,90,40,${0.2 * a})` : `rgba(40,140,170,${0.2 * a})`;
       ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
     }
+    // 相手が叩いた入力（何もない所を叩いたものも）: その時刻になったら、自分と同じくレーンが色づき、判定枠が光る
+    if (opp?.taps) {
+      for (const f of opp.taps) {
+        const ms = (now - f.t) * 1000;
+        if (ms < 0 || ms > 170) continue;
+        const a = 1 - ms / 170;
+        const don = f.k < 2;
+        ctx.fillStyle = don ? `rgba(170,90,40,${0.2 * a})` : `rgba(40,140,170,${0.2 * a})`;
+        ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
+      }
+    }
 
     // 判定枠: 音符と同じ大きさの暗い円＋外側の細い輪。ゴーゴータイムは炎の玉になる
     if (gogo && !opp) this.drawFireball(wall);
@@ -802,13 +823,26 @@ export class Renderer {
       ctx.stroke();
     }
     if (!opp) this.drawJudgeGlow(wall);
+    else if (opp.taps) {
+      // 相手の叩いた所: 判定枠の輪が叩いた色に光る（面 = ドン、縁 = カッ）
+      for (const f of opp.taps) {
+        const ms = (now - f.t) * 1000;
+        if (ms < 0 || ms > 160) continue;
+        const a = 1 - ms / 160;
+        ctx.beginPath();
+        ctx.arc(this.jx, JY, f.k < 2 ? NR - 6 : 73, 0, Math.PI * 2);
+        ctx.lineWidth = f.k < 2 ? 10 : 8;
+        ctx.strokeStyle = f.k < 2 ? `rgba(255,90,40,${0.85 * a})` : `rgba(70,200,240,${0.9 * a})`;
+        ctx.stroke();
+      }
+    }
 
     // 小節線（相手のレーンは、自分のレーンで求めた位置を使い回す）
     ctx.fillStyle = 'rgba(255,255,255,0.75)';
     if (opp) {
       for (const x of this.visBars) if (x <= right) ctx.fillRect(x - 1.5, LANE_TOP, 3, LANE_BOTTOM - LANE_TOP);
     } else {
-      const share = this.opponents.length > 0;
+      const share = false;
       if (share) this.visBars.length = 0;
       const far = share ? right * 1.5 : right;
       for (const b of bars) {
@@ -831,7 +865,7 @@ export class Renderer {
     ctx.textBaseline = 'middle';
     const states = game.states;
     // オンライン対戦: 画面に入る音符の位置を一度だけ求めて、相手のレーンでも使う（相手の数だけ計算し直さない）
-    const share = !opp && this.opponents.length > 0;
+    const share = false;
     const vis = this.visNotes;
     if (share) vis.length = 0;
     // 自分は後ろの音符から描く（手前の音符が上になる）。相手は、自分が入れた順（同じく後ろから）に描く
@@ -898,12 +932,64 @@ export class Renderer {
    * オンライン対戦の相手（自分の段の下に、自分の段と同じ描き方で並べる）。
    * 左のパネル（2P・3P・4P の色）・レーン・判定の演出まで自分と同じ。2 人までは同じ大きさ、3 人のときは段ごと縮める
    */
-  private drawOpponents(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number) {
+  /**
+   * 相手のレーンを何秒遅らせて描くか。新しく届いた判定・入力の遅れ（今の時刻 − その時刻）を記録し、
+   * 遅れの大きい方（9 割が入る値）に合わせる。急に変えるとレーンが跳ねるので、少しずつ動かす
+   */
+  private oppDelay(o: Opponent, now: number) {
+    const lags = (o.lags ??= []);
+    const seen = (t: number | undefined) => {
+      if (t === undefined || !Number.isFinite(t)) return;
+      lags.push(Math.max(0, now - t));
+      if (lags.length > 40) lags.shift();
+    };
+    for (const q of o.queue ?? []) if (!(q as { s?: 1 }).s) { (q as { s?: 1 }).s = 1; seen(q.t); }
+    for (const tp of o.taps ?? []) if (!(tp as { s?: 1 }).s) { (tp as { s?: 1 }).s = 1; seen(tp.t); }
+    if (o.delay === undefined) o.delay = o.queue || o.taps ? 0.12 : 0;
+    if (lags.length >= 3) {
+      const sorted = [...lags].sort((a, b) => a - b);
+      const want = Math.min(0.4, Math.max(0.04, sorted[Math.floor(sorted.length * 0.9)] + 0.02));
+      // 遅れが大きくなったときは早めに、小さくなったときはゆっくり合わせる
+      o.delay += (want - o.delay) * (want > o.delay ? 0.2 : 0.01);
+    }
+    return o.delay;
+  }
+
+  /** その時刻（相手のレーンの時刻）までに届いている判定を当てる（音符を消す・数える・光らせる） */
+  private applyOpp(o: Opponent, tn: number, wall: number) {
+    const q = o.queue;
+    if (!q?.length) return;
+    let keep = 0;
+    for (let n = 0; n < q.length; n++) {
+      const e = q[n];
+      if (e.t !== undefined && e.t > tn) {
+        q[keep++] = e;
+        continue;
+      }
+      if (e.i < 0 || e.i >= o.marks.length || e.j < 0 || e.j > 2) continue;
+      if (!o.marks[e.i]) {
+        if (e.j === 0) o.good++;
+        else if (e.j === 1) o.ok++;
+        else o.bad++;
+      }
+      o.marks[e.i] = e.j + 1;
+      // 光・文字は、その判定の時刻から数える（まとめて届いても順に出る）
+      o.fx = { j: e.j + 1, t: wall - Math.max(0, e.t !== undefined ? tn - e.t : 0) * 1000, i: e.i };
+    }
+    q.length = keep;
+  }
+
+  private drawOpponents(V: Rect, game: Game, course: Course, now: number, wall: number) {
     const ctx = this.ctx;
     const opps = this.opponents;
+    for (const o of opps) {
+      const tn = now - this.oppDelay(o, now);
+      this.applyOpp(o, tn, wall);
+    }
     this.updateHud();
     for (let n = 0; n < opps.length; n++) {
       const o = opps[n];
+      const tn = now - (o.delay ?? 0);
       const { top, k, rowH } = this.rowGeom(n);
       ctx.save();
       // 段の中は自分の段と同じ座標で描く（上下にずらし、小さいときは左上を中心に縮める）
@@ -916,28 +1002,25 @@ export class Renderer {
       ctx.rect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, rowH);
       ctx.clip();
       // レーンの動かない部分は背景に、パネルは HUD に描いてある
-      const L = o.lane;
-      if (L) {
-        // 違う難易度: その難易度の音符・小節線の位置を求めて描く（流れ方もその難易度のもの）
-        const keep = { vn: this.visNotes, vb: this.visBars, bn: this.beatNow, sm: this.scrollMode };
-        this.visNotes = L.vis;
-        this.visBars = L.bars;
-        this.beatNow = L.course.beatPoints?.length ? beatAt(L.course.beatPoints, now) : null;
-        this.scrollMode = this.beatNow !== null ? L.course.scrollMode : undefined;
-        this.computeVis(L.game, L.course.bars, now, right);
-        const lgogo = L.course.gogo.some(([a, b]) => now >= a && now < b);
-        this.drawLane({ ...V, x1: right }, L.game, L.course.bars, now, lgogo, wall, o);
-        this.drawOppBurst(o, L.game, wall);
-        this.visNotes = keep.vn;
-        this.visBars = keep.vb;
-        this.beatNow = keep.bn;
-        this.scrollMode = keep.sm;
-      } else {
-        this.drawLane({ ...V, x1: right }, game, bars, now, gogo, wall, o);
-        this.drawOppBurst(o, game, wall);
-      }
+      // 相手の難易度の譜面（同じ難易度なら自分の譜面）を、遅らせた時刻で描く（音符・小節線・流れ方・判定枠の位置）
+      const L = o.lane ?? { game, course, vis: (o as { _vis?: number[] })._vis ??= [], bars: (o as { _bars?: number[] })._bars ??= [] };
+      const keep = { vn: this.visNotes, vb: this.visBars, bn: this.beatNow, sm: this.scrollMode, jx: this.jx };
+      this.visNotes = L.vis;
+      this.visBars = L.bars;
+      this.beatNow = L.course.beatPoints?.length ? beatAt(L.course.beatPoints, tn) : null;
+      this.scrollMode = this.beatNow !== null ? L.course.scrollMode : undefined;
+      this.jx = JX + jposAt(L.course.jpos, tn) * JPOS_SCALE;
+      this.computeVis(L.game, L.course.bars, tn, right);
+      const lgogo = L.course.gogo.some(([a, b]) => tn >= a && tn < b);
+      this.drawLane({ ...V, x1: right }, L.game, L.course.bars, tn, lgogo, wall, o);
+      this.drawOppBurst(o, L.game, wall);
       ctx.restore();
       this.drawOppJudgeText(o, wall);
+      this.visNotes = keep.vn;
+      this.visBars = keep.vb;
+      this.beatNow = keep.bn;
+      this.scrollMode = keep.sm;
+      this.jx = keep.jx;
       ctx.restore();
     }
   }

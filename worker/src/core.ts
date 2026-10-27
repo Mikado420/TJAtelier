@@ -120,7 +120,7 @@ export const MAX_AUDIO = 40 * 1024 * 1024;
 /** 譜面の上限（文字数） */
 const MAX_TJA = 2 * 1024 * 1024;
 /** 1 秒に受け付けるメッセージの数（音源のかけらは数えない） */
-const RATE = 60;
+const RATE = 120;
 /** スタートの合図から曲の 0 秒までの時間（ms）。そのあいだに各端末が準備する */
 const LEAD_MS = 4500;
 /** 全員が準備OK になってから始めるまで（ms） */
@@ -525,16 +525,24 @@ export class RoomCore {
         // プレイ中の様子（点数・コンボ・ゲージと、新しく判定した音符）を中継する
         if (this.phase !== 'play' || !p.inGame) return;
         {
-          const j = Array.isArray(m.j) ? (m.j.slice(0, 200) as unknown[]).filter((x): x is [number, number] => Array.isArray(x) && x.length === 2).map(([a, b]) => [Math.floor(Number(a)) || 0, Math.floor(Number(b)) || 0] as [number, number]) : [];
+          // 判定 [音符の番号, 判定, 判定した曲の時刻（ms・無いこともある）] と、叩いた入力 [曲の時刻（ms）, 種類]
+          const j = Array.isArray(m.j)
+            ? (m.j.slice(0, 300) as unknown[])
+              .filter((x): x is number[] => Array.isArray(x) && (x.length === 2 || x.length === 3))
+              .map((x) => (x.length === 3 ? [Math.floor(Number(x[0])) || 0, Math.floor(Number(x[1])) || 0, Math.round(Number(x[2])) || 0] : [Math.floor(Number(x[0])) || 0, Math.floor(Number(x[1])) || 0]))
+            : [];
+          const h = Array.isArray(m.h)
+            ? (m.h.slice(0, 120) as unknown[]).filter((x): x is number[] => Array.isArray(x) && x.length === 2).map((x) => [Math.round(Number(x[0])) || 0, Math.floor(Number(x[1])) & 3])
+            : [];
           const r = this.round.get(p.id);
           if (r) {
             r.s = Number(m.s) || 0;
             r.c = Number(m.c) || 0;
             r.g = Number(m.g) || 0;
-            if (r.j.length < 20000) r.j.push(...j);
+            if (r.j.length < 20000) r.j.push(...j.map((x) => [x[0], x[1]] as [number, number]));
           }
           p.lastSt = this.now();
-          this.broadcast({ t: 'st', p: p.id, s: r?.s ?? 0, c: r?.c ?? 0, g: r?.g ?? 0, j }, p);
+          this.broadcast({ t: 'st', p: p.id, s: r?.s ?? 0, c: r?.c ?? 0, g: r?.g ?? 0, j, h }, p);
         }
         break;
       case 'watch': {

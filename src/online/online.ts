@@ -652,15 +652,17 @@ export class OnlineScreen {
         o.score = Number(s.s) || 0;
         o.combo = Number(s.c) || 0;
         o.gauge = Number(s.g) || 0;
-        for (const [i, j] of s.j) {
+        // 判定・入力は、その時刻になったら画面に出す（renderer が相手のレーンを少し遅らせて描き、時刻どおりに当てる）
+        const q = (o.queue ??= []);
+        for (const e of s.j) {
+          const [i, j, tms] = e as [number, number, number?];
           if (!(i >= 0 && i < o.marks.length) || j < 0 || j > 2) continue;
-          if (!o.marks[i]) {
-            if (j === 0) o.good++;
-            else if (j === 1) o.ok++;
-            else o.bad++;
-          }
-          o.marks[i] = j + 1;
-          o.fx = { j: j + 1, t: performance.now(), i };
+          q.push({ i, j, t: typeof tms === 'number' ? tms / 1000 : undefined });
+        }
+        if (Array.isArray(s.h)) {
+          const taps = (o.taps ??= []);
+          for (const [tms, k] of s.h) if (Number.isFinite(tms) && k >= 0 && k <= 3) taps.push({ t: tms / 1000, k });
+          if (taps.length > 48) taps.splice(0, taps.length - 48);
         }
       },
       fin: (p) => { const o = this.opponents.get(p); if (o) o.status = 'fin'; },

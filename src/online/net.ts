@@ -67,7 +67,8 @@ export interface Roster {
 export interface ResultRow { p: string; name: string; course: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }
 export interface HistoryRow { title: string; course: string; level: number; at: number; list: ResultRow[] }
 /** プレイ中に届くほかの人の様子。j = 新しく判定した音符 [音符の番号, 0 良 / 1 可 / 2 不可] */
-export interface PlayState { p: string; s: number; c: number; g: number; j: [number, number][] }
+/** j: [音符の番号, 0 良 / 1 可 / 2 不可, 判定した曲の時刻（ms。前の版には無い）]、h: 叩いた入力 [曲の時刻（ms）, 0 ドン左 / 1 ドン右 / 2 カッ左 / 3 カッ右] */
+export interface PlayState { p: string; s: number; c: number; g: number; j: ([number, number] | [number, number, number])[]; h?: [number, number][] }
 
 export interface WatchPlayer { p: string; name: string; course: string; s: number; c: number; g: number; j: [number, number][]; status: '' | 'fin' | 'quit' | 'lost' }
 
