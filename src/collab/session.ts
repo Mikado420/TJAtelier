@@ -160,7 +160,7 @@ export class CollabSession {
   vers: VerInfo[] = [];
   /** サーバーの時計 − この端末の時計（ms） */
   clockOffset = 0;
-  private bestRtt = Infinity;
+  private clockSamples: { rtt: number; off: number }[] = [];
   private pending: Pending[] = [];
   private seq = 1;
   private ws: WebSocket | null = null;
@@ -281,11 +281,11 @@ export class CollabSession {
 
   /** サーバーの今の時刻（ms） */
   serverNow() {
-    return Date.now() + this.clockOffset;
+    return performance.now() + this.clockOffset;
   }
 
   private ping() {
-    this.raw({ t: 'ping', c: Date.now() });
+    this.raw({ t: 'ping', c: performance.now() });
   }
 
   private handle(m: Record<string, any>) {
@@ -312,7 +312,7 @@ export class CollabSession {
         if (m.room) this.on.room?.();
         this.ping();
         clearInterval(this.pingTimer);
-        this.pingTimer = window.setInterval(() => this.ping(), 20000);
+        this.pingTimer = window.setInterval(() => this.ping(), 5000);
         for (let i = 1; i <= 3; i++) setTimeout(() => this.ping(), i * 400);
         return;
       case 'lane':
@@ -344,11 +344,14 @@ export class CollabSession {
         return;
       }
       case 'pong': {
-        const rtt = Date.now() - Number(m.c);
-        if (rtt <= this.bestRtt * 1.5 || rtt < 150) {
-          this.bestRtt = Math.min(this.bestRtt, rtt);
-          this.clockOffset = Number(m.s) + rtt / 2 - Date.now();
-        }
+        // 往復の速かった 3 回の真ん中で合わせる（performance.now() 基準。Date.now() は飛ぶことがある）
+        const c = Number(m.c);
+        const rtt = performance.now() - c;
+        if (!Number.isFinite(rtt) || rtt < 0 || rtt > 5000) return;
+        this.clockSamples.push({ rtt, off: Number(m.s) - (c + rtt / 2) });
+        if (this.clockSamples.length > 16) this.clockSamples.shift();
+        const best = [...this.clockSamples].sort((a, b) => a.rtt - b.rtt).slice(0, 3).map((x) => x.off).sort((a, b) => a - b);
+        this.clockOffset = best[Math.floor(best.length / 2)];
         return;
       }
       case 'ack': {
@@ -533,7 +536,7 @@ export class CollabSession {
   private curAt = 0;
   private curTimer = 0;
   private curLast = '';
-  /** 自分の見ている場所を知らせる（1 秒に 4 回まで） */
+  /** 自分の見ている場所を知らせる（1 秒に 10 回まで） */
   cursor(l: string, tick: number, play: boolean) {
     const s = `${l}:${Math.round(tick)}:${play}`;
     if (s === this.curLast) return;
@@ -543,8 +546,8 @@ export class CollabSession {
       this.raw({ t: 'cur', l, tick: Math.round(tick), play });
     };
     clearTimeout(this.curTimer);
-    if (Date.now() - this.curAt > 250) send();
-    else this.curTimer = window.setTimeout(send, 250);
+    if (Date.now() - this.curAt > 100) send();
+    else this.curTimer = window.setTimeout(send, 100);
   }
 
   playAll(from: number, mode: string, lanes: string[]) {

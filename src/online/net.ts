@@ -124,9 +124,11 @@ export class OnlineClient {
   me = '';
   room = { id: '', title: '', locked: false };
   on: Partial<Handlers> = {};
-  /** サーバーの時計 − この端末の時計（ms） */
+  /** サーバーの時計 − この端末の performance.now()（ms）。Date.now() は飛ぶことがあるので使わない */
   private offset = 0;
-  private bestRtt = Infinity;
+  /** 時計合わせの記録（往復の時間とずれ）。往復が速かったものほど正確なので、速い 3 つの真ん中を使う */
+  private clockSamples: { rtt: number; off: number }[] = [];
+  private syncTimer = 0;
   /** 今のカウントダウンで時計を合わせたか */
   private cdSynced = false;
   private pingTimer = 0;
@@ -215,6 +217,7 @@ export class OnlineClient {
   close() {
     this.closedByMe = true;
     clearInterval(this.pingTimer);
+    clearInterval(this.syncTimer);
     try { this.ws?.close(1000); } catch { /* 閉じ済み */ }
     this.ws = null;
   }
@@ -229,43 +232,49 @@ export class OnlineClient {
 
   /** サーバーの今の時刻（ms） */
   serverNow() {
-    return Date.now() + this.offset;
+    return performance.now() + this.offset;
   }
 
   /** サーバーの時刻 t（ms）が、この端末の performance.now() でいつか */
   toPerf(t: number) {
-    return performance.now() + (t - this.serverNow());
+    return t - this.offset;
+  }
+
+  /** 今の往復の時間（ms。いちばん速かったもの） */
+  get rtt() {
+    return this.clockSamples.length ? Math.min(...this.clockSamples.map((x) => x.rtt)) : 0;
   }
 
   private startPing() {
+    this.clockSamples = [];
     this.syncClock();
-    // つながっているかの確認だけ（サーバーは眠ったまま返すので、動いている時間に数えられない）
     clearInterval(this.pingTimer);
-    this.pingTimer = window.setInterval(() => { if (this.connected) this.ws!.send('ping'); }, 25000);
+    // 4 秒ごとに時計を測り直す（つながっているかの確認も兼ねる）
+    this.pingTimer = window.setInterval(() => { if (this.connected) this.send({ t: 'ping', c: performance.now() }); }, 4000);
   }
 
-  /** 時計を合わせる（入ったときと、次の曲が決まったとき。細かく何度か測る） */
+  /** 時計を細かく合わせる（入ったとき・次の曲が決まったとき・カウントダウンが始まったとき） */
   private syncClock() {
-    // 測るたびに、その回でいちばん速かった返事を使う（通信の具合が変わっても合わせ直せるように）
-    this.bestRtt = Infinity;
+    clearInterval(this.syncTimer);
     let n = 0;
-    const fast = setInterval(() => {
+    this.syncTimer = window.setInterval(() => {
       this.send({ t: 'ping', c: performance.now() });
-      if (++n >= 6) clearInterval(fast);
-    }, 150);
+      if (++n >= 10) clearInterval(this.syncTimer);
+    }, 80);
   }
 
   private onMessage(m: Record<string, unknown>) {
     switch (m.t) {
       case 'pong': {
         const c = Number(m.c);
-        const rtt = performance.now() - c;
-        // 行きと帰りが同じ時間だとして、返事の真ん中の時刻のサーバーの時計で合わせる（いちばん速かった返事を使う）
-        if (rtt <= this.bestRtt * 1.2 || rtt < 60) {
-          if (rtt < this.bestRtt) this.bestRtt = rtt;
-          const local = Date.now() - rtt / 2;
-          this.offset = Number(m.s) - local;
-        }
+        const now = performance.now();
+        const rtt = now - c;
+        if (!Number.isFinite(rtt) || rtt < 0 || rtt > 5000) break;
+        // 行きと帰りが同じ時間だとして、送ってから返事までの真ん中の時刻にサーバーの時計が m.s だった
+        this.clockSamples.push({ rtt, off: Number(m.s) - (c + rtt / 2) });
+        if (this.clockSamples.length > 16) this.clockSamples.shift();
+        const best = [...this.clockSamples].sort((a, b) => a.rtt - b.rtt).slice(0, 3).map((x) => x.off).sort((a, b) => a - b);
+        this.offset = best[Math.floor(best.length / 2)];
         break;
       }
       case 'roster':

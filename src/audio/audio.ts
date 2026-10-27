@@ -160,6 +160,11 @@ export class AudioEngine {
    * 曲の songTime 秒の位置から rate 倍速で再生（songTime が負なら、その分待ってから曲が始まる）。
    * buf を渡すと、読み込んだ曲の代わりにその音を鳴らす（音源の切り貼りの確認用）
    */
+  /** 音を出せる状態にしておく（始める時刻を決める前に。待った時間のぶん遅れて始まらないように） */
+  async resume() {
+    if (this.ctx.state !== 'running') await this.ctx.resume();
+  }
+
   async startAt(songTime: number, rate = 1, buf?: AudioBuffer) {
     await this.ctx.resume();
     this.stop();

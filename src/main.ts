@@ -2252,7 +2252,8 @@ const home = new Home({
   },
 });
 
-(window as unknown as { __collab?: Collab }).__collab = collab;
+(window as unknown as { __collab?: Collab; __play?: PlayMode }).__collab = collab;
+(window as unknown as { __play?: PlayMode }).__play = play;
 
 /** 曲からオンライン作業の部屋を作る（全部の難易度が本譜面になり、音源もサーバーに置く） */
 async function shareSong(id: string, room: RoomSettings) {

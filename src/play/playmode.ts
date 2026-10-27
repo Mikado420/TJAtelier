@@ -211,6 +211,8 @@ export class PlayMode {
     this.renderer.speed = this.settings.speed;
     this.active = true;
     postNative({ type: 'play', active: true });
+    // 先に音を出せる状態にしてから位置を決める（待った時間のぶん、ほかの人より遅れて始まらないように）
+    await this.audio.resume();
     // 音が出るまでの 30ms を足して、今の再生位置から始める
     const pos = (performance.now() + 30 - zeroPerf) / 1000;
     await this.audio.startAt(pos, 1);
@@ -238,7 +240,7 @@ export class PlayMode {
     if (!o) return;
     const t = performance.now();
     const has = this.outbox.length > 0 || this.tapbox.length > 0;
-    if (!force && t - this.lastSent < (has ? 25 : 50)) return;
+    if (!force && t - this.lastSent < (has ? 15 : 50)) return;
     const st = game.stats;
     const key = `${st.score}|${st.combo}|${Math.round(st.gauge)}`;
     if (!force && !has && key === this.lastSentKey && t - this.lastSent < 2000) return;
