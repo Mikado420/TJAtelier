@@ -4,7 +4,7 @@ import { saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
-import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent } from './chart/model';
+import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
@@ -1050,6 +1050,19 @@ const KEY_TOOLS: Record<string, Tool> = {
   Digit5: 'roll', Digit6: 'bigRoll', Digit7: 'balloon',
 };
 
+/** Alt を押してから、ほかのキーを押していない（離したら大音符にする） */
+let altSolo = false;
+window.addEventListener('keydown', (e) => { if (e.code !== 'AltLeft' && e.code !== 'AltRight') altSolo = false; }, true);
+window.addEventListener('keyup', (e) => {
+  if (e.code !== 'AltLeft' && e.code !== 'AltRight') return;
+  e.preventDefault();
+  const solo = altSolo;
+  altSolo = false;
+  const t = e.target;
+  if (!solo || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
+  if (play.isActive || !$('sheet').classList.contains('hidden') || !$('home').classList.contains('hidden')) return;
+  toggleBigAtPos();
+});
 window.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) return;
@@ -1068,6 +1081,16 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && ed.sel) { selAction('clear'); return; }
   if (mod) return;
   if (e.code === 'Space') { e.preventDefault(); playing ? stopPlayback() : void startPlayback(); return; }
+  // 置く: 面 F・J（ドン）、縁 D・K（カッ）、R 連打（もう一度で終点）、E 風船。Alt を押しながらで大音符。Tab で範囲選択（始点 → 終点）
+  const big = e.altKey;
+  const PLACE: Record<string, Tool> = {
+    KeyF: big ? 'bigDon' : 'don', KeyJ: big ? 'bigDon' : 'don',
+    KeyD: big ? 'bigKa' : 'ka', KeyK: big ? 'bigKa' : 'ka',
+    KeyR: big ? 'bigRoll' : 'roll', KeyE: 'balloon', Tab: 'select',
+  };
+  if (PLACE[e.code] && !e.repeat) { e.preventDefault(); keyPlace(PLACE[e.code]); return; }
+  // Alt だけ（離したとき）: 判定枠の位置の音符を大音符に（大音符なら元に）。連打も
+  if (e.code === 'AltLeft' || e.code === 'AltRight') { e.preventDefault(); if (!e.repeat) altSolo = true; return; }
   if (KEY_TOOLS[e.code]) { setTool(KEY_TOOLS[e.code]); return; }
   const move = (ticks: number) => {
     e.preventDefault();
@@ -1075,14 +1098,42 @@ window.addEventListener('keydown', (e) => {
     view.pos = Math.max(ed.minPos, Math.round(ed.snapView(view.pos) + ticks));
     view.invalidate();
   };
-  if (e.code === 'ArrowRight' || e.code === 'ArrowUp') move(ed.step);
-  else if (e.code === 'ArrowLeft' || e.code === 'ArrowDown') move(-ed.step);
+  if (e.code === 'ArrowRight') move(ed.step);
+  else if (e.code === 'ArrowLeft') move(-ed.step);
+  // 上下の矢印: 間隔（グリッド）を変える
+  else if (e.code === 'ArrowUp') { e.preventDefault(); stepDivisor(1); }
+  else if (e.code === 'ArrowDown') { e.preventDefault(); stepDivisor(-1); }
   else if (e.code === 'PageUp') move(ed.measureOf(view.pos).length);
   else if (e.code === 'PageDown') move(-ed.measureOf(Math.max(0, view.pos - 1)).length);
   else if (e.code === 'Home') move(-view.pos);
   else if (e.code === 'Equal') view.setZoom(view.zoom * 1.25);
   else if (e.code === 'Minus') view.setZoom(view.zoom / 1.25);
 });
+
+/** キーで置く位置（再生中は今の再生位置、止まっているときは判定枠の位置。グリッドに寄せる） */
+function keyTick() {
+  const raw = playing ? ed.timing.timeToTick(audio.now()) : view.pos;
+  return Math.max(0, ed.snap(raw));
+}
+
+/** キーで音符を置く・消す（タップと同じ。連打・風船・範囲選択は 2 回で始点と終点） */
+function keyPlace(tool: Tool) {
+  if (ed.tool !== tool) setTool(tool);
+  view.onTap(keyTick(), 1);
+  view.invalidate();
+}
+
+/** 判定枠の位置の音符を大音符にする（大音符なら元に戻す） */
+function toggleBigAtPos() {
+  const tick = keyTick();
+  const n = ed.course.notes.find((x) => x.tick === tick) ?? ed.course.notes.find((x) => x.endTick !== undefined && x.tick <= tick && tick <= x.endTick);
+  if (!n) return;
+  const SWAP: Partial<Record<string, ENote['type']>> = { don: 'bigDon', bigDon: 'don', ka: 'bigKa', bigKa: 'ka', roll: 'bigRoll', bigRoll: 'roll' };
+  const to = SWAP[n.type];
+  if (!to) return;
+  if (collab.active && !collab.canTap(n.tick)) return;
+  ed.mutate(() => { n.type = to; });
+}
 
 // ---------- シート ----------
 

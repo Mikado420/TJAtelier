@@ -512,10 +512,12 @@ export class EditorView {
       'wheel',
       (e) => {
         e.preventDefault();
-        if (e.ctrlKey || e.metaKey) {
+        // マウスのホイール（縦）は拡大・縮小。横のスクロール（トラックパッドの横・Shift ＋ ホイール）で移動
+        const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+        if (e.ctrlKey || e.metaKey || (!horiz && !e.shiftKey)) {
           this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.002));
-        } else if (e.shiftKey && this.L.sub) {
-          // Shift + ホイールで段を切り替える
+        } else if (e.shiftKey && !horiz && this.L.sub && e.altKey) {
+          // Shift + Alt + ホイールで段を切り替える
           const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
           if (d) this.settleRow(Math.min(this.L.sub, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
         } else {
