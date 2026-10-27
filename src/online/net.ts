@@ -236,14 +236,19 @@ export class OnlineClient {
 
   private startPing() {
     this.bestRtt = Infinity;
+    this.syncClock();
+    // つながっているかの確認だけ（サーバーは眠ったまま返すので、動いている時間に数えられない）
+    clearInterval(this.pingTimer);
+    this.pingTimer = window.setInterval(() => { if (this.connected) this.ws!.send('ping'); }, 25000);
+  }
+
+  /** 時計を合わせる（入ったときと、次の曲が決まったとき。細かく何度か測る） */
+  private syncClock() {
     let n = 0;
-    const ping = () => this.send({ t: 'ping', c: performance.now() });
-    // 最初は細かく何度か測って、あとはときどき
     const fast = setInterval(() => {
-      ping();
-      if (++n >= 8) clearInterval(fast);
+      this.send({ t: 'ping', c: performance.now() });
+      if (++n >= 6) clearInterval(fast);
     }, 150);
-    this.pingTimer = window.setInterval(ping, 4000);
   }
 
   private onMessage(m: Record<string, unknown>) {
@@ -261,6 +266,7 @@ export class OnlineClient {
       }
       case 'roster': this.on.roster?.(m as unknown as Roster); break;
       case 'next': {
+        this.syncClock();
         this.meta = m.meta as SongMeta;
         this.buf = null;
         this.got = 0;

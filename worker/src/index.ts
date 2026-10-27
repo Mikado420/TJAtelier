@@ -6,7 +6,7 @@
  * GET  /ws/:id?name=&create=1&title=&pass=   部屋に入る（WebSocket）
  */
 import { DurableObject } from 'cloudflare:workers';
-import { LobbyCore, newRoomId, RoomCore, type Conn, type LobbyInfo } from './core';
+import { LOBBY_STALE_MS, LobbyCore, newRoomId, RoomCore, type Conn, type LobbyInfo, type RoomState } from './core';
 
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
@@ -64,36 +64,125 @@ export class Lobby extends DurableObject<Env> {
   }
 }
 
-/** 1 つの部屋 */
+/** 譜面の文字を保存するときの 1 かけらの長さ（1 つの値の上限 2MB に収める） */
+const TJA_PART = 500_000;
+
+/**
+ * 1 つの部屋。
+ * WebSocket は「眠れる」受け方（acceptWebSocket）にする。だれも何も送らない間はサーバーが眠り、
+ * 動いている時間（無料の枠の上限）に数えられない。つながっているかの確認（'ping'）は眠ったまま自動で返す。
+ * 眠ると中身が消えるので、部屋の様子は変わるたびに保存し、起きたときに戻す
+ */
 export class Room extends DurableObject<Env> {
   private core: RoomCore | null = null;
-  private beat: ReturnType<typeof setInterval> | null = null;
-  private last: LobbyInfo | null = null;
+  private roomId = '';
+  private conns = new WeakMap<WebSocket, Conn>();
+  /** 保存してある譜面（予約の番号） */
+  private savedTja = new Set<string>();
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+    ctx.blockConcurrencyWhile(() => this.load());
+  }
+
+  private connOf(ws: WebSocket): Conn {
+    let c = this.conns.get(ws);
+    if (!c) {
+      c = {
+        send: (d) => ws.send(d),
+        close: (code, reason) => {
+          try { ws.close(code, reason); } catch { /* 閉じ済み */ }
+        },
+      };
+      this.conns.set(ws, c);
+    }
+    return c;
+  }
+
+  private makeCore(id: string) {
+    this.roomId = id;
+    const core = new RoomCore(id, (info) => {
+      const lobby = lobbyStub(this.env);
+      this.ctx.waitUntil(lobby.update(info ?? { id, gone: true }).catch(() => {}));
+      if (!info) this.ctx.waitUntil(this.ctx.storage.deleteAlarm());
+    });
+    core.onChange = () => this.save();
+    this.core = core;
+    return core;
+  }
+
+  /** 眠りから起きたとき: 保存した様子と、つながったままの WebSocket から部屋を戻す */
+  private async load() {
+    const id = await this.ctx.storage.get<string>('id');
+    const st = await this.ctx.storage.get<RoomState>('state');
+    if (!id || !st) return;
+    const core = this.makeCore(id);
+    const parts = await this.ctx.storage.list<string>({ prefix: 'tja:' });
+    const tja = new Map<string, string[]>();
+    for (const [k, v] of parts) {
+      const [, qid, n] = k.split(':');
+      const a = tja.get(qid) ?? [];
+      a[Number(n)] = v;
+      tja.set(qid, a);
+      this.savedTja.add(qid);
+    }
+    const conns = new Map<string, Conn>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const a = ws.deserializeAttachment() as { p?: string } | null;
+      if (a?.p) conns.set(a.p, this.connOf(ws));
+    }
+    core.restore(st, (qid) => (tja.get(qid) ?? []).join(''), conns);
+    if (core.empty) {
+      // だれもつながっていない（サーバーが入れ替わったなど）: 部屋を片付けて一覧から消す
+      await this.clear();
+      this.ctx.waitUntil(lobbyStub(this.env).update({ id, gone: true }).catch(() => {}));
+    }
+  }
+
+  private async clear() {
+    await this.ctx.storage.deleteAll();
+    this.savedTja.clear();
+  }
+
+  /** 部屋の様子を保存する（譜面は予約ごとに 1 回だけ） */
+  private save() {
+    const core = this.core;
+    if (!core) return;
+    if (core.empty) {
+      this.ctx.waitUntil(this.clear());
+      return;
+    }
+    const { state, items } = core.snapshot();
+    const put: Record<string, unknown> = { id: this.roomId, state };
+    const keep = new Set<string>();
+    for (const it of items) {
+      keep.add(it.qid);
+      if (this.savedTja.has(it.qid)) continue;
+      this.savedTja.add(it.qid);
+      const t = it.meta.tja;
+      for (let i = 0, n = 0; i < Math.max(1, t.length); i += TJA_PART, n++) put[`tja:${it.qid}:${n}`] = t.slice(i, i + TJA_PART);
+    }
+    const del: string[] = [];
+    for (const qid of this.savedTja) {
+      if (keep.has(qid)) continue;
+      this.savedTja.delete(qid);
+      for (let n = 0; n < 5; n++) del.push(`tja:${qid}:${n}`);
+    }
+    // 1 回に書ける数に分けて書く
+    const entries = Object.entries(put);
+    for (let i = 0; i < entries.length; i += 100) this.ctx.waitUntil(this.ctx.storage.put(Object.fromEntries(entries.slice(i, i + 100))));
+    for (let i = 0; i < del.length; i += 100) this.ctx.waitUntil(this.ctx.storage.delete(del.slice(i, i + 100)));
+  }
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const id = url.pathname.split('/').pop()!;
-    if (!this.core) {
-      this.core = new RoomCore(id, (info) => {
-        this.last = info;
-        const lobby = lobbyStub(this.env);
-        this.ctx.waitUntil(lobby.update(info ?? { id, gone: true }).catch(() => {}));
-        if (!info && this.beat) {
-          clearInterval(this.beat);
-          this.beat = null;
-        }
-      });
-    }
-    const core = this.core;
+    const core = this.core ?? this.makeCore(id);
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    server.accept();
-    const conn: Conn = {
-      send: (d) => server.send(d),
-      close: (code, reason) => {
-        try { server.close(code, reason); } catch { /* 閉じ済み */ }
-      },
-    };
+    this.ctx.acceptWebSocket(server);
+    const conn = this.connOf(server);
     const q = url.searchParams;
     const p = core.join(conn, { name: q.get('name') ?? '', create: q.get('create') === '1', title: q.get('title') ?? '', pass: q.get('pass') ?? '', cid: q.get('cid') ?? '' });
     if (typeof p === 'string') {
@@ -101,20 +190,37 @@ export class Room extends DurableObject<Env> {
       server.close(4003, 'denied');
       return new Response(null, { status: 101, webSocket: client });
     }
-    server.addEventListener('message', (e) => core.message(p, e.data as string | ArrayBuffer));
-    // 切れても少しのあいだ席を残す（入り直したら同じ席に戻る）
-    const bye = () => core.disconnect(p, conn);
-    server.addEventListener('close', bye);
-    server.addEventListener('error', bye);
-    // 一覧から消えないよう、人がいるあいだは 2 分ごとに知らせ直す
-    if (!this.beat) {
-      this.beat = setInterval(() => {
-        if (this.last && !core.empty) {
-          this.last = { ...this.last, updatedAt: Date.now() };
-          this.ctx.waitUntil(lobbyStub(this.env).update(this.last).catch(() => {}));
-        }
-      }, 120000);
-    }
+    server.serializeAttachment({ p: p.id });
+    // 一覧から消えないよう、人がいるあいだはときどき知らせ直す（目覚ましで起きる。ずっと起きてはいない）
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + LOBBY_STALE_MS / 2);
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private playerOf(ws: WebSocket) {
+    const a = ws.deserializeAttachment() as { p?: string } | null;
+    return a?.p ? this.core?.player(a.p) : undefined;
+  }
+
+  async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer) {
+    const p = this.playerOf(ws);
+    if (p && this.core) this.core.message(p, data);
+  }
+
+  async webSocketClose(ws: WebSocket, code: number) {
+    // 切れても少しのあいだ席を残す（入り直したら同じ席に戻る）
+    const p = this.playerOf(ws);
+    if (p && this.core) this.core.disconnect(p, this.connOf(ws));
+    try { ws.close(code === 1005 || code === 1006 ? 1000 : code, 'bye'); } catch { /* 閉じ済み */ }
+  }
+
+  async webSocketError(ws: WebSocket) {
+    await this.webSocketClose(ws, 1000);
+  }
+
+  async alarm() {
+    const core = this.core;
+    if (!core || core.empty) return;
+    core.heartbeat();
+    await this.ctx.storage.setAlarm(Date.now() + LOBBY_STALE_MS / 2);
   }
 }

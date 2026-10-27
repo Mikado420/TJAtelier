@@ -166,7 +166,7 @@ export class OnlineScreen {
     clearInterval(this.poll);
     this.poll = window.setInterval(() => {
       if (this.view === 'lobby' && this.isOpen && !document.hidden) void this.refresh();
-    }, 5000);
+    }, 15000);
   }
 
   private async refresh() {

@@ -48,20 +48,45 @@ jobs:
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
           sleep 5
           echo "::notice title=GET /rooms::$(curl -s "$URL/rooms")"
-          # 部屋を作って、もう 1 人が入れるかを確かめる
+          # 部屋を作って、もう 1 人が入り、予約できるか。'ping' に眠ったまま 'pong' が返るか。
+          # 30 秒だれも送らずに（サーバーが眠ってから）チャットを送り、部屋の様子が戻っているかを確かめる
           node -e '
             const base = process.argv[1].replace(/^http/, "ws");
             const id = "T" + Math.random().toString(36).slice(2, 7).toUpperCase().replace(/[^A-Z0-9]/g, "X");
-            const a = new WebSocket(`${base}/ws/${id}?name=check&create=1&title=check`);
             const out = [];
-            const done = (m) => { console.log("::notice title=WebSocket::" + m); process.exit(0); };
-            setTimeout(() => done("timeout " + out.join(" ")), 10000);
+            const done = (ok, m) => { console.log((ok ? "::notice" : "::error") + " title=WebSocket::" + m + " / " + out.join(" ")); process.exit(ok ? 0 : 1); };
+            setTimeout(() => done(false, "timeout"), 60000);
+            const a = new WebSocket(`${base}/ws/${id}?name=check&create=1&title=check&cid=ca`);
+            let b = null;
+            let pong = false;
+            let reserved = false;
+            let slept = false;
+            const meta = { title: "check", subtitle: "", course: "Oni", level: 1, tja: "x".repeat(600000), size: 0, audioName: "", hash: "", lib: "", vname: "", vsize: 0, vhash: "", voff: 0, vfromAudio: false };
             a.onmessage = (e) => {
+              if (e.data === "pong") { pong = true; out.push("A:pong"); return; }
               const m = JSON.parse(e.data); out.push("A:" + m.t);
               if (m.t === "hello") {
-                const b = new WebSocket(`${base}/ws/${id}?name=check2`);
-                b.onmessage = (e2) => { const n = JSON.parse(e2.data); out.push("B:" + n.t); if (n.t === "roster" && n.players.length === 2) done("ok " + out.join(" ")); };
+                b = new WebSocket(`${base}/ws/${id}?name=check2&cid=cb`);
+                b.onmessage = (e2) => {
+                  if (e2.data === "pong") return;
+                  const n = JSON.parse(e2.data); out.push("B:" + n.t);
+                  if (n.t === "roster" && n.players.length === 2 && !reserved) {
+                    reserved = true;
+                    a.send("ping");
+                    b.send(JSON.stringify({ t: "reserve", meta }));
+                  }
+                  if (n.t === "next") setTimeout(() => b.send(JSON.stringify({ t: "chat", x: "after-sleep" })), 30000);
+                };
+              }
+              if (m.t === "chat" && m.x === "after-sleep") {
+                if (!pong) return done(false, "no pong");
+                slept = true;
+                a.send(JSON.stringify({ t: "ok", on: true }));
+              }
+              if (slept && m.t === "roster") {
+                if (m.players.length === 2 && m.song && m.song.title === "check") done(true, "ok");
+                else done(false, "state lost " + JSON.stringify(m.song));
               }
             };
-            a.onerror = () => done("error " + out.join(" "));
+            a.onerror = () => done(false, "error");
           ' "$URL"

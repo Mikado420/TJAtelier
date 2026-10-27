@@ -114,4 +114,49 @@ describe('部屋（予約・音源を配る・準備OK・入り直し）', () =>
     expect(ca.bin.map((b) => b.byteLength)).toEqual([10, 20]);
     expect(last(ca, 'vend')?.key).toBe(key);
   });
+
+  it('眠る前に保存した様子から、予約・今の曲・チャット・通算成績を戻せる（譜面の文字は別に保存）', () => {
+    const { ca, cb, A, B, send, room } = setup();
+    send(A, { t: 'reserve', meta: meta('曲1', 10, 'h1') });
+    send(B, { t: 'reserve', meta: meta('曲2', 10, 'h2') });
+    send(A, { t: 'chat', x: 'こんにちは' });
+    const { state, items } = room.snapshot();
+    expect(JSON.stringify(state)).not.toContain('"tja":"x"');
+    const tja = new Map(items.map((it) => [it.qid, it.meta.tja]));
+    const back = new RoomCore('R', () => {});
+    back.restore(JSON.parse(JSON.stringify(state)), (q) => tja.get(q) ?? '', new Map([[A.id, ca], [B.id, cb]]));
+    const s2 = back.snapshot();
+    expect(s2.state.queue.map((q) => q.meta.title)).toEqual(['曲2']);
+    expect(s2.state.current?.item.meta.title).toBe('曲1');
+    expect(s2.state.chatLog[0].x).toBe('こんにちは');
+    expect(s2.items.every((it) => it.meta.tja === 'x')).toBe(true);
+    // 音源のかけらは残っていないので、必要な人がいれば予約した人にもう一度送ってもらう
+    const key = s2.state.current!.key;
+    back.message(back.player(B.id)!, JSON.stringify({ t: 'need', key }));
+    expect(last(ca, 'upload')?.key).toBe(key);
+  });
+
+  it('つながりが残っていない人は、戻したときに抜けたことにする', () => {
+    const { ca, A, room } = setup();
+    const back = new RoomCore('R', () => {});
+    back.restore(room.snapshot().state, () => '', new Map([[A.id, ca]]));
+    expect(back.player(A.id)).toBeTruthy();
+    expect(back.snapshot().state.players.length).toBe(1);
+  });
+
+  it('ロビーへは、部屋の様子が変わったときだけ知らせる', () => {
+    let n = 0;
+    const room = new RoomCore('R', () => { n++; });
+    const c = conn();
+    const A = room.join(c, { name: 'A', create: true, title: '', pass: '', cid: 'a' });
+    if (typeof A === 'string') throw new Error('join');
+    const before = n;
+    room.message(A, JSON.stringify({ t: 'ok', on: true }));
+    room.message(A, JSON.stringify({ t: 'ok', on: false }));
+    expect(n).toBe(before);
+    room.message(A, JSON.stringify({ t: 'reserve', meta: meta('曲1') }));
+    expect(n).toBe(before + 1);
+    room.heartbeat();
+    expect(n).toBe(before + 2);
+  });
 });

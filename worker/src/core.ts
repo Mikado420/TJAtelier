@@ -8,6 +8,9 @@
  * - プレイ中は、それぞれの判定・点数をほかの人へ中継する
  * - 全員が終わったら（または時間切れで）順位を配り、部屋の通算成績に足す
  * - 通信が切れても 20 秒は席を残し、同じ端末（cid）が入り直したら元の席に戻す
+ *
+ * Cloudflare では、だれも何も送らない間はサーバーを眠らせる（動いている時間だけ数えられるので）。
+ * 眠ると中身が消えるため、様子が変わるたびに snapshot() を保存し、起きたら restore() で戻す。
  */
 
 export interface Conn {
@@ -80,7 +83,25 @@ export interface SongMeta {
   vfromAudio: boolean;
 }
 
-interface QItem { qid: string; by: string; byName: string; meta: Omit<SongMeta, 'key'> }
+export interface QItem { qid: string; by: string; byName: string; meta: Omit<SongMeta, 'key'> }
+
+/** 保存する部屋の様子 */
+export interface RoomState {
+  players: { id: string; cid: string; name: string; ready: boolean; ok: boolean; course: string }[];
+  hostId: string;
+  title: string;
+  pass: string;
+  settings: RoomSettings;
+  queue: QItem[];
+  current: { item: QItem; key: string } | null;
+  last: QItem | null;
+  lastBy: string;
+  seq: number;
+  qseq: number;
+  chatLog: { p: string; name: string; x: string; at: number }[];
+  standings: [string, { name: string; total: number; wins: number; plays: number }][];
+  history: { title: string; course: string; level: number; at: number; list: (Result & { p: string })[] }[];
+}
 
 export interface RoomSettings {
   /** 曲を選べる人: 部屋主だけ・全員・全員（順番に）・全員（ランダム） */
@@ -91,7 +112,7 @@ export interface RoomSettings {
   auto: boolean;
 }
 
-interface Result { name: string; course: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }
+export interface Result { name: string; course: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }
 
 export const MAX_PLAYERS = 4;
 /** 音源の上限（バイト） */
@@ -106,6 +127,8 @@ const LEAD_MS = 4500;
 const COUNTDOWN_MS = 3000;
 /** 通信が切れてから席を消すまで（ms） */
 const AWAY_MS = 20000;
+/** ロビー: この間知らせが無い部屋は一覧から消す。部屋はその半分ごとに知らせ直す */
+export const LOBBY_STALE_MS = 30 * 60 * 1000;
 /** 背景の動画の上限（バイト。サーバーにはためずに、持っていない人へそのまま流す） */
 export const MAX_VIDEO = 300 * 1024 * 1024;
 /** 予約できる曲の数（部屋全体） */
@@ -151,6 +174,10 @@ export class RoomCore {
   private standings = new Map<string, { name: string; total: number; wins: number; plays: number }>();
   /** 遊んだ曲と順位（新しい 20 曲） */
   private history: { title: string; course: string; level: number; at: number; list: (Result & { p: string })[] }[] = [];
+  /** 最後にロビーへ知らせた内容（変わったときだけ知らせる） */
+  private lobbySig = '';
+  /** 部屋の様子が変わった（保存する合図） */
+  onChange: () => void = () => {};
 
   constructor(
     readonly id: string,
@@ -161,6 +188,72 @@ export class RoomCore {
 
   get empty() {
     return this.players.size === 0;
+  }
+
+  player(id: string) {
+    return this.players.get(id);
+  }
+
+  /** ロビーに知らせ直す（しばらく知らせが無い部屋は一覧から消えるので、ときどき） */
+  heartbeat() {
+    this.lobbySig = '';
+    this.lobby();
+  }
+
+  /** 保存する中身（譜面の文字は大きいので items で別に渡す。音源のかけら・プレイ中の様子は入れない） */
+  snapshot(): { state: RoomState; items: QItem[] } {
+    const strip = (x: QItem) => ({ ...x, meta: { ...x.meta, tja: '' } });
+    const cur = this.current;
+    const items = [...this.queue];
+    if (cur) items.push(cur.item);
+    if (this.last) items.push(this.last);
+    return {
+      items,
+      state: {
+        players: [...this.players.values()].map((o) => ({ id: o.id, cid: o.cid, name: o.name, ready: o.ready, ok: o.ok, course: o.course })),
+        hostId: this.hostId,
+        title: this.title,
+        pass: this.pass,
+        settings: this.settings,
+        queue: this.queue.map(strip),
+        current: cur ? { item: strip(cur.item), key: cur.key } : null,
+        last: this.last ? strip(this.last) : null,
+        lastBy: this.lastBy,
+        seq: this.seq,
+        qseq: this.qseq,
+        chatLog: this.chatLog,
+        standings: [...this.standings.entries()],
+        history: this.history,
+      },
+    };
+  }
+
+  /** 保存した中身から戻す。conns: 席の番号 → つながり（つながりが無い人は抜けたことにする） */
+  restore(st: RoomState, tja: (qid: string) => string, conns: Map<string, Conn>) {
+    const fill = (x: QItem): QItem => ({ ...x, meta: { ...x.meta, tja: tja(x.qid) } });
+    this.hostId = st.hostId;
+    this.title = st.title;
+    this.pass = st.pass;
+    this.settings = st.settings;
+    this.queue = st.queue.map(fill);
+    this.last = st.last ? fill(st.last) : null;
+    this.lastBy = st.lastBy;
+    this.seq = st.seq;
+    this.qseq = st.qseq;
+    this.chatLog = st.chatLog;
+    this.standings = new Map(st.standings);
+    this.history = st.history;
+    this.phase = 'wait';
+    // 音源のかけらは残っていないので、必要になったらもう一度送ってもらう
+    this.current = st.current ? { item: fill(st.current.item), key: st.current.key, uploading: false, done: st.current.item.meta.size === 0, chunks: [], received: 0, need: new Set(), vuploading: false, vreceived: 0, vneed: new Set() } : null;
+    this.players.clear();
+    for (const o of st.players) {
+      const conn = conns.get(o.id);
+      if (!conn) continue;
+      this.players.set(o.id, { ...o, conn, inGame: false, rate: 0, rateAt: this.now() });
+    }
+    if (!this.players.has(this.hostId)) this.hostId = this.players.keys().next().value ?? '';
+    if (!this.players.size) this.reset();
   }
 
   /** 入る。だめなら理由（文字）を返す。cid が同じ人が席にいれば、その席に戻る */
@@ -260,6 +353,11 @@ export class RoomCore {
   message(p: Player, data: string | ArrayBuffer) {
     if (typeof data !== 'string') {
       this.audioChunk(p, data);
+      return;
+    }
+    // つながっているかの確認（Cloudflare では眠ったまま自動で返す）
+    if (data === 'ping') {
+      try { p.conn?.send('pong'); } catch { /* 切れている */ }
       return;
     }
     const t = this.now();
@@ -485,6 +583,7 @@ export class RoomCore {
         this.chatLog.push(c);
         if (this.chatLog.length > 40) this.chatLog.shift();
         this.broadcast({ t: 'chat', ...c });
+        this.onChange();
         break;
       }
     }
@@ -665,11 +764,12 @@ export class RoomCore {
       standings: [...this.standings.values()].sort((a, b) => b.total - a.total),
     });
     this.lobby();
+    this.onChange();
   }
 
   private lobby() {
     if (!this.players.size) return;
-    this.report({
+    const info = {
       id: this.id,
       title: this.title,
       host: this.players.get(this.hostId)?.name ?? '',
@@ -679,7 +779,12 @@ export class RoomCore {
       locked: !!this.pass,
       song: this.current?.item.meta.title ?? '',
       updatedAt: this.now(),
-    });
+    };
+    // 中身が変わったときだけ知らせる（ロビーへの知らせも数に入るので）
+    const sig = JSON.stringify({ ...info, updatedAt: 0 });
+    if (sig === this.lobbySig) return;
+    this.lobbySig = sig;
+    this.report(info);
   }
 
   private sendTo(p: Player, m: object) {
@@ -722,7 +827,7 @@ export class LobbyCore {
   list(): LobbyInfo[] {
     const t = this.now();
     // しばらく知らせが無い部屋は消す（部屋のサーバーが止まったなど）
-    for (const [id, r] of this.rooms) if (t - r.updatedAt > 10 * 60 * 1000) this.rooms.delete(id);
+    for (const [id, r] of this.rooms) if (t - r.updatedAt > LOBBY_STALE_MS) this.rooms.delete(id);
     return [...this.rooms.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60);
   }
 }
