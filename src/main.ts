@@ -659,6 +659,16 @@ const closeMenu = () => {
 };
 // 再生速度: 押すたびに 1.0 → 0.75 → 0.5 → 0.25 → 1.0
 const RATES = [1, 0.75, 0.5, 0.25];
+/** 再生速度を 1 段階変える（dir = 1 で速く、-1 で遅く） */
+function stepRate(dir: 1 | -1) {
+  const i = RATES.indexOf(settings.rate);
+  const next = RATES[Math.max(0, Math.min(RATES.length - 1, (i < 0 ? 0 : i) - dir))];
+  if (next === settings.rate) return;
+  settings.rate = next;
+  saveSettings();
+  updateHeader();
+  if (playing) { stopPlayback(); void startPlayback(); }
+}
 $('btnRate').addEventListener('click', () => {
   closeMenus();
   settings.rate = RATES[(RATES.indexOf(settings.rate) + 1) % RATES.length] ?? 1;
@@ -1069,6 +1079,8 @@ window.addEventListener('keydown', (e) => {
   if (play.isActive || !$('sheet').classList.contains('hidden') || !$('home').classList.contains('hidden')) return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  // 再生速度: Z で遅く、C で速く（1.0・0.75・0.5・0.25）
+  if (!mod && !e.altKey && (e.code === 'KeyZ' || e.code === 'KeyC')) { e.preventDefault(); stepRate(e.code === 'KeyC' ? 1 : -1); return; }
   if (mod && e.code === 'KeyY') { e.preventDefault(); redo(); return; }
   if (mod && (e.code === 'KeyC' || e.code === 'KeyX' || e.code === 'KeyV')) {
     if (e.code !== 'KeyV' && !ed.sel) return;
