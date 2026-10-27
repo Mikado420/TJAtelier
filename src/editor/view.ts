@@ -3,6 +3,7 @@ import { drawAny, drawRoll, hexPath } from '../render/notes';
 import { localPoint } from '../orient';
 import type { Editor } from './editor';
 import type { Grad } from './grad';
+import { DelayLanes } from './delayLanes';
 
 /**
  * Malody 風の横スクロール作譜画面。
@@ -36,6 +37,9 @@ const R = {
   waveBottom: 336,
   evTop: 576,
   evBottom: 616,
+  /** #DELAY で重なった所に出す下の段の高さと、段の間のすき間 */
+  subH: 118,
+  subGap: 10,
 };
 
 /** 斜めの形の傾き（CSS の --tan = tan(8°) と同じ） */
@@ -55,6 +59,7 @@ const C = {
   btnEdge: '#ffffff',
   play: '#4d9fbe',
   wave: '#4d9fbe',
+  subLane: '#1f2d27',
   event: '#c27dff',
 };
 
@@ -165,6 +170,18 @@ export class EditorView {
   private drag: { startX: number; startY: number; lastX: number; moved: boolean; scrub?: boolean } | null = null;
   private pinch: { d0: number; z0: number } | null = null;
   private hoverX: number | null = null;
+  private hoverY = 0;
+  private lastUp = 0;
+  /** 再生中の時刻（DELAY の空きの間も判定枠を進めるため） */
+  posTime: number | null = null;
+  private lanesCache: { timing: unknown; lanes: DelayLanes } | null = null;
+
+  /** #DELAY の段の表（タイミングが変わったら作り直す） */
+  get lanes(): DelayLanes {
+    const t = this.ed.timing;
+    if (!this.lanesCache || this.lanesCache.timing !== t) this.lanesCache = { timing: t, lanes: new DelayLanes(this.ed.course, t) };
+    return this.lanesCache.lanes;
+  }
   private dirty = true;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly ed: Editor) {
@@ -200,9 +217,16 @@ export class EditorView {
   get L() {
     const s = this.s;
     const box = (b: { x: number; y: number; r: number }): Box => ({ x: b.x * s, y: b.y * s, r: b.r * s });
-    const laneY = R.laneTop * s;
+    // #DELAY で重なる所があるときは、下に段を出す分だけレーンを上げる
+    const sub = this.lanes.rows - 1;
+    const up = sub * (R.subH + R.subGap);
+    const laneY = (R.laneTop - up) * s;
     const laneH = (R.laneBottom - R.laneTop) * s;
     return {
+      up: up * s,
+      sub,
+      subH: R.subH * s,
+      subGap: R.subGap * s,
       s,
       colW: R.laneX * s,
       colLine1: R.colLine1 * s,
@@ -211,14 +235,14 @@ export class EditorView {
       evY: R.laneBottom * s,
       evH: (R.evBottom - R.evTop) * s,
       evTop: R.evTop * s,
-      cy: R.laneCY * s,
+      cy: (R.laneCY - up) * s,
       playX: R.judgeX * s,
       r: R.noteR * s,
       bigR: R.bigR * s,
       waveX: R.waveX * s,
       waveY: R.waveTop * s,
-      waveH: (R.waveBottom - R.waveTop) * s,
-      play: box(R.play),
+      waveH: (R.waveBottom - up - R.waveTop) * s,
+      play: box({ ...R.play, y: R.play.y - up }),
     };
   }
 
@@ -234,12 +258,48 @@ export class EditorView {
     return (1470 / 4) * (R.noteR / 54) * this.playSpeed * this.s;
   }
 
-  xOf(tick: number) {
-    return this.L.playX + ((tick - this.pos) / TPB) * this.zoom;
+  /** 判定枠の表示の位置 */
+  private get dpos() {
+    const ln = this.lanes;
+    return this.playing && this.posTime !== null && ln.hasDelay ? ln.dispOfTime(this.posTime) : ln.disp(this.pos);
   }
 
-  tickOf(x: number) {
-    return this.pos + ((x - this.L.playX) / this.zoom) * TPB;
+  /** 表示の位置 → x */
+  private xOfD(d: number, dpos = this.dpos) {
+    return this.L.playX + ((d - dpos) / TPB) * this.zoom;
+  }
+
+  /** 表示の位置（x → ） */
+  private dOf(x: number) {
+    return this.dpos + ((x - this.L.playX) / this.zoom) * TPB;
+  }
+
+  xOf(tick: number) {
+    return this.xOfD(this.lanes.disp(tick));
+  }
+
+  /** x と段 → tick（DELAY の空きなど、その段のそこに何もなければ null） */
+  tickOf(x: number, row = 0) {
+    return this.lanes.tickAt(this.dOf(x), row);
+  }
+
+  /** 段ごとの縦の位置（0 = いつものレーン、1〜 = 下に出る段） */
+  rowGeom(row: number) {
+    const L = this.L;
+    if (row === 0) return { y: L.laneY, h: L.laneH, cy: L.cy, r: L.r, bigR: L.bigR };
+    const y = L.laneY + L.laneH + L.subGap + (row - 1) * (L.subH + L.subGap);
+    const k = R.subH / (R.laneBottom - R.laneTop);
+    return { y, h: L.subH, cy: y + L.subH / 2, r: L.r * k, bigR: L.bigR * k };
+  }
+
+  /** y → 段（どの段でもなければ -1） */
+  private rowAtY(y: number) {
+    const L = this.L;
+    for (let r = 1; r <= L.sub; r++) {
+      const g = this.rowGeom(r);
+      if (y >= g.y - L.subGap / 2 && y <= g.y + g.h + L.subGap / 2) return r;
+    }
+    return y >= L.laneY - L.r * 0.5 && y <= L.evTop + L.evH ? 0 : -1;
   }
 
   /** 密度推移の縦の範囲（下が曲の始め、上が終わり） */
@@ -344,6 +404,7 @@ export class EditorView {
       const L = this.L;
       if (e.pointerType === 'mouse') {
         this.hoverX = pt.y >= L.laneY - 10 && pt.y <= L.evTop + L.evH && pt.x > L.colW ? pt.x : null;
+        this.hoverY = pt.y;
         this.invalidate();
       }
       if (!this.pointers.has(e.pointerId)) return;
@@ -417,7 +478,8 @@ export class EditorView {
     if (y >= L.waveY && y <= L.waveY + L.waveH) {
       // 波形をタップ → その位置へ移動
       this.onUserScroll();
-      this.pos = this.ed.snapView(this.tickOf(x));
+      const t = this.tickOf(x);
+      if (t !== null) this.pos = this.ed.snapView(t);
       this.invalidate();
       return;
     }
@@ -428,7 +490,10 @@ export class EditorView {
     }
     // 曲の頭より前と、再生ボタンの中心より左には置けない
     if (x < L.play.x) return;
-    if (y >= L.laneY - L.r * 0.5 && y <= L.evTop + L.evH && this.tickOf(x) > -this.ed.step / 2) this.onTap(this.tickOf(x), (L.r / this.zoom) * TPB);
+    const row = this.rowAtY(y);
+    if (row < 0) return;
+    const t = this.tickOf(x, row);
+    if (t !== null && t > -this.ed.step / 2) this.onTap(t, (this.rowGeom(row).r / this.zoom) * TPB);
   }
 
   // ---------- 描画 ----------
@@ -444,8 +509,22 @@ export class EditorView {
     const L = this.L;
     const s = L.s;
     const course = ed.course;
-    const leftTick = this.tickOf(L.colW - L.bigR * 2);
-    const rightTick = this.tickOf(this.w + L.bigR * 2);
+    const ln = this.lanes;
+    // 下の段の分だけ上がったことを、波形の上の表示（小節・BPM）にも伝える
+    if (this.lastUp !== L.up / s) {
+      this.lastUp = L.up / s;
+      document.documentElement.style.setProperty('--eup', String(this.lastUp));
+    }
+    const dpos = this.dpos;
+    const xd = (d: number) => this.xOfD(d, dpos);
+    const xt = (tick: number) => xd(ln.disp(tick));
+    const geomOf = (tick: number) => this.rowGeom(ln.rowOf(tick));
+    const [leftTick, rightTick] = ln.tickRange(this.dOf(L.colW - L.bigR * 2), this.dOf(this.w + L.bigR * 2));
+    /** tick の範囲が画面のどこに出るか（段ごと） */
+    const spansX = (ta: number, tb: number) =>
+      ln.spans(ta, tb)
+        .map((sp) => ({ g: this.rowGeom(sp.row), x1: Math.max(L.colW, xd(sp.a)), x2: Math.min(this.w, xd(sp.b)) }))
+        .filter((sp) => sp.x2 > sp.x1);
 
     // 背景は透明（後ろの六角形の模様を見せる。CSS の .stage）
     ctx.clearRect(0, 0, this.w, this.h);
@@ -459,26 +538,41 @@ export class EditorView {
     ctx.fillStyle = C.lane;
     ctx.fillRect(L.colW, L.laneY, this.w - L.colW, L.laneH);
 
+    // #DELAY で重なった所だけ、下に段を出す（いつものレーンからの枝でつなぐ）
+    if (L.sub) {
+      const edge = Math.max(1, 2 * s);
+      for (const p of ln.pieces) {
+        if (p.row === 0) continue;
+        const g = this.rowGeom(p.row);
+        const xa = xd(p.a);
+        const xb = xd(p.b);
+        const x1 = Math.max(L.colW, xa);
+        const x2 = Math.min(this.w, xb);
+        if (x2 <= x1) continue;
+        ctx.fillStyle = C.subLane;
+        ctx.fillRect(x1, g.y, x2 - x1, g.h);
+        ctx.fillStyle = EVENT_COLOR.delay;
+        ctx.fillRect(x1, g.y - edge / 2, x2 - x1, edge);
+        ctx.fillRect(x1, g.y + g.h - edge / 2, x2 - x1, edge);
+        const up = this.rowGeom(p.row - 1);
+        const bw = Math.max(2, 4 * s);
+        for (const x of [xa, xb]) if (x >= L.colW && x <= this.w) ctx.fillRect(x - bw / 2, up.y + up.h, bw, g.y + g.h - (up.y + up.h));
+      }
+    }
+
     // ゴーゴー区間
     const ranges = this.ed.gogoRanges();
     ctx.fillStyle = C.gogo;
-    for (const [a, b] of ranges) {
-      const x1 = Math.max(L.colW, this.xOf(a));
-      const x2 = Math.min(this.w, b === Infinity ? this.w : this.xOf(b));
-      if (x2 > x1) ctx.fillRect(x1, L.laneY, x2 - x1, L.laneH);
-    }
+    for (const [a, b] of ranges) for (const sp of spansX(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
 
     // グラデの範囲（レーンの下の端に紫の帯。右へ行くほど濃く）
     for (const g of course.grads ?? []) {
-      const x1 = Math.max(L.colW, this.xOf(g.start));
-      const x2 = Math.min(this.w, this.xOf(g.end));
-      if (x2 <= x1) continue;
       const bh = Math.max(4, 10 * s);
-      const grd = ctx.createLinearGradient(this.xOf(g.start), 0, this.xOf(g.end), 0);
+      const grd = ctx.createLinearGradient(xt(g.start), 0, xt(g.end), 0);
       grd.addColorStop(0, 'rgba(199,146,234,0.25)');
       grd.addColorStop(1, 'rgba(199,146,234,0.9)');
       ctx.fillStyle = grd;
-      ctx.fillRect(x1, L.laneY + L.laneH - bh, x2 - x1, bh);
+      for (const sp of spansX(g.start, g.end)) ctx.fillRect(sp.x1, sp.g.y + sp.g.h - bh, sp.x2 - sp.x1, bh);
     }
 
     ctx.save();
@@ -506,7 +600,8 @@ export class EditorView {
       if (beatPx >= 6) {
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
         for (let rel = TPB; rel < m.length; rel += TPB) {
-          const x = this.xOf(m.start + rel);
+          if (ln.rows > 1 && ln.rowOf(m.start + rel) !== 0) continue;
+          const x = xt(m.start + rel);
           if (x >= L.colW && x <= this.w) ctx.fillRect(x - lw1 / 2, L.waveY, lw1, L.waveH);
         }
       }
@@ -515,7 +610,8 @@ export class EditorView {
         for (let k = 1; k < count; k++) {
           const rel = Math.round(k * step);
           if (rel % TPB === 0) continue;
-          const x = this.xOf(m.start + rel);
+          if (ln.rows > 1 && ln.rowOf(m.start + rel) !== 0) continue;
+          const x = xt(m.start + rel);
           if (x >= L.colW && x <= this.w) ctx.fillRect(x - lw1 / 2, L.waveY, lw1, L.waveH);
         }
       }
@@ -524,23 +620,27 @@ export class EditorView {
       for (const rel of pts) {
         const inBeat = rel % TPB;
         if (stepPx < 7 && inBeat !== 0) continue;
-        const x = this.xOf(m.start + rel);
+        const x = xt(m.start + rel);
         if (x < L.colW || x > this.w) continue;
         const d = inBeat === 0 ? 1 : TPB / gcd(TPB, inBeat);
+        const g = geomOf(m.start + rel);
         ctx.fillStyle = DOT_COLORS[d] ?? '#6c6c74';
-        hexPath(ctx, x, L.cy, (inBeat === 0 ? 13 : 9) * s);
+        hexPath(ctx, x, g.cy, (inBeat === 0 ? 13 : 9) * s * (g.r / L.r));
         ctx.fill();
       }
-      const x = this.xOf(m.start);
+      const x = xt(m.start);
       if (x >= L.colW - 1 && x <= this.w + 1) {
+        const row = ln.rowOf(m.start);
+        const g = this.rowGeom(row);
         ctx.fillStyle = C.measure;
         const lw = Math.max(1, 2 * s);
-        ctx.fillRect(x - lw / 2, L.waveY, lw, L.evY - L.waveY);
-        ctx.font = `600 ${Math.round(28 * s)}px ui-monospace, monospace`;
+        const top = row === 0 ? L.waveY : g.y;
+        ctx.fillRect(x - lw / 2, top, lw, g.y + g.h - top);
+        ctx.font = `600 ${Math.round((row === 0 ? 28 : 22) * s)}px ui-monospace, monospace`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillStyle = C.text;
-        ctx.fillText(String(m.index + 1), x + 6 * s, L.waveY + 6 * s);
+        ctx.fillText(String(m.index + 1), x + 6 * s, top + (row === 0 ? 6 : 3) * s);
       }
     }
 
@@ -554,7 +654,7 @@ export class EditorView {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
       if (e.kind === 'gogo' || !this.evShow[e.kind]) continue;
       if (e.tick > rightTick) continue;
-      const x = this.xOf(e.tick);
+      const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {
         // 三角の印はすべてに出す
         ctx.fillStyle = EVENT_COLOR[e.kind];
@@ -603,8 +703,9 @@ export class EditorView {
       }
       this.evBoxes.push(cur);
     };
+    evItems.sort((a, b) => xt(a.tick) - xt(b.tick));
     for (const it of evItems) {
-      const x = this.xOf(it.tick);
+      const x = xt(it.tick);
       if (x < L.colW || x > this.w) continue;
       const w = ctx.measureText(label(it)).width + pad * 2;
       if (cur && x < cur.x2 + 4 * s) {
@@ -638,15 +739,18 @@ export class EditorView {
 
     // 選んでいる範囲（水色の帯。両端の音符が収まるよう少し広げる）
     if (ed.sel) {
-      const x1 = Math.max(L.colW, this.xOf(ed.sel.start) - L.r * 1.2);
-      const x2 = Math.min(this.w, this.xOf(ed.sel.end) + L.r * 1.2);
-      if (x2 > x1) {
+      const pad = L.r * 1.2;
+      for (const sp of ln.spans(ed.sel.start - pad / this.zoom * TPB, ed.sel.end + pad / this.zoom * TPB)) {
+        const g = this.rowGeom(sp.row);
+        const x1 = Math.max(L.colW, xd(sp.a));
+        const x2 = Math.min(this.w, xd(sp.b));
+        if (x2 <= x1) continue;
         ctx.fillStyle = 'rgba(147,205,226,0.16)';
-        ctx.fillRect(x1, L.laneY, x2 - x1, L.laneH);
+        ctx.fillRect(x1, g.y, x2 - x1, g.h);
         ctx.strokeStyle = 'rgba(147,205,226,0.85)';
         ctx.lineWidth = Math.max(1, 2 * s);
         ctx.setLineDash([6 * s, 5 * s]);
-        ctx.strokeRect(x1, L.laneY + 1, x2 - x1, L.laneH - 2);
+        ctx.strokeRect(x1, g.y + 1, x2 - x1, g.h - 2);
         ctx.setLineDash([]);
       }
     }
@@ -654,7 +758,7 @@ export class EditorView {
     // ノーツ（後ろから描く）
     ctx.save();
     ctx.beginPath();
-    ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
+    ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.evY + L.bigR - (L.laneY - L.bigR));
     ctx.clip();
     const notes = course.notes;
     for (let i = notes.length - 1; i >= 0; i--) {
@@ -662,16 +766,17 @@ export class EditorView {
       const endT = n.endTick ?? n.tick;
       if (endT < leftTick || n.tick > rightTick) continue;
       const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
-      const x = this.xOf(n.tick);
-      const ex = n.endTick !== undefined ? this.xOf(n.endTick) : undefined;
+      const x = xt(n.tick);
+      const ex = n.endTick !== undefined ? xt(n.endTick) : undefined;
+      const g = geomOf(n.tick);
       if (n.type === 'balloon' && ex !== undefined) {
         // 風船は、受け付けている範囲を半透明のオレンジの連打で示す
         ctx.globalAlpha = 0.45;
-        drawRoll(ctx, x, ex, L.cy, L.r, 'balloon');
+        drawRoll(ctx, x, ex, g.cy, g.r, 'balloon');
         ctx.globalAlpha = 1;
-        drawAny(ctx, n.type, x, L.cy, L.r, undefined, n.hits ?? 5);
+        drawAny(ctx, n.type, x, g.cy, g.r, undefined, n.hits ?? 5);
       } else {
-        drawAny(ctx, n.type, x, L.cy, big ? L.bigR : L.r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
+        drawAny(ctx, n.type, x, g.cy, big ? g.bigR : g.r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
       }
     }
 
@@ -682,34 +787,40 @@ export class EditorView {
       for (const n of ed.selectedNotes()) {
         if (n.tick < leftTick || n.tick > rightTick) continue;
         const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
+        const g = geomOf(n.tick);
         ctx.beginPath();
-        ctx.arc(this.xOf(n.tick), L.cy, (big ? L.bigR : L.r) + 5 * s, 0, Math.PI * 2);
+        ctx.arc(xt(n.tick), g.cy, (big ? g.bigR : g.r) + 5 * s, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
 
     // 連打の始点（終点待ち）
     if (ed.pendingLong !== null) {
-      const x = this.xOf(ed.pendingLong);
+      const x = xt(ed.pendingLong);
+      const g = geomOf(ed.pendingLong);
       ctx.setLineDash([8 * s, 8 * s]);
       ctx.strokeStyle = ed.tool === 'gogo' ? '#ff6e28' : ed.tool === 'scroll' ? '#c792ea' : ed.tool === 'select' ? '#7cc4ff' : '#fbbf14';
       ctx.lineWidth = Math.max(2, 5 * s);
       ctx.beginPath();
       if (ed.tool === 'gogo' || ed.tool === 'scroll' || ed.tool === 'select') {
         // ゴーゴー・グラデの始点は縦の点線
-        ctx.moveTo(x, L.laneY);
-        ctx.lineTo(x, L.laneY + L.laneH);
+        ctx.moveTo(x, g.y);
+        ctx.lineTo(x, g.y + g.h);
       } else {
-        ctx.arc(x, L.cy, L.r * 1.15, 0, Math.PI * 2);
+        ctx.arc(x, g.cy, g.r * 1.15, 0, Math.PI * 2);
       }
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
     // マウス位置のプレビュー
-    if (this.hoverX !== null && !this.drag) {
-      const t = ed.snap(this.tickOf(this.hoverX));
-      const x = this.xOf(t);
+    const hRow = this.hoverX !== null ? this.rowAtY(this.hoverY) : -1;
+    const hTick = this.hoverX !== null && hRow >= 0 ? this.tickOf(this.hoverX, hRow) : null;
+    if (hTick !== null && !this.drag) {
+      const t = ed.snap(hTick);
+      const x = xt(t);
+      const g = geomOf(t);
+      const L = { ...this.L, laneY: g.y, laneH: g.h, cy: g.cy, r: g.r, bigR: g.bigR };
       ctx.globalAlpha = 0.4;
       if (ed.tool === 'gogo' || ed.tool === 'scroll' || ed.tool === 'bpm' || ed.tool === 'measure' || ed.tool === 'select') {
         ctx.fillStyle = { gogo: '#ff6e28', scroll: '#c792ea', bpm: '#5cc8f0', measure: '#e0a400', select: '#7cc4ff' }[ed.tool];
@@ -745,17 +856,18 @@ export class EditorView {
       ctx.fillText('音源なし（読み込み・書き出し → 音源を読み込む）', (L.waveX + this.w) / 2, mid);
       return;
     }
-    const t = this.ed.timing;
-    // 波形の棒は曲の中の位置（tick）に固定した区切りで作る。画面の位置で区切ると、スクロールのたびに
+    const ln = this.lanes;
+    // 波形の棒は曲の中の位置（表示の位置）に固定した区切りで作る。画面の位置で区切ると、スクロールのたびに
     // 区切りが曲に対してずれて、波形が揺れて見えるため
     const step = 2;
     const binTicks = (step / this.zoom) * TPB;
-    const k0 = Math.floor(this.tickOf(L.waveX) / binTicks);
-    const k1 = Math.ceil(this.tickOf(this.w) / binTicks);
+    const dpos = this.dpos;
+    const k0 = Math.floor(this.dOf(L.waveX) / binTicks);
+    const k1 = Math.ceil(this.dOf(this.w) / binTicks);
     ctx.fillStyle = C.wave;
-    let prevT = t.tickToTime(k0 * binTicks);
+    let prevT = ln.timeOfDisp(k0 * binTicks);
     for (let k = k0; k < k1; k++) {
-      const nextT = t.tickToTime((k + 1) * binTicks);
+      const nextT = ln.timeOfDisp((k + 1) * binTicks);
       let i0 = Math.floor(Math.min(prevT, nextT) * wv.rate);
       let i1 = Math.ceil(Math.max(prevT, nextT) * wv.rate);
       prevT = nextT;
@@ -765,7 +877,7 @@ export class EditorView {
       let peak = 0;
       for (let i = i0; i <= i1; i++) if (wv.peaks[i] > peak) peak = wv.peaks[i];
       const hh = Math.max(0.5, peak * (L.waveH / 2 - 3));
-      const x = this.xOf(k * binTicks);
+      const x = this.xOfD(k * binTicks, dpos);
       const x0 = Math.max(L.waveX, x);
       const x1 = Math.min(this.w, x + step - 0.5);
       if (x1 > x0) ctx.fillRect(x0, mid - hh, x1 - x0, hh * 2);

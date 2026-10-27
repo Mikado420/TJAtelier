@@ -325,6 +325,7 @@ function stopPlayback() {
   playing = false;
   audio.stop();
   view.playing = false;
+  view.posTime = null;
   view.invalidate();
 }
 
@@ -332,6 +333,7 @@ function tickPlayback() {
   const t = audio.now();
   if (t < lastTime) return; // 再生開始直後
   view.pos = ed.timing.timeToTick(t);
+  view.posTime = t;
 
   scheduleAhead(t);
   lastTime = t;
