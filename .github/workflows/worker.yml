@@ -90,3 +90,37 @@ jobs:
             };
             a.onerror = () => done(false, "error");
           ' "$URL"
+
+      - name: 合作サーバーの動作確認
+        run: |
+          URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
+          # プロジェクトを作り、もう 1 人が入って変更が届くか。音源を置いて受け取れるか
+          node -e '
+            const http = process.argv[1];
+            const base = http.replace(/^http/, "ws");
+            const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+            const id = Array.from({ length: 10 }, () => A[Math.floor(Math.random() * A.length)]).join("");
+            const out = [];
+            const done = (ok, m) => { console.log((ok ? "::notice" : "::error") + " title=合作::" + m + " / " + out.join(" ")); process.exit(ok ? 0 : 1); };
+            setTimeout(() => done(false, "timeout"), 30000);
+            const q = "key=checkkey123&vkey=viewkey123";
+            const a = new WebSocket(`${base}/collab/ws/${id}?cid=ca&name=A&${q}&create=1`);
+            a.onmessage = async (e) => {
+              if (e.data === "pong") return;
+              const m = JSON.parse(e.data); out.push("A:" + m.t);
+              if (m.t !== "ready") return;
+              const bytes = new Uint8Array(1500000).map((_, i) => i % 7);
+              const put = await fetch(`${http}/collab/audio/${id}/abcd1234?key=checkkey123`, { method: "PUT", body: bytes });
+              out.push("put:" + put.status);
+              const got = new Uint8Array(await (await fetch(`${http}/collab/audio/${id}/abcd1234?key=viewkey123`)).arrayBuffer());
+              out.push("get:" + got.byteLength);
+              if (got.byteLength !== bytes.byteLength || got[1234567] !== 1234567 % 7) return done(false, "audio");
+              const b = new WebSocket(`${base}/collab/ws/${id}?cid=cb&name=B&key=checkkey123`);
+              b.onmessage = (e2) => {
+                const n = JSON.parse(e2.data); out.push("B:" + n.t);
+                if (n.t === "ready") a.send(JSON.stringify({ t: "ops", c: 1, ops: [{ o: "m", v: { title: "check" } }] }));
+                if (n.t === "ops" && n.ops[0].v.title === "check") done(true, "ok");
+              };
+            };
+            a.onerror = () => done(false, "error");
+          ' "$URL"
