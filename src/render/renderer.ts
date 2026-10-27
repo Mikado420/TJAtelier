@@ -797,7 +797,7 @@ export class Renderer {
     // 相手が叩いた入力（何もない所を叩いたものも）: その時刻になったら、自分と同じくレーンが色づき、判定枠が光る
     if (opp?.taps) {
       for (const f of opp.taps) {
-        const ms = (now - f.t) * 1000;
+        const ms = (now - Math.max(f.t, (f as { a?: number }).a ?? f.t)) * 1000;
         if (ms < 0 || ms > 170) continue;
         const a = 1 - ms / 170;
         const don = f.k < 2;
@@ -826,7 +826,7 @@ export class Renderer {
     else if (opp.taps) {
       // 相手の叩いた所: 判定枠の輪が叩いた色に光る（面 = ドン、縁 = カッ）
       for (const f of opp.taps) {
-        const ms = (now - f.t) * 1000;
+        const ms = (now - Math.max(f.t, (f as { a?: number }).a ?? f.t)) * 1000;
         if (ms < 0 || ms > 160) continue;
         const a = 1 - ms / 160;
         ctx.beginPath();
@@ -879,7 +879,10 @@ export class Renderer {
       let endX: number;
       if (opp) {
         const m = opp.marks[i];
-        if ((m === 1 || m === 2) && n.type !== 'roll' && n.type !== 'bigRoll' && n.type !== 'balloon') continue;
+        const long = n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon';
+        if ((m === 1 || m === 2) && !long) continue;
+        // 判定枠を過ぎて、まだ判定が届いていない音符は消しておく（届くまでの遅れの間、枠を通り過ぎて見えないように）
+        if (!m && !long && opp.queue && now >= n.time && now - n.time < 0.4) continue;
         x = vis[q * 3 + 1];
         endX = vis[q * 3 + 2];
         if (x > right + 120) continue;
@@ -944,15 +947,11 @@ export class Renderer {
       if (lags.length > 40) lags.shift();
     };
     for (const q of o.queue ?? []) if (!(q as { s?: 1 }).s) { (q as { s?: 1 }).s = 1; seen(q.t); }
-    for (const tp of o.taps ?? []) if (!(tp as { s?: 1 }).s) { (tp as { s?: 1 }).s = 1; seen(tp.t); }
-    if (o.delay === undefined) o.delay = o.queue || o.taps ? 0.12 : 0;
-    if (lags.length >= 3) {
-      const sorted = [...lags].sort((a, b) => a - b);
-      const want = Math.min(0.4, Math.max(0.04, sorted[Math.floor(sorted.length * 0.9)] + 0.02));
-      // 遅れが大きくなったときは早めに、小さくなったときはゆっくり合わせる
-      o.delay += (want - o.delay) * (want > o.delay ? 0.2 : 0.01);
-    }
-    return o.delay;
+    // 叩いた入力は、届いた時刻から光らせる（届くまでに消えてしまわないように）
+    for (const tp of o.taps ?? []) if (!(tp as { s?: 1 }).s) { (tp as { s?: 1; a?: number }).s = 1; (tp as { a?: number }).a = now; seen(tp.t); }
+    // 自分のレーンと相手のレーンの音符がずれないよう、相手のレーンも同じ時刻で描く（遅らせない）
+    o.delay = 0;
+    return 0;
   }
 
   /** その時刻（相手のレーンの時刻）までに届いている判定を当てる（音符を消す・数える・光らせる） */
@@ -974,7 +973,7 @@ export class Renderer {
       }
       o.marks[e.i] = e.j + 1;
       // 光・文字は、その判定の時刻から数える（まとめて届いても順に出る）
-      o.fx = { j: e.j + 1, t: wall - Math.max(0, e.t !== undefined ? tn - e.t : 0) * 1000, i: e.i };
+      o.fx = { j: e.j + 1, t: wall, i: e.i };
     }
     q.length = keep;
   }
