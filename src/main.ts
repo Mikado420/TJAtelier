@@ -33,7 +33,7 @@ import { Home } from './home/home';
 import { isZip, readZip, writeZip } from './io/zip';
 import { exportBackup, importBackup, isBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
-import { fitRoot, localPoint, typing } from './orient';
+import { fitRoot, localPoint, pixelRatio, typing } from './orient';
 import { BUILD_ID, startAutoUpdate } from './update';
 import { Collab, collabProjects, sharedMap } from './collab/controller';
 import { CollabLobby } from './collab/lobby';
@@ -3258,7 +3258,7 @@ function bindTempoDrag(
 /** キャンバスの大きさを画面に合わせる */
 function fitCanvas(cv: HTMLCanvasElement) {
   // 3 倍の画面でも 2 倍で描く（見た目はほぼ同じで、キャンバスのメモリは半分以下）
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = Math.min(3, pixelRatio());
   const W = Math.max(1, cv.clientWidth);
   const H = Math.max(1, cv.clientHeight);
   if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {

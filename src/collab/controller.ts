@@ -14,6 +14,7 @@ import { audioHash } from '../online/net';
 import type { Editor } from '../editor/editor';
 import type { EditorView, GhostRow } from '../editor/view';
 import type { AudioFile } from '../io/load';
+import { uiScale } from '../orient';
 import { courseToLane, diff, laneToChart, stateOf, type LaneState } from './bridge';
 import {
   canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes, TRASH_DAYS,
@@ -1356,7 +1357,7 @@ export class Collab {
       p.classList.remove('hidden');
       const r = b.getBoundingClientRect();
       const pr = this.chatEl.getBoundingClientRect();
-      p.style.top = `${Math.max(40, r.top - pr.top - 44)}px`;
+      p.style.top = `${Math.max(40, (r.top - pr.top) / uiScale() - 44)}px`;
     } else if (k === 'react') {
       if (this.pickFor) s.react(this.pickFor, b.dataset.e!);
       this.pickFor = '';

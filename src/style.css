@@ -423,6 +423,8 @@ dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weig
   transform: translateZ(0);
 }
 #app { height: 100%; }
+/* PC: スマホと同じ見た目のまま、画面に合わせて丸ごと拡大する（src/orient.ts の fitRoot） */
+body.desk #root { transform-origin: 0 0; transform: scale(var(--rs, 1)); }
 
 @media (orientation: portrait) {
   #root {

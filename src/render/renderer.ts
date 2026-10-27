@@ -1,6 +1,7 @@
 import { beatAt, jposAt, scrollAhead, type Course, type Note } from '../chart/types';
 import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type NoteState } from '../engine/game';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
+import { pixelRatio } from '../orient';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
 
 /**
@@ -196,7 +197,7 @@ export class Renderer {
   resize() {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
     // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
-    this.dpr = Math.min(this.opponents.length ? 1.5 : 2, window.devicePixelRatio || 1);
+    this.dpr = Math.min(this.opponents.length ? 2 : 3, pixelRatio());
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(w * this.dpr);

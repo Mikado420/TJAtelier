@@ -1,6 +1,6 @@
 import { TPB, type EEvent } from '../chart/model';
 import { drawAny, drawRoll, hexPath } from '../render/notes';
-import { localPoint } from '../orient';
+import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
 import type { Grad } from './grad';
 import { DelayLanes } from './delayLanes';
@@ -222,7 +222,7 @@ export class EditorView {
   }
 
   resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = pixelRatio();
     this.w = this.canvas.clientWidth;
     this.h = this.canvas.clientHeight;
     this.s = Math.max(0.2, this.h / REF_H);

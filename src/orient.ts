@@ -10,6 +10,21 @@ const portrait = matchMedia('(orientation: portrait)');
 /** TJA の画面を開いている間は、縦向きでも回さない（キーボードが占める割合が小さく、多くの行が見える） */
 export const isRotated = () => portrait.matches && !document.body.classList.contains('tja-open');
 
+/**
+ * PC（マウスで操作する広い画面）では、スマホ（iPhone の横向き 844×390）と同じ見た目にするため、
+ * #root をスマホの大きさに近い論理サイズで並べて、画面に合わせて丸ごと拡大する（縦横の比で合わせる）。
+ * K = 拡大率（1 = 拡大しない）
+ */
+const PHONE_W = 844;
+const PHONE_H = 390;
+let K = 1;
+/** 画面の拡大率（PC で丸ごと拡大しているとき 1 より大きい） */
+export const uiScale = () => K;
+/** キャンバスの解像度に使う倍率（拡大しているぶんも細かく描く） */
+export const pixelRatio = () => (window.devicePixelRatio || 1) * K;
+const desktop = () =>
+  matchMedia('(hover: hover) and (pointer: fine)').matches && (navigator.maxTouchPoints ?? 0) === 0 && new URLSearchParams(location.search).get('scale') !== '1';
+
 export function onRotateChange(fn: () => void) {
   portrait.addEventListener('change', fn);
 }
@@ -19,9 +34,10 @@ export function localPoint(e: { clientX: number; clientY: number }, el: Element)
   const r = el.getBoundingClientRect();
   if (isRotated()) {
     // #root は時計回りに 90° 回っている: 要素の x 軸は画面の下向き、y 軸は画面の左向き
-    return { x: e.clientY - r.top, y: r.right - e.clientX };
+    return { x: (e.clientY - r.top) / K, y: (r.right - e.clientX) / K };
   }
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
+  // PC で拡大しているときは、画面の px を #root の中の px に戻す
+  return { x: (e.clientX - r.left) / K, y: (e.clientY - r.top) / K };
 }
 
 /**
@@ -41,8 +57,14 @@ export function fitRoot() {
     // キーボードが出ている間は大きさを変えない（変えると画面全体が縮んだりずれたりする）
     if (typing() && !document.body.classList.contains('tja-open')) return;
     const st = document.documentElement.style;
-    st.setProperty('--vw', `${window.innerWidth}px`);
-    st.setProperty('--vh', `${window.innerHeight}px`);
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    // PC: スマホの横向きと同じ大きさの見た目になるように拡大する（狭い方の辺に合わせ、余った方向は広く使う）
+    K = desktop() && W > H ? Math.max(1, Math.min(W / PHONE_W, H / PHONE_H)) : 1;
+    document.body.classList.toggle('desk', K > 1);
+    st.setProperty('--rs', String(K));
+    st.setProperty('--vw', `${W / K}px`);
+    st.setProperty('--vh', `${H / K}px`);
     // TJA の画面（縦向き）の高さ。ホーム画面から開いたとき（standalone）は innerHeight が上の帯のぶん短いことがあるので、
     // 画面そのものの高さを使う（iPhone の screen.height は向きに関係なく長い辺）
     const standalone = (navigator as Navigator & { standalone?: boolean }).standalone || matchMedia('(display-mode: standalone)').matches;

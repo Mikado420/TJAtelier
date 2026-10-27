@@ -4,6 +4,7 @@
  */
 import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
+import { uiScale } from '../orient';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
@@ -926,8 +927,10 @@ export class Home {
     const r = anchor.getBoundingClientRect();
     const hr = this.el.getBoundingClientRect();
     // ボタンの左端にそろえる（右にはみ出すときは右端にそろえる）
-    pop.style.left = `${Math.max(8, Math.min(r.left - hr.left, hr.width - pop.offsetWidth - 8))}px`;
-    pop.style.top = `${Math.min(hr.height - pop.offsetHeight - 8, r.bottom - hr.top + 4)}px`;
+    // 画面の px を、中の px に戻す（PC で丸ごと拡大しているとき）
+    const k = uiScale();
+    pop.style.left = `${Math.max(8, Math.min((r.left - hr.left) / k, hr.width / k - pop.offsetWidth - 8))}px`;
+    pop.style.top = `${Math.min(hr.height / k - pop.offsetHeight - 8, (r.bottom - hr.top) / k + 4)}px`;
     pop.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
       if (!b) return;

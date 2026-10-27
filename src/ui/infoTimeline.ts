@@ -3,6 +3,7 @@
  * 横の位置（時刻）は上下で同じ。横に拡大・縮小（ボタン・2 本指・ホイール）、横にスクロールできる。
  */
 import type { Course } from '../chart/types';
+import { pixelRatio, uiScale } from '../orient';
 import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/notes';
 
 export interface TimelineData {
@@ -55,7 +56,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
   };
 
   const draw = () => {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(3, pixelRatio());
     const w = viewW;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(H * dpr)) {
       cv.width = Math.round(w * dpr);
@@ -206,7 +207,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     if (!e.ctrlKey) return;
     e.preventDefault();
     const r = scroller.getBoundingClientRect();
-    setZoom(zoom * Math.exp(-e.deltaY * 0.01), e.clientX - r.left);
+    setZoom(zoom * Math.exp(-e.deltaY * 0.01), (e.clientX - r.left) / uiScale());
   }, { passive: false });
   // 2 本指で拡大・縮小（1 本指はふつうの横スクロール）
   let pinch: { d: number; z: number; cx: number } | null = null;
