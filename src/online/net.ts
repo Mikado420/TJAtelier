@@ -126,6 +126,8 @@ export class OnlineClient {
   /** サーバーの時計 − この端末の時計（ms） */
   private offset = 0;
   private bestRtt = Infinity;
+  /** 今のカウントダウンで時計を合わせたか */
+  private cdSynced = false;
   private pingTimer = 0;
   private closedByMe = false;
   // 受け取り中の曲
@@ -235,7 +237,6 @@ export class OnlineClient {
   }
 
   private startPing() {
-    this.bestRtt = Infinity;
     this.syncClock();
     // つながっているかの確認だけ（サーバーは眠ったまま返すので、動いている時間に数えられない）
     clearInterval(this.pingTimer);
@@ -244,6 +245,8 @@ export class OnlineClient {
 
   /** 時計を合わせる（入ったときと、次の曲が決まったとき。細かく何度か測る） */
   private syncClock() {
+    // 測るたびに、その回でいちばん速かった返事を使う（通信の具合が変わっても合わせ直せるように）
+    this.bestRtt = Infinity;
     let n = 0;
     const fast = setInterval(() => {
       this.send({ t: 'ping', c: performance.now() });
@@ -264,7 +267,12 @@ export class OnlineClient {
         }
         break;
       }
-      case 'roster': this.on.roster?.(m as unknown as Roster); break;
+      case 'roster':
+        // カウントダウンが始まったら、始まる直前にもう一度時計を合わせる
+        if (m.countdown && !this.cdSynced) this.syncClock();
+        this.cdSynced = !!m.countdown;
+        this.on.roster?.(m as unknown as Roster);
+        break;
       case 'next': {
         this.syncClock();
         this.meta = m.meta as SongMeta;
