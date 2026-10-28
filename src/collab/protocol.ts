@@ -297,14 +297,85 @@ export function canEditLane(doc: CollabDoc, mid: string, laneId: string, ticks: 
   return lane.owner === mid;
 }
 
+const NOTE_TYPES = new Set(['don', 'ka', 'bigDon', 'bigKa', 'roll', 'bigRoll', 'balloon']);
+const fin = (x: unknown, lo: number, hi: number) => typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi;
+const MAX_TICK = 2 ** 40;
+const TICK_RE = /^-?\d{1,13}$/;
+
+/** 音符の値が正しいか（壊れた値で全員の譜面が開けなくならないように） */
+export function validNote(k: string, v: NoteVal | null): boolean {
+  if (!TICK_RE.test(k)) return false;
+  if (v === null) return true;
+  if (!v || typeof v !== 'object' || !NOTE_TYPES.has(v.type)) return false;
+  if (v.endTick !== undefined && !(fin(v.endTick, -MAX_TICK, MAX_TICK) && v.endTick > Number(k))) return false;
+  if (v.hits !== undefined && !(Number.isInteger(v.hits) && v.hits >= 1 && v.hits <= 99999)) return false;
+  return true;
+}
+
+/** 命令の値が正しいか */
+export function validEvent(k: string, v: EventVal | null): boolean {
+  const [t, kind] = k.split(':');
+  if (!TICK_RE.test(t) || !kind) return false;
+  if (v === null) return true;
+  if (!v || typeof v !== 'object' || v.kind !== kind || !fin(v.tick, -MAX_TICK, MAX_TICK) || Math.round(v.tick) !== Number(t)) return false;
+  switch (v.kind) {
+    case 'bpm': return fin(v.value, 0.0001, 100000);
+    case 'scroll': return fin(v.value, -100000, 100000);
+    case 'measure': return Number.isInteger(v.num) && Number.isInteger(v.den) && v.num >= 1 && v.den >= 1 && v.num <= 100000 && v.den <= 100000;
+    case 'gogo': case 'barline': return typeof v.on === 'boolean';
+    case 'delay': return fin(v.value, -600, 600);
+    case 'jpos': return fin(v.time, 0, 600) && fin(v.dist, -100000, 100000) && (v.dir === 0 || v.dir === 1);
+  }
+  return false;
+}
+
+/** グラデの値が正しいか */
+export function validGrad(v: GradVal | null): boolean {
+  if (v === null) return true;
+  return !!v && typeof v === 'object' && fin(v.start, -MAX_TICK, MAX_TICK) && fin(v.end, -MAX_TICK, MAX_TICK) && v.end > v.start
+    && fin(v.from, -100000, 100000) && fin(v.to, -100000, 100000) && (v.mode === 'linear' || v.mode === 'geometric') && fin(v.digits, 0, 10);
+}
+
+/** 変更の値が正しいか（サーバーとアプリの両方で確かめる） */
+export function validOp(op: Op): boolean {
+  if (!op || typeof op !== 'object') return false;
+  switch (op.o) {
+    case 'n': return typeof op.k === 'string' && validNote(op.k, op.v);
+    case 'e': return typeof op.k === 'string' && validEvent(op.k, op.v);
+    case 'g': return typeof op.k === 'string' && validGrad(op.v);
+    case 'h': return !!op.v && typeof op.v === 'object' && (op.v.bpm === undefined || fin(op.v.bpm, 0.0001, 100000)) && (op.v.offset === undefined || fin(op.v.offset, -3600, 3600));
+    case 'new':
+    case 'rep': {
+      const src = op.o === 'new' ? op.lane : op;
+      if (!src || typeof src !== 'object') return false;
+      const notes = Object.entries(src.notes ?? {});
+      const events = Object.entries(src.events ?? {});
+      const grads = Object.values(src.grads ?? {});
+      if (notes.length > 50000 || events.length > 20000 || grads.length > 2000) return false;
+      if (op.o === 'new' && src.head && !validOp({ o: 'h', l: '', v: src.head } as Op)) return false;
+      if (op.o === 'rep' && op.head && !validOp({ o: 'h', l: '', v: op.head } as Op)) return false;
+      return notes.every(([k, v]) => validNote(k, v)) && events.every(([k, v]) => validEvent(k, v)) && grads.every((g) => validGrad(g));
+    }
+    case 'lm': case 'm': return !!op.v && typeof op.v === 'object';
+  }
+  return false;
+}
+
+/** 曲全体の時間に効く命令（担当の人は置けない。ほかの担当の小節や時刻まで動くため） */
+export const GLOBAL_EVENTS = new Set(['bpm', 'measure', 'delay']);
+
 /** その変更をしてよいか */
 export function canApply(doc: CollabDoc, mid: string, op: Op): boolean {
   const m = doc.members[mid];
-  if (!m || m.viewer) return false;
+  if (!m || m.viewer || !validOp(op)) return false;
   const leader = mid === doc.leader;
   switch (op.o) {
+    case 'e': {
+      const lane = doc.lanes[op.l];
+      if (lane?.main && GLOBAL_EVENTS.has(op.k.split(':')[1]) && !leader && !m.perms.any) return false;
+      return canEditLane(doc, mid, op.l, opTicks(op));
+    }
     case 'n':
-    case 'e':
     case 'g':
     case 'h':
     case 'rep':

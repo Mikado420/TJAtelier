@@ -222,7 +222,15 @@ export class Collab {
       },
       room: () => { this.renderChip(); this.rerenderPanel(); },
       error: (msg) => this.h.toast(msg),
-      rejected: (n) => this.h.toast(`${n} 個の変更は、権限が無いので戻しました`),
+      rejected: (n) => this.h.toast(`${n} 個の変更は、編集できない所だったので戻しました`),
+      conflicts: (n) => this.h.toast(`${n} 個の変更は、つながっていない間にほかの人が同じ所を変えていたので取り消しました`),
+      dropped: (n) => this.h.toast(`版が戻されたので、送っていなかった ${n} 個の変更を取り消しました`),
+      left: () => {
+        this.h.toast('部屋を抜けました');
+        forgetJoined(link.id);
+        this.close(false);
+        void this.h.showHome();
+      },
       kicked: () => {
         this.h.toast('この部屋から外されました');
         forgetJoined(link.id);
@@ -230,6 +238,8 @@ export class Collab {
         void this.h.showHome();
       },
     });
+    // iPhone の Safari が、しばらく使わないサイトの保存を消さないように頼む（メンバーの印と送っていない変更を守る）
+    void navigator.storage?.persist?.().catch(() => {});
     this.h.showEditor();
     this.chip.classList.remove('hidden');
     document.body.classList.add('collab');
@@ -446,7 +456,7 @@ export class Collab {
       this.reloadLane();
       return;
     }
-    this.s.apply(ops);
+    this.s.apply(ops, inverse);
     this.bump(this.laneId);
     this.base = next;
     this.undoSt.push({ ops, inv: inverse });
@@ -539,9 +549,10 @@ export class Collab {
     const doc = this.doc;
     const cur = this.lane;
     if (!doc || !cur) return [];
-    const checked = sortedLanes(doc).filter((l) => this.compare.has(l.id) && l.id !== this.laneId);
-    const list = checked.length ? checked : sortedLanes(doc, cur.course).filter((l) => l.id !== this.laneId);
-    return list.slice(0, 3).map((l) => l.id);
+    // ほかのレーンを全部（同じ難易度を先に。本譜面 → 下書きの順）。自分のレーンの下に縦に並べる
+    const same = sortedLanes(doc, cur.course).filter((l) => l.id !== this.laneId);
+    const rest = sortedLanes(doc).filter((l) => l.course !== cur.course);
+    return [...same, ...rest].slice(0, 24).map((l) => l.id);
   }
 
   refreshGhosts() {
@@ -556,8 +567,8 @@ export class Collab {
       const lane = doc.lanes[id];
       if (!d || !lane) continue;
       rows.push({
-        id, name: `${lane.name || '無題'}・${doc.members[lane.owner]?.name ?? ''}`, color: lane.color, main: lane.main,
-        notes: d.course.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: d.course.bars.map((b) => b.time),
+        id, name: `${lane.course !== this.lane?.course && lane.name !== (COURSE_JA[lane.course] ?? lane.course) ? `${COURSE_JA[lane.course] ?? lane.course}・` : ''}${lane.name || '無題'}・${doc.members[lane.owner]?.name ?? ''}`, color: lane.color, main: lane.main,
+        notes: d.course.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: d.course.bars.map((b) => b.time), chart: d.chart,
       });
     }
     this.h.view.ghosts = rows;
@@ -809,7 +820,7 @@ export class Collab {
           : '';
         return `<div class="item cp-mem"><i class="cp-mdot ${on ? 'on' : ''}" style="--mc:${m.color}"></i><div class="grow"><b>${esc(m.name)}</b>${me ? ' <small>（自分）</small>' : ''}<div class="pos">${perm}${on ? '' : ` ・ ${fmtDate(m.lastSeen)}`}</div>${ctl}</div>${!me && on ? `<button data-cp="followOne" data-mid="${m.id}">${this.follow === m.id ? 'やめる' : 'ついていく'}</button>` : ''}</div>`;
       }).join('');
-      return `<div class="btns"><button data-cp="groups">担当</button></div>
+      return `<div class="btns"><button data-cp="groups">担当</button><button data-cp="leave" class="danger">部屋を抜ける</button></div>
         <div class="list">${rows}</div>
         ${s.online.viewers ? `<p class="note">見学 ${s.online.viewers} 人</p>` : ''}`;
     }
@@ -1069,7 +1080,11 @@ export class Collab {
         return;
       }
       case 'leader': if (confirm(`${this.memberName(mid)} さんにリーダーを渡しますか？`)) s.cmd('leader', { mid }); return;
-      case 'kick': if (confirm(`${this.memberName(mid)} さんをプロジェクトから外しますか？（作ったレーンは残ります）`)) s.cmd('kick', { mid }); return;
+      case 'leave': {
+        if (confirm('部屋を抜けますか？')) s.cmd('leave');
+        return;
+      }
+      case 'kick': if (confirm(`${this.memberName(mid)} さんをプロジェクトから外しますか？`)) s.cmd('kick', { mid }); return;
       case 'verSave': {
         const name = (this.panelEl.querySelector('#cpVerName') as HTMLInputElement | null)?.value.trim() ?? '';
         s.cmd('saveVer', { name: name || '手動で保存' });
@@ -1200,8 +1215,10 @@ export class Collab {
       const t = Number(k);
       if (t >= a && t <= z) ops.push({ o: 'n', l: main.id, k, v: null });
     }
+    let off = 0;
     for (const n of ed.selectedNotes()) {
       const p = toDst(n.tick);
+      if (p.off) off++;
       const v: NoteVal = { type: n.type };
       if (n.endTick !== undefined) v.endTick = toDst(n.endTick).tick;
       if (n.hits !== undefined) v.hits = n.hits;
@@ -1213,7 +1230,7 @@ export class Collab {
     for (const op of ops) last.set((op as { k: string }).k, op);
     const list = [...last.values()];
     const inv: Op[] = list.map((op) => ({ o: 'n', l: main.id, k: (op as { k: string }).k, v: main.notes[(op as { k: string }).k] ?? null }));
-    s.apply(list);
+    s.apply(list, inv);
     this.bump(main.id);
     this.undoSt.push({ ops: list, inv });
     this.redoSt = [];
@@ -1221,7 +1238,7 @@ export class Collab {
     s.cmd('adoptNote', { src: src.id, dst: main.id, range: `${fmt(ta)}〜${fmt(tb)}` });
     this.refreshGhosts();
     this.h.updateHeader();
-    this.h.toast('本譜面へ採用しました');
+    this.h.toast(off ? `本譜面へ採用しました（${off} 個の音符は本譜面のグリッドに合わず、近い位置に置きました）` : '本譜面へ採用しました');
   }
 
   /**

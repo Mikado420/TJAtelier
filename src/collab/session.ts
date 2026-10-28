@@ -50,10 +50,25 @@ export interface SessionEvents {
   room(): void;
   error(msg: string): void;
   rejected(n: number): void;
+  /** 切れている間の自分の変更のうち、その間にほかの人が同じ所を変えていたので取り消した数 */
+  conflicts(n: number): void;
+  /** 版が戻されたので、送っていなかった自分の変更を取り消した数 */
+  dropped(n: number): void;
   kicked(): void;
+  /** 自分から部屋を抜けた */
+  left(): void;
 }
 
-interface Pending { c: number; ops: Op[] }
+/** 送っている途中の変更。prev = 変える前の値（切れている間にほかの人が変えていないか確かめる） */
+interface Pending { c: number; ops: Op[]; prev?: (Op | null)[]; at?: number }
+
+/** その所の今の値（変更の値と比べる形） */
+function valueAt(doc: CollabDoc, op: Op): string | undefined {
+  const lane = op.o === 'n' || op.o === 'e' || op.o === 'g' ? doc.lanes[op.l] : undefined;
+  if (!lane) return undefined;
+  const v = op.o === 'n' ? lane.notes[op.k] : op.o === 'e' ? lane.events[op.k] : op.o === 'g' ? lane.grads[(op as { k: string }).k] : undefined;
+  return JSON.stringify(v ?? null);
+}
 
 /** 1 つの変更が触る所（同じ所かどうかを見分ける） */
 function opKey(op: Op): string {
@@ -247,7 +262,7 @@ export class CollabSession {
       this.ws = null;
       clearInterval(this.pingTimer);
       if (this.closed || this.status === 'denied') return;
-      if (e.code === 4004) return;
+      if (e.code === 4004 || e.code === 4005) return;
       this.setStatus('offline');
       this.scheduleRetry();
     };
@@ -297,6 +312,10 @@ export class CollabSession {
         this.closed = true;
         this.on.kicked?.();
         return;
+      case 'left':
+        this.closed = true;
+        this.on.left?.();
+        return;
       case 'hello':
         this.me = m.you;
         this.role = m.role;
@@ -309,10 +328,24 @@ export class CollabSession {
         this.retry = 0;
         // 一度入ったら、次からはあいことばは要らない（見学は見学のまま）
         this.join = { watch: m.role === 'view' };
+        // 版が戻された: 送っていない自分の変更は、戻した後の譜面に当てない
+        if (m.restored && this.pending.length) {
+          const n = this.pendingCount;
+          this.pending = [];
+          this.on.dropped?.(n);
+        }
         if (m.room) this.on.room?.();
         this.ping();
         clearInterval(this.pingTimer);
-        this.pingTimer = window.setInterval(() => this.ping(), 5000);
+        this.pingTimer = window.setInterval(() => {
+          this.ping();
+          // 受け取りが 8 秒届かない変更は送り直す（同じ値にするだけなので、二重に届いても大丈夫）
+          const now = Date.now();
+          for (const p of this.pending) if (p.c <= this.sent && p.at && now - p.at > 8000) {
+            this.raw({ t: 'ops', c: p.c, ops: p.ops });
+            p.at = now;
+          }
+        }, 5000);
         for (let i = 1; i <= 3; i++) setTimeout(() => this.ping(), i * 400);
         return;
       case 'lane':
@@ -332,13 +365,34 @@ export class CollabSession {
         if (!this.loading) return;
         this.doc = this.loading;
         this.loading = null;
+        // 送っていない自分の変更: その間にほかの人が同じ所を変えていたら取り消す（黙って上書きしない）。
+        // サーバーに届いていた（今の値が自分の値）ものは、もう送らない
+        let conflicts = 0;
+        for (const p of this.pending) {
+          if (!p.prev) continue;
+          const keep: Op[] = [];
+          const keepPrev: (Op | null)[] = [];
+          p.ops.forEach((op, i) => {
+            const before = p.prev![i];
+            if (!before || (op.o !== 'n' && op.o !== 'e' && op.o !== 'g')) { keep.push(op); keepPrev.push(before ?? null); return; }
+            const now = valueAt(this.doc!, op);
+            if (now === JSON.stringify((op as { v: unknown }).v ?? null)) return;
+            if (now !== JSON.stringify((before as { v: unknown }).v ?? null)) { conflicts++; return; }
+            keep.push(op);
+            keepPrev.push(before);
+          });
+          p.ops = keep;
+          p.prev = keepPrev;
+        }
+        this.pending = this.pending.filter((p) => p.ops.length);
+        if (conflicts) this.on.conflicts?.(conflicts);
         // 送っていない自分の変更を当て直して、送り直す
         for (const p of this.pending) for (const op of p.ops) applyOp(this.doc, op);
         this.setStatus('online');
         this.on.reset?.();
         this.on.chat?.(null);
         this.on.online?.();
-        for (const p of this.pending) this.raw({ t: 'ops', c: p.c, ops: p.ops });
+        for (const p of this.pending) { this.raw({ t: 'ops', c: p.c, ops: p.ops }); p.at = Date.now(); }
         this.sent = Math.max(this.sent, ...this.pending.map((p) => p.c));
         this.saveCache();
         return;
@@ -484,24 +538,27 @@ export class CollabSession {
     }
   }
 
-  /** 自分の変更（手元にすぐ当てて、少しまとめて送る） */
-  apply(ops: Op[]) {
+  /** 自分の変更（手元にすぐ当てて、少しまとめて送る）。prev = 変える前の値（ops と同じ並び） */
+  apply(ops: Op[], prev?: Op[]) {
     if (!this.doc || !ops.length || this.role !== 'edit') return;
     for (const op of ops) applyOp(this.doc, op);
     // まとめる（大きいときは分ける）
     let cur: Op[] = [];
+    let curPrev: (Op | null)[] = [];
     let size = 0;
     const push = () => {
-      if (cur.length) this.pending.push({ c: this.seq++, ops: cur });
+      if (cur.length) this.pending.push({ c: this.seq++, ops: cur, ...(prev ? { prev: curPrev } : {}) });
       cur = [];
+      curPrev = [];
       size = 0;
     };
-    for (const op of ops) {
+    ops.forEach((op, i) => {
       const n = op.o === 'new' || op.o === 'rep' ? JSON.stringify(op).length : 80;
       if (size + n > 400_000) push();
       cur.push(op);
+      curPrev.push(prev?.[i] ?? null);
       size += n;
-    }
+    });
     push();
     this.saveCache();
     clearTimeout(this.flushTimer);
@@ -513,6 +570,7 @@ export class CollabSession {
     // まだ送っていないものを送る（受け取りが届くまで pending に残す）
     for (const p of this.pending) if (p.c > this.sent) {
       this.raw({ t: 'ops', c: p.c, ops: p.ops });
+      p.at = Date.now();
       this.sent = p.c;
     }
   }

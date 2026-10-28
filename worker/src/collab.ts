@@ -79,6 +79,8 @@ interface Info {
   lastVerAt: number;
   /** 前の版から変わったか */
   changed: boolean;
+  /** 外した人の端末（もう入れない） */
+  banned?: string[];
 }
 
 interface Sess {
@@ -114,6 +116,11 @@ const LEAVE_WAIT = 30_000;
 const CHAT_SEND = 200;
 
 const clampStr = (s: unknown, n: number) => String(s ?? '').slice(0, n);
+/** リーダーがこれだけ来なければ、次に入った編集できる人へリーダーを渡す */
+const LEADER_AWAY = 14 * DAY;
+/** あいことばを間違えられる回数（この時間の中で） */
+const PASS_TRIES = 10;
+const PASS_WINDOW = 10 * 60_000;
 
 export class CollabCore {
   private info: Info | null = null;
@@ -132,6 +139,8 @@ export class CollabCore {
   onLobby: (info: RoomInfo | { id: string; gone: true }) => void = () => {};
   private lobbyAt = 0;
   private lobbyKey = '';
+  /** あいことばを間違えた時刻（総当たりを防ぐ） */
+  private passFails: number[] = [];
 
   constructor(readonly id: string, private store: CollabStore, opts: { now?: () => number } = {}) {
     this.now = opts.now ?? Date.now;
@@ -266,6 +275,7 @@ export class CollabCore {
         room: { name: clampStr(r.name, 40) || '合作', pass: clampStr(r.pass, 40), unlisted: !!r.unlisted, watch: !!r.watch }, groups: this.doc.groups, lastActive: now, updatedAt: now,
       };
     }
+    if (cid && this.info.banned?.includes(cid)) return 'この部屋には入れません';
     // メンバーの端末ならそのまま。ちがえば、あいことば（見学なら見学できる部屋か）
     const known = !!cid && !!this.info.cids[cid] && !!this.doc.members[this.info.cids[cid]];
     let role: 'edit' | 'view';
@@ -273,8 +283,15 @@ export class CollabCore {
     else if (q.watch) {
       if (!this.info.room.watch) return 'この部屋は見学できません';
       role = 'view';
-    } else if (q.pass && q.pass === this.info.room.pass) role = 'edit';
-    else return q.pass ? 'あいことばが違います' : 'あいことばを入れてください';
+    } else {
+      this.passFails = this.passFails.filter((t) => now - t < PASS_WINDOW);
+      if (this.passFails.length >= PASS_TRIES) return 'あいことばを何度も間違えたので、しばらく入れません';
+      if (q.pass && q.pass === this.info.room.pass) role = 'edit';
+      else {
+        if (q.pass) this.passFails.push(now);
+        return q.pass ? 'あいことばが違います' : 'あいことばを入れてください';
+      }
+    }
     this.info.lastActive = now;
     this.dirtyInfo = true;
     this.schedule();
@@ -298,6 +315,14 @@ export class CollabCore {
       }
       const m = this.doc.members[mid];
       if (q.name) m.name = clampStr(q.name, 24);
+      // リーダーがいない・長く来ていないときは、入った人がリーダーになる
+      const ld = this.doc.members[this.doc.leader];
+      const ldOnline = !!ld && this.onlineIds().ids.includes(ld.id);
+      if (mid !== this.doc.leader && (!ld || (!ldOnline && now - ld.lastSeen > LEADER_AWAY))) {
+        this.doc.leader = mid;
+        m.perms = { main: true, any: true };
+        this.sys(`${ld ? `${ld.name} さんが長く来ていないので、` : ''}リーダーが ${m.name} さんに変わりました`);
+      }
       m.lastSeen = now;
       this.dirtyInfo = true;
       this.schedule();
@@ -328,10 +353,10 @@ export class CollabCore {
     return true;
   }
 
-  private hello(conn: Conn, mid: string, role: 'edit' | 'view') {
+  private hello(conn: Conn, mid: string, role: 'edit' | 'view', restored = false) {
     const lanes = Object.values(this.doc.lanes);
     this.send(conn, {
-      t: 'hello', you: mid, role, now: this.now(), id: this.id, room: this.roomFor(role), lastActive: this.info?.lastActive,
+      t: 'hello', you: mid, role, restored, now: this.now(), id: this.id, room: this.roomFor(role), lastActive: this.info?.lastActive,
       doc: { meta: this.doc.meta, members: this.doc.members, leader: this.doc.leader, trash: this.doc.trash, groups: this.doc.groups, lanes: {} },
       lanes: lanes.length, chat: this.chat.slice(-CHAT_SEND), chatAll: this.chat.length, online: this.onlineIds(),
     });
@@ -396,20 +421,21 @@ export class CollabCore {
       s.rate = 0;
       s.rateAt = now;
     }
-    if (++s.rate > 120) return;
     let m: Record<string, unknown>;
     try {
       m = JSON.parse(data);
     } catch {
       return;
     }
+    // 変更と時計合わせは数えない（捨てると送った変更が届かないままになる）。ほかは 1 秒に 120 回まで
+    if (m.t !== 'ops' && m.t !== 'ping' && ++s.rate > 120) return;
     const edit = s.role === 'edit';
     switch (m.t) {
       case 'ping':
         this.send(conn, { t: 'pong', c: m.c, s: now });
         return;
       case 'ops':
-        if (edit) this.ops(conn, s.mid, m.c, m.ops);
+        if (edit) await this.ops(conn, s.mid, m.c, m.ops);
         else this.send(conn, { t: 'ack', c: m.c, rej: 'all' });
         return;
       case 'cur':
@@ -459,13 +485,17 @@ export class CollabCore {
   }
 
   /** 変更をまとめて当てる。だめだったものは、そのレーンの正しい中身を送り返す */
-  private ops(conn: Conn, mid: string, c: unknown, list: unknown) {
+  private async ops(conn: Conn, mid: string, c: unknown, list: unknown) {
     if (!Array.isArray(list)) return;
     const ok: Op[] = [];
     const rej: number[] = [];
     const fix = new Set<string>();
     let meta = false;
-    list.slice(0, 20000).forEach((raw, i) => {
+    if (list.length > 20000) {
+      this.send(conn, { t: 'ack', c, rej: list.map((_, i) => i) });
+      return;
+    }
+    list.forEach((raw, i) => {
       const op = raw as Op;
       if (!op || typeof op !== 'object' || typeof op.o !== 'string') return rej.push(i);
       // 足すレーンの持ち主は送った人（本譜面以外）
@@ -485,8 +515,9 @@ export class CollabCore {
     if (meta) this.dirtyInfo = true;
     if (ok.length) {
       this.changed();
-      this.schedule();
       this.broadcast({ t: 'ops', by: mid, ops: ok }, conn);
+      // 「受け取った」を返す前に保存する（返した後にサーバーが止まっても消えないように）
+      await this.flush();
     }
     this.send(conn, { t: 'ack', c, rej });
     if (fix.size) {
@@ -683,7 +714,11 @@ export class CollabCore {
         if (!t || t.id === mid) return;
         delete this.doc.members[t.id];
         for (const g of Object.values(this.doc.groups)) g.members = g.members.filter((x) => x !== t.id);
-        for (const [cid, x] of Object.entries(this.info!.cids)) if (x === t.id) delete this.info!.cids[cid];
+        for (const [cid, x] of Object.entries(this.info!.cids)) if (x === t.id) {
+          delete this.info!.cids[cid];
+          // 外した人は、あいことばを知っていても入れない
+          (this.info!.banned ??= []).push(cid);
+        }
         for (const [c, s] of this.sess) if (s.mid === t.id) {
           this.send(c, { t: 'kicked' });
           this.sess.delete(c);
@@ -692,6 +727,31 @@ export class CollabCore {
         this.membersChanged();
         this.broadcast({ t: 'online', ...this.onlineIds() });
         this.sys(`${t.name} さんがプロジェクトから外れました`);
+        return;
+      }
+      case 'leave': {
+        // 自分から部屋を抜ける（メンバーの枠を空ける）。リーダーなら、最近来た人へリーダーを渡す
+        if (!me) return;
+        delete this.doc.members[mid];
+        for (const g of Object.values(this.doc.groups)) g.members = g.members.filter((x) => x !== mid);
+        for (const [cid, x] of Object.entries(this.info!.cids)) if (x === mid) delete this.info!.cids[cid];
+        if (leader) {
+          const next = Object.values(this.doc.members).sort((a, b) => b.lastSeen - a.lastSeen)[0];
+          this.doc.leader = next?.id ?? '';
+          if (next) {
+            next.perms = { main: true, any: true };
+            this.sys(`リーダーが ${next.name} さんに変わりました`);
+          }
+        }
+        for (const [c, x] of this.sess) if (x.mid === mid) {
+          this.send(c, { t: 'left' });
+          this.sess.delete(c);
+          c.close(4005, 'left');
+        }
+        this.membersChanged();
+        this.broadcast({ t: 'online', ...this.onlineIds() });
+        this.sys(`${name} さんが部屋を抜けました`);
+        this.pushLobby(true);
         return;
       }
       case 'profile': {
@@ -724,7 +784,7 @@ export class CollabCore {
         this.sys(`${name} さんが版「${v.name}」（${new Date(v.at).toISOString().slice(0, 16).replace('T', ' ')}）に戻しました`);
         await this.flush();
         // 全員に最初から送り直す
-        for (const [c, s] of this.sess) this.hello(c, s.mid, s.role);
+        for (const [c, s] of this.sess) this.hello(c, s.mid, s.role, true);
         return;
       }
     }

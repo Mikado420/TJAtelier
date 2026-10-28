@@ -1,4 +1,4 @@
-import { TPB, type EEvent } from '../chart/model';
+import { measures, Timing, TPB, type EChart, type EEvent, type ECourse, type Measure } from '../chart/model';
 import { drawAny, drawRoll, hexPath } from '../render/notes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
@@ -39,6 +39,8 @@ const R = {
   evBottom: 616,
   /** #DELAY で重なった所に出す段の間のすき間（段は上下にスクロールして見る） */
   subGap: 16,
+  /** 合作: ほかのレーン（譜面）との間（段の間に足す） */
+  laneGap: 50,
 };
 
 /** 上のタイムラインに見せる長さ（拍）。4/4 で 3 小節 */
@@ -151,7 +153,12 @@ export interface GhostRow {
   notes: { t: number; e?: number; type: string }[];
   /** 小節線（秒） */
   bars: number[];
+  /** レーンの譜面そのもの（縦に並べて、命令・GOGO なども描くため） */
+  chart?: EChart;
 }
+
+/** ほかのレーンを描くための表（譜面が変わったら作り直す） */
+interface GhostGeo { chart: EChart; course: ECourse; timing: Timing; lanes: DelayLanes; ms: Measure[]; gogo: [number, number][] }
 
 /** 合作: ほかの人が見ている場所 */
 export interface CursorMark { color: string; name: string; t: number }
@@ -203,11 +210,69 @@ export class EditorView {
   private vrowRaw = 0;
   private vAnim = 0;
   get vrow() {
-    return Math.min(Math.max(0, this.vrowRaw), this.lanes.rows - this.visRows);
+    return Math.min(Math.max(0, this.vrowRaw), this.totalRows - this.visRows);
   }
   /** 同時に見せる段の数（#DELAY で重なる所は、1 段目の下に同じ大きさで 2 段目まで並べる。3 段以上は上下にスクロール） */
   get visRows() {
-    return this.stack ? Math.min(this.lanes.rows, 2) : 1;
+    return this.stack ? Math.min(this.totalRows, 2) : 1;
+  }
+  /**
+   * 合作: ほかのレーンも、自分のレーンの下に同じ大きさで並べる（#DELAY の段と同じ形。譜面ごとに少し間をあける）。
+   * 上下にスクロールして見る
+   */
+  lanesFull = true;
+  private get fullGhosts() {
+    return this.stack && this.lanesFull ? this.ghosts.filter((g) => g.chart) : [];
+  }
+  private geoCache = new WeakMap<EChart, GhostGeo>();
+  private geoOf(g: GhostRow): GhostGeo {
+    const chart = g.chart!;
+    let geo = this.geoCache.get(chart);
+    if (!geo) {
+      const course = chart.courses[0];
+      const timing = new Timing(chart, course);
+      let end = 0;
+      for (const n of course.notes) end = Math.max(end, n.endTick ?? n.tick);
+      for (const e of course.events) end = Math.max(end, e.tick);
+      const gogo: [number, number][] = [];
+      let from: number | null = null;
+      for (const e of course.events) {
+        if (e.kind !== 'gogo') continue;
+        if (e.on && from === null) from = e.tick;
+        if (!e.on && from !== null) { gogo.push([from, e.tick]); from = null; }
+      }
+      if (from !== null) gogo.push([from, Infinity]);
+      geo = { chart, course, timing, lanes: new DelayLanes(course, timing), ms: measures(course, end + TPB * 4 * 64), gogo };
+      this.geoCache.set(chart, geo);
+    }
+    return geo;
+  }
+  /** 段の並び（譜面ごと）: [譜面の番号（0 = 自分、1〜 = ほかのレーン）, その譜面の中の段] */
+  private get rowMap(): [number, number][] {
+    const out: [number, number][] = [];
+    for (let r = 0; r < this.lanes.rows; r++) out.push([0, r]);
+    this.fullGhosts.forEach((g, i) => {
+      const n = this.geoOf(g).lanes.rows;
+      for (let r = 0; r < n; r++) out.push([i + 1, r]);
+    });
+    return out;
+  }
+  /** 段の数（自分のレーンの #DELAY の段 ＋ ほかのレーンの段） */
+  get totalRows() {
+    let n = this.lanes.rows;
+    for (const g of this.fullGhosts) n += this.geoOf(g).lanes.rows;
+    return n;
+  }
+  /** 段 r の頭の位置（段 0 の頭から。途中の値はスクロール中）。譜面が変わる所は少し間をあける */
+  private rowOff(r: number) {
+    const L = this.L;
+    let gap = 0;
+    let start = this.lanes.rows;
+    for (const g of this.fullGhosts) {
+      gap += Math.min(1, Math.max(0, r - (start - 1))) * L.laneGap;
+      start += this.geoOf(g).lanes.rows;
+    }
+    return r * (L.laneH + L.subGap) + gap;
   }
   /** 再生中の時刻（DELAY の空きの間も判定枠を進めるため） */
   posTime: number | null = null;
@@ -270,7 +335,8 @@ export class EditorView {
       const evH = Math.max(16, (R.evBottom - R.evTop) * s);
       const vis = this.visRows;
       const subGap = R.subGap * s;
-      const blockH = vis * laneH + (vis - 1) * subGap;
+      const laneGap = R.laneGap * s;
+      const blockH = vis * laneH + (vis - 1) * subGap + (vis > this.lanes.rows ? laneGap : 0);
       // 1 段目はいつも縦の真ん中（下の命令とツールが入らない画面だけ上へ）。2 段目以降はその下に続ける。
       // 上のタイムラインの大きさは段の数で変えない
       const laneY = Math.min((this.h - laneH) / 2, this.h - this.toolsH - evH - 8 * s - laneH);
@@ -278,9 +344,11 @@ export class EditorView {
       const tlTop = 8 * s;
       return {
         sub: this.lanes.rows - 1,
+        rows: this.totalRows,
         vis,
         blockH,
         subGap,
+        laneGap,
         s,
         colW: R.laneX * s,
         colLine1: R.colLine1 * s,
@@ -308,6 +376,8 @@ export class EditorView {
     const laneH = (R.laneBottom - R.laneTop) * s;
     return {
       vis: 1,
+      rows: this.lanes.rows,
+      laneGap: 0,
       blockH: laneH,
       ctlTop: 0,
       tlX: 0,
@@ -395,7 +465,7 @@ export class EditorView {
   /** 段ごとの縦の位置（0 = いつものレーン、1〜 = 下に出る段） */
   rowGeom(row: number) {
     const L = this.L;
-    const y = L.laneY + (row - this.vrow) * (L.laneH + L.subGap);
+    const y = L.laneY + this.rowOff(row) - this.rowOff(this.vrow);
     return { y, h: L.laneH, cy: y + (L.cy - L.laneY), r: L.r, bigR: L.bigR };
   }
 
@@ -405,9 +475,11 @@ export class EditorView {
     const near = Math.round(this.vrow);
     if (y < L.laneY) return y >= L.laneY - L.r * 0.5 ? near : -1;
     if (y > L.laneY + L.blockH) return y <= L.evTop + L.evH ? near : -1;
-    const c = y - L.laneY + this.vrow * (L.laneH + L.subGap);
-    const row = Math.floor(c / (L.laneH + L.subGap));
-    return c - row * (L.laneH + L.subGap) <= L.laneH ? Math.min(row, L.sub) : -1;
+    for (let r = 0; r < L.rows; r++) {
+      const g = this.rowGeom(r);
+      if (y >= g.y && y <= g.y + g.h) return r;
+    }
+    return -1;
   }
 
   /** 見ている段を、一番近い段へなめらかに寄せる */
@@ -548,14 +620,14 @@ export class EditorView {
       const dx = pt.x - this.drag.lastX;
       // #DELAY の段があるときは、レーンを縦にドラッグして段を切り替える
       if (this.drag.v) {
-        this.vrowRaw = this.vrow - (pt.y - this.drag.lastY) / (L.laneH + L.subGap);
+        this.vrowRaw = this.vrow - (pt.y - this.drag.lastY) / (L.laneH + L.subGap + (L.rows > L.sub + 1 ? L.laneGap : 0));
         this.drag.lastY = pt.y;
         this.invalidate();
         return;
       }
       const ax = Math.abs(pt.x - this.drag.startX);
       const ay = Math.abs(pt.y - this.drag.startY);
-      if (!this.drag.moved && L.sub >= L.vis && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
+      if (!this.drag.moved && L.rows > L.vis && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
         this.drag.moved = true;
         this.drag.v = true;
         this.drag.lastY = pt.y;
@@ -602,10 +674,10 @@ export class EditorView {
         const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
         if (e.ctrlKey || e.metaKey || (!horiz && !e.shiftKey)) {
           this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.002));
-        } else if (e.shiftKey && !horiz && this.L.sub >= this.L.vis && e.altKey) {
+        } else if (e.shiftKey && !horiz && this.L.rows > this.L.vis && e.altKey) {
           // Shift + Alt + ホイールで段を切り替える
           const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-          if (d) this.settleRow(Math.min(this.L.sub + 1 - this.L.vis, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
+          if (d) this.settleRow(Math.min(this.L.rows - this.L.vis, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
         } else {
           this.onUserScroll();
           this.stopSettle();
@@ -655,6 +727,11 @@ export class EditorView {
     if (x < L.play.x) return;
     const row = this.rowAtY(y);
     if (row < 0) return;
+    if (row > L.sub) {
+      const g = this.fullGhosts[this.rowMap[row][0] - 1];
+      if (g) this.onGhostTap(g.id);
+      return;
+    }
     const t = this.tickOf(x, row);
     if (t !== null && t > -this.ed.step / 2) this.onTap(t, (this.rowGeom(row).r / this.zoom) * TPB);
   }
@@ -677,7 +754,7 @@ export class EditorView {
     const laneClip = (fn: () => void) => {
       ctx.save();
       ctx.beginPath();
-      if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
+      if (L.rows > 1) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
       else ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
       ctx.clip();
       fn();
@@ -780,7 +857,7 @@ export class EditorView {
     ctx.restore();
 
     // 見えていない段に音符がある所: 上下の縁を緑にして知らせる。右の端に、見ている段の印
-    if (L.sub) {
+    if (L.rows > 1) {
       const cur = Math.round(this.vrow);
       const last = cur + L.vis - 1;
       const bh = Math.max(3, 6 * s);
@@ -795,8 +872,8 @@ export class EditorView {
       }
       const dr = Math.max(3, 6 * s);
       const gap = dr * 3;
-      const y0 = L.laneY + L.blockH / 2 - (L.sub * gap) / 2;
-      for (let r = 0; r <= L.sub && L.sub >= L.vis; r++) {
+      const y0 = L.laneY + L.blockH / 2 - ((L.rows - 1) * gap) / 2;
+      for (let r = 0; r < L.rows && L.rows > L.vis; r++) {
         ctx.fillStyle = r >= cur && r <= last ? EVENT_COLOR.delay : 'rgba(255,255,255,0.3)';
         ctx.beginPath();
         ctx.arc(this.w - dr * 2.5, y0 + r * gap, dr, 0, Math.PI * 2);
@@ -992,7 +1069,7 @@ export class EditorView {
     // ノーツ（後ろから描く）
     ctx.save();
     ctx.beginPath();
-    if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
+    if (L.rows > 1) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
     else ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
     ctx.clip();
     const notes = course.notes;
@@ -1074,6 +1151,7 @@ export class EditorView {
     }
     ctx.restore();
 
+    this.drawFullGhosts(L);
     this.drawCursors(L);
     this.drawColumn(L);
   }
@@ -1225,7 +1303,7 @@ export class EditorView {
     ctx.restore();
 
     // 合作: ほかのレーン（波形の所に重ねる）
-    this.drawGhosts(L, { top: waveTop + 2 * s, bottom: waveBot - 2 * s });
+    if (!this.fullGhosts.length) this.drawGhosts(L, { top: waveTop + 2 * s, bottom: waveBot - 2 * s });
 
     // 音符の段（後ろから）
     ctx.save();
@@ -1376,6 +1454,196 @@ export class EditorView {
       ctx.fillText(label, px + 11 * s, cy);
       this.ghostBoxes.push({ x1: px - 6 * s, x2: px + pw + 6 * s, y1: y, y2: y + rh, id: g.id });
     });
+  }
+
+  /**
+   * 合作: ほかのレーンを、自分のレーンの下に同じ大きさで描く（自分のレーンと同じ描き方: GOGO・小節線・拍の点・命令・グラデ・#DELAY の段）。
+   * 横の位置は時刻でそろえる。譜面の間には名前と、その譜面の命令を出す
+   */
+  private drawFullGhosts(L: Lay) {
+    const gs = this.fullGhosts;
+    if (!gs.length) return;
+    const ctx = this.ctx;
+    const s = L.s;
+    const x0 = L.colW;
+    const own = this.lanes;
+    const tL = own.timeOfDisp(this.dOf(x0 - L.bigR * 2));
+    const tR = own.timeOfDisp(this.dOf(this.w + L.bigR * 2));
+    const map = this.rowMap;
+    const lw = Math.max(1, 2 * s);
+    const font = (w: number, px: number) => `${w} ${Math.round(px)}px 'Barlow Semi Condensed', system-ui, sans-serif`;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, L.laneY, this.w - x0, L.blockH);
+    ctx.clip();
+    gs.forEach((g, gi) => {
+      const geo = this.geoOf(g);
+      const ln = geo.lanes;
+      const first = map.findIndex(([c]) => c === gi + 1);
+      if (first < 0) return;
+      const rowG = (r: number) => this.rowGeom(first + r);
+      const top = rowG(0).y;
+      const bottom = rowG(ln.rows - 1).y + L.laneH;
+      if (top - L.laneGap > L.laneY + L.blockH || bottom < L.laneY) return;
+      /** そのレーンの表示の位置 → 画面の x（時刻でそろえる） */
+      const X = (d: number) => this.xOfTime(ln.timeOfDisp(d));
+      const Xt = (tick: number) => this.xOfTime(geo.timing.tickToTime(tick));
+      const [leftTick, rightTick] = ln.tickRange(ln.dispOfTime(tL), ln.dispOfTime(tR));
+      const spans = (a: number, b: number) =>
+        ln.spans(a, b).map((sp) => ({ g: rowG(sp.row), x1: Math.max(x0, X(sp.a)), x2: Math.min(this.w, X(sp.b)) })).filter((sp) => sp.x2 > sp.x1);
+
+      // 譜面の間: 名前と、命令（GOGO 以外）
+      const hy = top - L.subGap - L.laneGap;
+      const hh = L.laneGap;
+      ctx.fillStyle = 'rgba(16,19,22,0.92)';
+      ctx.fillRect(x0, hy, this.w - x0, hh);
+      ctx.fillStyle = g.color;
+      ctx.fillRect(x0, hy + 4 * s, Math.max(3, 6 * s), hh - 8 * s);
+      ctx.font = font(800, Math.max(11, 24 * s));
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#f4f4f4';
+      const label = `${g.main ? '★' : ''}${g.name}`;
+      ctx.fillText(label, x0 + 14 * s + 4, hy + hh / 2);
+      let end = x0 + 14 * s + 4 + ctx.measureText(label).width + 12 * s;
+      ctx.font = font(700, Math.max(10, 20 * s));
+      const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
+      const grads = geo.course.grads ?? [];
+      for (const e of evs) {
+        if (e.kind === 'scroll' && grads.some((gr) => e.tick > gr.start && e.tick < gr.end)) continue;
+        const x = Xt(e.tick);
+        if (x < x0 || x > this.w) continue;
+        // 三角の印はレーンの上の縁に
+        const ry = rowG(ln.rowOf(e.tick)).y;
+        ctx.fillStyle = EVENT_COLOR[e.kind];
+        ctx.beginPath();
+        ctx.moveTo(x, ry + 2);
+        ctx.lineTo(x - 7 * s - 1, ry - 7 * s);
+        ctx.lineTo(x + 7 * s + 1, ry - 7 * s);
+        ctx.closePath();
+        ctx.fill();
+        const gr = e.kind === 'scroll' ? grads.find((q) => q.start === e.tick) : undefined;
+        const t = gr ? `×${gr.from}→${gr.to}` : eventShort(e);
+        const w = ctx.measureText(t).width + 12 * s;
+        if (x < end) continue;
+        const by = hy + 6 * s;
+        const bh = hh - 14 * s;
+        ctx.fillStyle = 'rgba(30,30,36,0.95)';
+        ctx.fillRect(x + 2, by, w, bh);
+        ctx.fillStyle = EVENT_COLOR[e.kind];
+        ctx.fillRect(x + 2, by, Math.max(2, 3 * s), bh);
+        ctx.fillText(t, x + 2 + 6 * s, by + bh / 2);
+        end = x + 2 + w + 4 * s;
+      }
+
+      // レーン（#DELAY で重なった所だけ下の段。ほかは暗く）
+      for (let r = 0; r < ln.rows; r++) {
+        const q = rowG(r);
+        ctx.fillStyle = r === 0 ? C.lane : C.emptyLane;
+        ctx.fillRect(x0, q.y, this.w - x0, q.h);
+      }
+      for (const pc of ln.pieces) {
+        if (pc.row === 0) continue;
+        const q = rowG(pc.row);
+        const x1 = Math.max(x0, X(pc.a));
+        const x2 = Math.min(this.w, X(pc.b));
+        if (x2 > x1) { ctx.fillStyle = C.subLane; ctx.fillRect(x1, q.y, x2 - x1, q.h); }
+      }
+      // レーンの色（うっすら）
+      ctx.globalAlpha = 0.1;
+      ctx.fillStyle = g.color;
+      for (let r = 0; r < ln.rows; r++) ctx.fillRect(x0, rowG(r).y, this.w - x0, L.laneH);
+      ctx.globalAlpha = 1;
+      // ゴーゴー
+      ctx.fillStyle = C.gogo;
+      for (const [a, b] of geo.gogo) for (const sp of spans(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
+      // グラデ（下の端に紫の帯）
+      for (const gr of grads) {
+        const bh = Math.max(4, 10 * s);
+        const grd = ctx.createLinearGradient(Xt(gr.start), 0, Xt(gr.end), 0);
+        grd.addColorStop(0, 'rgba(199,146,234,0.25)');
+        grd.addColorStop(1, 'rgba(199,146,234,0.9)');
+        ctx.fillStyle = grd;
+        for (const sp of spans(gr.start, gr.end)) ctx.fillRect(sp.x1, sp.g.y + sp.g.h - bh, sp.x2 - sp.x1, bh);
+      }
+      // 小節線・拍の点・小節番号
+      const step = this.ed.step;
+      const stepPx = (step / TPB) * this.zoom;
+      ctx.font = `600 ${Math.round(28 * s)}px ui-monospace, monospace`;
+      ctx.textBaseline = 'top';
+      for (const m of geo.ms) {
+        if (m.start + m.length < leftTick) continue;
+        if (m.start > rightTick) break;
+        const count = Math.ceil(m.length / step - 1e-6);
+        const pts = stepPx >= 7 ? Array.from({ length: Math.max(0, count - 1) }, (_, k) => Math.round((k + 1) * step)) : beatRels(m.length);
+        for (const rel of pts) {
+          const inBeat = rel % TPB;
+          if (stepPx < 7 && inBeat !== 0) continue;
+          const x = Xt(m.start + rel);
+          if (x < x0 || x > this.w) continue;
+          const d = inBeat === 0 ? 1 : TPB / gcd(TPB, inBeat);
+          ctx.fillStyle = DOT_COLORS[d] ?? '#6c6c74';
+          hexPath(ctx, x, rowG(ln.rowOf(m.start + rel)).cy, (inBeat === 0 ? 13 : 9) * s);
+          ctx.fill();
+        }
+        const x = Xt(m.start);
+        if (x >= x0 - 1 && x <= this.w + 1) {
+          const q = rowG(ln.rowOf(m.start));
+          ctx.fillStyle = C.measure;
+          ctx.fillRect(x - lw / 2, q.y, lw, q.h);
+          ctx.fillStyle = C.text;
+          ctx.fillText(String(m.index + 1), x + 6 * s, q.y + 6 * s);
+        }
+      }
+      // 判定枠（自分のレーンと同じ位置に、細く）
+      ctx.lineWidth = Math.max(1, 2 * s);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      for (let r = 0; r < ln.rows; r++) {
+        ctx.beginPath();
+        ctx.arc(L.playX, rowG(r).cy, R.judgeR * s, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // 音符（後ろから）
+      const notes = geo.course.notes;
+      for (let i = notes.length - 1; i >= 0; i--) {
+        const n = notes[i];
+        const endT = n.endTick ?? n.tick;
+        if (endT < leftTick || n.tick > rightTick) continue;
+        const x = Xt(n.tick);
+        const ex = n.endTick !== undefined ? Xt(n.endTick) : undefined;
+        const q = rowG(ln.rowOf(n.tick));
+        const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
+        if (n.type === 'balloon' && ex !== undefined) {
+          ctx.globalAlpha = 0.45;
+          drawRoll(ctx, x, ex, q.cy, q.r, 'balloon');
+          ctx.globalAlpha = 1;
+          drawAny(ctx, n.type, x, q.cy, q.r, undefined, n.hits ?? 5);
+        } else {
+          drawAny(ctx, n.type, x, q.cy, big ? q.bigR : q.r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
+        }
+      }
+      // 縁
+      ctx.fillStyle = C.laneEdge;
+      for (let r = 0; r < ln.rows; r++) {
+        const q = rowG(r);
+        ctx.fillRect(x0, q.y - lw / 2, this.w - x0, lw);
+        ctx.fillRect(x0, q.y + q.h - lw / 2, this.w - x0, lw);
+      }
+      // 名前の帯が上に隠れたら、名前をレーンの左上に残す
+      if (hy + hh / 2 < L.laneY && bottom > L.laneY + 20 * s) {
+        ctx.font = font(800, Math.max(10, 20 * s));
+        const tw = ctx.measureText(label).width;
+        const py = Math.min(L.laneY + 4 * s, bottom - 40 * s);
+        ctx.fillStyle = 'rgba(10,12,14,0.85)';
+        ctx.fillRect(x0 + 4, py, tw + 20 * s, Math.max(16, 34 * s));
+        ctx.fillStyle = g.color;
+        ctx.fillRect(x0 + 4, py, Math.max(3, 5 * s), Math.max(16, 34 * s));
+        ctx.fillStyle = '#f4f4f4';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x0 + 4 + 12 * s, py + Math.max(8, 17 * s));
+      }
+    });
+    ctx.restore();
   }
 
   /** 合作: ほかの人の見ている場所（色の縦線と名前） */

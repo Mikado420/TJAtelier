@@ -222,4 +222,74 @@ describe('合作プロジェクト（サーバー）', () => {
     lb.update({ id: 'AAAAAA', gone: true });
     expect(lb.list(now)).toEqual([]);
   });
+  it('壊れた値は受け取らない。担当の人は BPM・拍子・DELAY を置けない', async () => {
+    const { core, A, B, ca, cb, send } = await setup();
+    await send(ca, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('M', A, true) }] });
+    await send(ca, { t: 'cmd', x: 'groups', groups: { A: { id: 'A', name: 'A', color: '#f00', ranges: [{ lane: 'M', from: 1, to: 4 }], members: [B] } } });
+    await send(ca, { t: 'ops', c: 2, ops: [
+      { o: 'n', l: 'M', k: '10', v: { type: 'xx' } },
+      { o: 'e', l: 'M', k: '0:bpm', v: { tick: 0, kind: 'bpm', value: 0 } },
+      { o: 'e', l: 'M', k: '0:measure', v: { tick: 0, kind: 'measure', num: 3, den: 0 } },
+      { o: 'n', l: 'M', k: '20', v: { type: 'roll', endTick: 5 } },
+    ] });
+    expect(last(ca, 'ack')!.rej).toEqual([0, 1, 2, 3]);
+    await send(cb, { t: 'ops', c: 3, ops: [
+      { o: 'e', l: 'M', k: '960:bpm', v: { tick: 960, kind: 'bpm', value: 200 } },
+      { o: 'e', l: 'M', k: '960:scroll', v: { tick: 960, kind: 'scroll', value: 2 } },
+    ] });
+    expect(last(cb, 'ack')!.rej).toEqual([0]);
+  });
+
+  it('受け取りを返す前に保存する。送りすぎても変更は捨てない', async () => {
+    const { store, A, ca, send } = await setup();
+    await send(ca, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('M', A, true) }] });
+    expect(last(ca, 'ack')!.rej).toEqual([]);
+    expect((store.m.get('lane:M') as Lane).id).toBe('M');
+    for (let i = 0; i < 300; i++) await send(ca, { t: 'cur', l: 'M', tick: i });
+    await send(ca, { t: 'ops', c: 2, ops: [{ o: 'n', l: 'M', k: '0', v: { type: 'don' } }] });
+    expect(last(ca, 'ack')!.c).toBe(2);
+    expect((store.m.get('lane:M') as Lane).notes['0']).toEqual({ type: 'don' });
+  });
+
+  it('外した人は、あいことばを知っていても入れない。自分から抜けると枠が空き、リーダーは渡る', async () => {
+    const { core, A, B, ca, cb, send } = await setup();
+    await send(ca, { t: 'cmd', x: 'kick', mid: B });
+    expect(cb.closed).toBe(true);
+    expect(await core.join(conn(), q('b', { pass: PASS }))).toBe('この部屋には入れません');
+    const cc = conn();
+    const C = await core.join(cc, q('c', { pass: PASS }));
+    if (typeof C === 'string') throw new Error(C);
+    await send(ca, { t: 'cmd', x: 'leave' });
+    expect(ca.closed).toBe(true);
+    expect(core.member(A)).toBeUndefined();
+    expect(last(cc, 'members')!.leader).toBe(C.mid);
+  });
+
+  it('リーダーが 2 週間来なければ、次に入った人がリーダーになる', async () => {
+    let now = 1_000_000;
+    const core = new CollabCore('P', new MemoryStore(), { now: () => now });
+    const ca = conn();
+    const cb = conn();
+    const A = await core.join(ca, q('a', { create: ROOM }));
+    const B = await core.join(cb, q('b', { pass: PASS }));
+    if (typeof A === 'string' || typeof B === 'string') throw new Error('join');
+    core.leave(ca);
+    core.leave(cb);
+    now += 3 * 86400_000;
+    const c1 = conn();
+    await core.join(c1, q('b'));
+    expect(last(c1, 'hello')!.doc.leader).toBe(A.mid);
+    core.leave(c1);
+    now += 15 * 86400_000;
+    const c2 = conn();
+    await core.join(c2, q('b'));
+    expect(last(c2, 'hello')!.doc.leader).toBe(B.mid);
+  });
+
+  it('あいことばを何度も間違えると、しばらく入れない（メンバーの端末は入れる）', async () => {
+    const { core } = await setup();
+    for (let i = 0; i < 10; i++) await core.join(conn(), q('x' + i, { pass: 'ちがう' }));
+    expect(await core.join(conn(), q('y', { pass: PASS }))).toContain('しばらく');
+    expect(typeof (await core.join(conn(), q('a')))).toBe('object');
+  });
 });
