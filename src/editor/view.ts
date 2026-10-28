@@ -1143,7 +1143,31 @@ export class EditorView {
     const stepPx = (step / TPB) * tz;
     const lw = Math.max(1, s * 1.5);
     // 小節番号は重ならないものだけ（とても短い小節が続く所など）
-    let labelEnd = L.playX - 2;
+    // 今の位置の表示の大きさ（小節番号がこれに重ならないよう、先に測る）
+    const ro = (() => {
+      const at = Math.max(0, ed.snap(this.pos));
+      const mm = ed.measureOf(at);
+      const bar = String(mm.index + 1);
+      const val = `${Number(ed.timing.bpmAt(at).toFixed(2))}  ${mm.num}/${mm.den}`;
+      const f0 = font(800, Math.max(12, 26 * s));
+      const f1 = font(700, Math.max(11, 20 * s));
+      const f2 = font(700, Math.max(8, 13 * s));
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.font = f1;
+      const vw = ctx.measureText(val).width;
+      ctx.font = f2;
+      const lw2 = ctx.measureText('BPM').width;
+      ctx.font = f0;
+      const bw0 = ctx.measureText(bar).width;
+      // 再生位置の手前に右寄せ。入らなければ左の端から並べる
+      const total = bw0 + 10 + lw2 + 4 + vw;
+      const bx = Math.max(x0 + 6, L.playX - 14 * s - 8 - total);
+      const lx = bx + bw0 + 10;
+      const rx = lx + lw2 + 4 + vw;
+      return { bar, val, f0, f1, f2, bx, lx, lw2, rx };
+    })();
+    let labelEnd = Math.max(L.playX - 2, ro.rx + 10);
     for (const m of ms) {
       if (m.start + m.length < leftTick) continue;
       if (m.start > rightTick) break;
@@ -1244,26 +1268,10 @@ export class EditorView {
 
     // 今の位置の小節・BPM・拍子（見出しの、再生位置の手前）
     {
-      const at = Math.max(0, ed.snap(this.pos));
-      const mm = ed.measureOf(at);
-      const bar = String(mm.index + 1);
-      const val = `${Number(ed.timing.bpmAt(at).toFixed(2))}  ${mm.num}/${mm.den}`;
-      const f0 = font(800, Math.max(12, 26 * s));
-      const f1 = font(700, Math.max(11, 20 * s));
-      const f2 = font(700, Math.max(8, 13 * s));
+      const { bar, val, f0, f1, f2, bx, lx, lw2, rx } = ro;
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      ctx.font = f1;
-      const vw = ctx.measureText(val).width;
-      ctx.font = f2;
-      const lw2 = ctx.measureText('BPM').width;
       ctx.font = f0;
-      const bw0 = ctx.measureText(bar).width;
-      // 再生位置の手前に右寄せ。入らなければ左の端から並べる
-      const total = bw0 + 10 + lw2 + 4 + vw;
-      const bx = Math.max(x0 + 6, L.playX - 14 * s - 8 - total);
-      const lx = bx + bw0 + 10;
-      const rx = lx + lw2 + 4 + vw;
       const cy = top + headH / 2 + 1;
       ctx.fillStyle = 'rgba(10,12,14,0.95)';
       ctx.fillRect(bx - 6, top + 2, rx - bx + 10, headH - 4);

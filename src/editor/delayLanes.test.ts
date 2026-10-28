@@ -37,4 +37,18 @@ describe('#DELAY の段', () => {
     expect(ln.dispOfTime(3.5)).toBeCloseTo(m2 + TPB * 3);
     expect(ln.timeOfDisp(m2 + TPB)).toBeCloseTo(2.5);
   });
+  it('DELAY・BPM・MEASURE が混ざっても、どの段の音符も鳴る時刻の位置に出る（再生の位置・波形とずれない）', () => {
+    const c = parseTJA(tja('1111,\n1010101010101010,\n#DELAY -1.3\n#MEASURE 1/4\n1,\n1,\n#MEASURE 4/4\n#BPMCHANGE 180\n1111,\n#DELAY 0.7\n2222,\n#DELAY -2\n#BPMCHANGE 90\n1212,\n1111,'));
+    const course = c.courses[0];
+    const t = new Timing(c, course);
+    const ln = new DelayLanes(course, t);
+    expect(ln.rows).toBeGreaterThan(1);
+    for (const n of course.notes) {
+      const time = t.tickToTime(n.tick);
+      const d = ln.disp(n.tick);
+      expect(ln.dispOfTime(time)).toBeCloseTo(d, 3);
+      expect(ln.timeOfDisp(d)).toBeCloseTo(time, 5);
+      expect(ln.tickAt(d, ln.rowOf(n.tick))).toBeCloseTo(n.tick, 3);
+    }
+  });
 });
