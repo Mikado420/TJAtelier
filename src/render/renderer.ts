@@ -73,6 +73,8 @@ export interface Layout {
   restBottom: number;
   /** 背景の動画を「上だけ」に出すときの範囲（画面 px） */
   top: { x: number; y: number; w: number; h: number };
+  /** レーンより下（床の所） */
+  bottom: { x: number; y: number; w: number; h: number };
 }
 
 /** オンライン対戦の相手（小さいレーンで下に並べる） */
@@ -236,6 +238,7 @@ export class Renderer {
       drumRY: this.drum().ry,
       restBottom: this.restZone ? this.sy(LANE_TOP) : 0,
       top: { x: this.ox, y: this.oy, w: REF_W * s, h: this.sy(LANE_TOP) - this.oy },
+      bottom: { x: this.ox, y: this.sy(TEXT_BOTTOM), w: REF_W * s, h: this.sy(this.vis.y1) - this.sy(TEXT_BOTTOM) },
     };
     for (const c of Object.values(this.burstSprites)) { c.width = 0; c.height = 0; }
     this.burstSprites = {};
@@ -256,7 +259,7 @@ export class Renderer {
   spectate = false;
 
   /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
-  videoMode: '' | 'full' | 'top' = '';
+  videoMode: '' | 'full' | 'bottom' = '';
 
   /** 観戦のとき: 画面に入る音符・小節線の位置だけ求める（自分のレーンは描かない） */
   private computeVis(game: Game, bars: Course['bars'], now: number, right: number) {
@@ -386,10 +389,11 @@ export class Renderer {
   }
 
   /** 背景の動画があるとき: 全面なら塗らない、上だけなら上を空けて下はふつうの床 */
-  private paintVideoBackground(c: CanvasRenderingContext2D, V: Rect, vm: 'full' | 'top') {
+  private paintVideoBackground(c: CanvasRenderingContext2D, V: Rect, vm: 'full' | 'bottom') {
     if (vm === 'full') return;
+    // 下だけ: レーンより上はいつもの背景、レーンの下（床の所）を透かして動画を見せる
     this.paintPlainBackground(c, V);
-    c.clearRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
+    c.clearRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
   }
 
   private paintPlainBackground(c: CanvasRenderingContext2D, V: Rect) {
@@ -1963,7 +1967,8 @@ export class Renderer {
     const ctx = this.ctx;
     const EMIT = FW_EMIT; // 噴き出している時間
     const LIFE = 700; // 1 粒の寿命
-    const bottom = REF_H - 70;
+    // 画面のいちばん下から噴き出す
+    const bottom = this.vis.y1;
     const top = TEXT_BOTTOM;
     const hgt = bottom - top;
     ctx.save();
@@ -1979,7 +1984,8 @@ export class Renderer {
       // 火花の柱の光
       if (age < EMIT + 150) {
         const a = age < 80 ? age / 80 : age < EMIT ? 1 : 1 - (age - EMIT) / 150;
-        const h = hgt * 0.95 * Math.min(1, age / 140);
+        // テッペンまでほぼ一瞬で伸びる
+        const h = hgt * 0.95 * Math.min(1, age / 25);
         const g = ctx.createLinearGradient(0, bottom, 0, bottom - h);
         g.addColorStop(0, `rgba(255,252,240,${a})`);
         g.addColorStop(0.65, `rgba(255,228,160,${0.75 * a})`);
@@ -1997,7 +2003,7 @@ export class Renderer {
       for (let i = 0; i < f.n; i++) {
         const pa = (age - (i / f.n) * EMIT) / 1000;
         if (pa < 0 || pa * 1000 > LIFE) continue;
-        this.spark(f.x + i * 7.13, f.x * 1.7 + i * 3.91, f.x, pa, i, bottom, hgt, LIFE, 1);
+        this.spark(f.x + i * 7.13, f.x * 1.7 + i * 3.91, f.x, pa, i, bottom, hgt, LIFE, 3);
       }
       ctx.globalAlpha = 1;
     }
@@ -2011,7 +2017,8 @@ export class Renderer {
     const r2 = hash(k2);
     const vy = -(hgt * 1.5 + r1 * hgt * 0.9) * boost;
     const vx = (r2 - 0.5) * 260 * boost;
-    const g = hgt * 2.4;
+    // 勢い（boost）を上げても同じ高さまで上がるよう、重さも合わせる（速く上がって速く落ちる）
+    const g = hgt * 2.4 * boost * boost;
     const px = x + vx * pa;
     const py = bottom + vy * pa + 0.5 * g * pa * pa;
     const life = (pa * 1000) / LIFE;

@@ -42,10 +42,8 @@ export interface PlaySettings {
   restZone?: boolean;
   /** 指のタッチをポインターイベントで受け取る（iPhone の取りこぼし対策の切り替え） */
   pointerInput?: boolean;
-  /** 背景の動画: 全面・上だけ・出さない */
-  videoMode?: 'full' | 'top' | 'off';
-  /** 動画の形: 16:9（縦をいっぱいに出し、左右は黒帯。16:9 でない動画は 16:9 に切り抜く）・画面いっぱい */
-  videoFit?: 'wide' | 'fill';
+  /** 背景の動画: 全面・下だけ・出さない */
+  videoMode?: 'full' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
 }
@@ -564,8 +562,8 @@ export class PlayMode {
   }
 
   /** 今の動画の出し方（'' = 出さない） */
-  private get videoMode(): '' | 'full' | 'top' {
-    const m = this.settings.videoMode ?? 'full';
+  private get videoMode(): '' | 'full' | 'bottom' {
+    const m = (this.settings.videoMode as string) === 'top' ? 'bottom' : this.settings.videoMode ?? 'full';
     return this.videoUrl && m !== 'off' && !this.calibrating ? m : '';
   }
 
@@ -594,9 +592,10 @@ export class PlayMode {
   private placeVideo() {
     const v = this.video;
     if (!v) return;
-    const t = this.videoMode === 'top' ? this.renderer.layout?.top : null;
+    const t = this.videoMode === 'bottom' ? this.renderer.layout?.bottom : null;
     let r = t ? { x: t.x, y: t.y, w: t.w, h: t.h } : { x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight };
-    if ((this.settings.videoFit ?? 'wide') === 'wide' && r.w > 0 && r.h > 0) {
+    // いつも 16:9（その範囲の縦をいっぱいに使い、左右は黒帯。縦長なら横をいっぱいに）
+    if (r.w > 0 && r.h > 0) {
       let h = r.h;
       let w = (h * 16) / 9;
       // 縦長の画面では横をいっぱいにして、上下を黒帯にする

@@ -2380,10 +2380,9 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 /* 小節・BPM・拍子はタイムラインの左上に出すので、札は出さない */
 .stage.stack #posInfo { display: none; }
 /* 拡大率は 100% 以外のときだけ、命令の段の右に */
-.stage.stack .zoom-ctl { top: var(--ev-top); right: 6px; flex-direction: row; --zh: max(22px, var(--ev-h)); }
+.stage.stack .zoom-ctl { top: var(--ev-top); right: 6px; flex-direction: column; --zh: max(24px, min(32px, calc((var(--tl-h) - 12px) / 3))); }
 .stage.stack .zoom-ctl button { width: 44px; }
-.stage.stack .zoom-ctl #zoomReset { flex-direction: row; gap: 2px; }
-.stage.stack .zoom-ctl:not(:has(#zoomReset.on)) { display: none; }
+.stage.stack .zoom-ctl #zoomReset { flex-direction: column; gap: 0; }
 /* 選択の操作はツールの台のすぐ上に */
 .stage.stack .sel-bar { bottom: calc(40px * var(--es, 0.45) + var(--th) + 18px); }
 
