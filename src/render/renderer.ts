@@ -1985,7 +1985,7 @@ export class Renderer {
       if (age < EMIT + 150) {
         const a = age < 80 ? age / 80 : age < EMIT ? 1 : 1 - (age - EMIT) / 150;
         // テッペンまでほぼ一瞬で伸びる
-        const h = hgt * 0.95 * Math.min(1, age / 25);
+        const h = hgt * 0.95 * Math.min(1, age / 60);
         const g = ctx.createLinearGradient(0, bottom, 0, bottom - h);
         g.addColorStop(0, `rgba(255,252,240,${a})`);
         g.addColorStop(0.65, `rgba(255,228,160,${0.75 * a})`);
@@ -2003,7 +2003,7 @@ export class Renderer {
       for (let i = 0; i < f.n; i++) {
         const pa = (age - (i / f.n) * EMIT) / 1000;
         if (pa < 0 || pa * 1000 > LIFE) continue;
-        this.spark(f.x + i * 7.13, f.x * 1.7 + i * 3.91, f.x, pa, i, bottom, hgt, LIFE, 3);
+        this.spark(f.x + i * 7.13, f.x * 1.7 + i * 3.91, f.x, pa, i, bottom, hgt, LIFE, 2.2);
       }
       ctx.globalAlpha = 1;
     }

@@ -185,7 +185,7 @@ export class EditorView {
   /** レーンの下に出す種類 */
   evShow: EventShow = { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true };
   /** 最後に描いたイベントの文字の位置（タップの判定用） */
-  private evBoxes: { x1: number; x2: number; items: EventItem[] }[] = [];
+  private evBoxes: { x1: number; x2: number; y1: number; y2: number; items: EventItem[] }[] = [];
   onUserScroll: () => void = () => {};
   /** 合作: ほかのレーン（最大 3 段） */
   ghosts: GhostRow[] = [];
@@ -338,10 +338,11 @@ export class EditorView {
       const laneH = (R.laneBottom - R.laneTop) * s;
       const evH = Math.max(16, (R.evBottom - R.evTop) * s);
       const vis = this.visRows;
-      const subGap = R.subGap * s;
+      // 段と段の間は命令の欄（#DELAY の段ごとに、その段の命令を下に出す）
+      const subGap = evH + 12 * s;
       const laneGap = R.laneGap * s;
-      // 譜面の境目: 上の譜面の命令の段 ＋ 下の譜面の名前の帯
-      const lgap = evH + 12 * s + laneGap;
+      // 譜面の境目: 下の譜面の名前の帯
+      const lgap = laneGap;
       // 1 段目はいつも縦の真ん中（下の命令とツールが入らない画面だけ上へ）。2 段目以降はその下に続ける。
       // 上のタイムラインの大きさは段の数で変えない
       const laneY = Math.min((this.h - laneH) / 2, this.h - this.toolsH - evH - 8 * s - laneH);
@@ -731,8 +732,8 @@ export class EditorView {
       return;
     }
     // レーンの下のイベントの文字をタップ → そのイベント（まとめたものは一覧）
-    if (y >= L.evTop && y <= L.evTop + L.evH) {
-      const b = this.evBoxes.find((bx) => x >= bx.x1 && x <= bx.x2);
+    {
+      const b = this.evBoxes.find((bx) => x >= bx.x1 && x <= bx.x2 && y >= bx.y1 - 4 && y <= bx.y2 + 4);
       if (b) return this.onEventTap(b.items);
     }
     // 曲の頭より前と、再生ボタンの中心より左には置けない
@@ -977,6 +978,8 @@ export class EditorView {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     const grads = course.grads ?? [];
+    /** その tick の命令を出す段の、命令の欄の上端（上下にスクロールする配置では、#DELAY の段ごとにその段の下） */
+    const evRowY = (tick: number) => (this.stack ? this.rowGeom(ln.rowOf(tick)).y + L.laneH + 6 * s : L.evTop);
     const evItems: EventItem[] = [];
     for (const e of course.events) {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
@@ -984,12 +987,13 @@ export class EditorView {
       if (e.tick > rightTick) continue;
       const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {
-        // 三角の印はすべてに出す
+        // 三角の印はすべてに出す（その命令がある段の下）
+        const ey = evRowY(e.tick);
         ctx.fillStyle = EVENT_COLOR[e.kind];
         ctx.beginPath();
-        ctx.moveTo(x, L.evY + 2);
-        ctx.lineTo(x - 9 * s, L.evTop + 4 * s);
-        ctx.lineTo(x + 9 * s, L.evTop + 4 * s);
+        ctx.moveTo(x, ey - 6 * s + 2);
+        ctx.lineTo(x - 9 * s, ey - 2 * s);
+        ctx.lineTo(x + 9 * s, ey - 2 * s);
         ctx.closePath();
         ctx.fill();
       }
@@ -1008,11 +1012,11 @@ export class EditorView {
     const color = (it: EventItem) => EVENT_COLOR[it.events[0].kind];
     const pad = 7 * s;
     const boxH = 30 * s;
-    const y0 = L.evTop + 8 * s;
     this.evBoxes = [];
-    let cur: { x1: number; x2: number; items: EventItem[] } | null = null;
+    let cur: { x1: number; x2: number; y1: number; y2: number; items: EventItem[] } | null = null;
     const flush = () => {
       if (!cur) return;
+      const y0 = cur.y1;
       const first = cur.items[0];
       const t = label(first);
       const tw = ctx.measureText(t).width;
@@ -1032,11 +1036,14 @@ export class EditorView {
       this.evBoxes.push(cur);
     };
     evItems.sort((a, b) => xt(a.tick) - xt(b.tick));
+    // 段ごとに並べる（同じ段の中で重なるものだけまとめる）
+    evItems.sort((a, b) => evRowY(a.tick) - evRowY(b.tick) || xt(a.tick) - xt(b.tick));
     for (const it of evItems) {
       const x = xt(it.tick);
       if (x < L.colW || x > this.w) continue;
       const w = ctx.measureText(label(it)).width + pad * 2;
-      if (cur && x < cur.x2 + 4 * s) {
+      const y1 = evRowY(it.tick) + 2 * s;
+      if (cur && cur.y1 === y1 && x < cur.x2 + 4 * s) {
         // 前の文字に重なる → まとめる（幅は「+N」の分だけ広げる）
         cur.items.push(it);
         const base = ctx.measureText(label(cur.items[0])).width + pad * 2;
@@ -1045,7 +1052,7 @@ export class EditorView {
         continue;
       }
       flush();
-      cur = { x1: x + 2 * s, x2: x + 2 * s + w, items: [it] };
+      cur = { x1: x + 2 * s, x2: x + 2 * s + w, y1, y2: y1 + boxH, items: [it] };
     }
     flush();
     ctx.restore();
@@ -1516,7 +1523,7 @@ export class EditorView {
 
       // 譜面の上: 名前の帯
       const hh = L.laneGap - 4 * s;
-      const hy = top - L.subGap - hh;
+      const hy = top - hh - 2 * s;
       ctx.fillStyle = 'rgba(16,19,22,0.92)';
       ctx.fillRect(x0, hy, this.w - x0, hh);
       ctx.fillStyle = g.color;
@@ -1628,15 +1635,17 @@ export class EditorView {
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
-        const by = bottom + 8 * s;
         const bh = 30 * s;
         const pad = 7 * s;
-        let end = -Infinity;
+        const ends = new Map<number, number>();
         for (const e of evs) {
           if (e.kind === 'scroll' && grads.some((gr) => e.tick > gr.start && e.tick < gr.end)) continue;
           const x = Xt(e.tick);
           if (x < x0 || x > this.w) continue;
-          const ry = rowG(ln.rowOf(e.tick)).y + L.laneH;
+          const er = ln.rowOf(e.tick);
+          const ry = rowG(er).y + L.laneH;
+          const by = ry + 8 * s;
+          const end = ends.get(er) ?? -Infinity;
           ctx.fillStyle = EVENT_COLOR[e.kind];
           ctx.beginPath();
           ctx.moveTo(x, ry + 2);
@@ -1653,7 +1662,7 @@ export class EditorView {
           ctx.fillStyle = EVENT_COLOR[e.kind];
           ctx.fillRect(x + 2 * s, by, Math.max(2, 3 * s), bh);
           ctx.fillText(t, x + 2 * s + pad, by + bh / 2);
-          end = x + 2 * s + w + 4 * s;
+          ends.set(er, x + 2 * s + w + 4 * s);
         }
       }
       // 名前の帯が上に隠れたら、名前をレーンの左上に残す
