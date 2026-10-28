@@ -64,6 +64,18 @@ export interface Lane {
   notes: Record<string, NoteVal>;
   events: Record<string, EventVal>;
   grads: Record<string, GradVal>;
+  /** 本譜面の小節が、だれの案から来たか（鍵は小節の頭の tick） */
+  prov?: Record<string, ProvVal>;
+}
+
+/** 本譜面の小節の出どころ */
+export interface ProvVal {
+  /** 小節の終わりの tick */
+  end: number;
+  /** 案を作った人（メンバーの id） */
+  by: string;
+  /** 案のレーンの色 */
+  color: string;
 }
 
 export interface SongMetaC {
@@ -139,7 +151,9 @@ export type Op =
   | { o: 'new'; lane: Lane }
   /** レーンの中身をまとめて置き換える（ヘッダー・音符・命令・グラデ） */
   | { o: 'rep'; l: string; head: LaneHead; notes: Record<string, NoteVal>; events: Record<string, EventVal>; grads: Record<string, GradVal> }
-  | { o: 'm'; v: Partial<SongMetaC> };
+  | { o: 'm'; v: Partial<SongMetaC> }
+  /** 本譜面の小節の出どころ */
+  | { o: 'pv'; l: string; k: string; v: ProvVal | null };
 
 /** 1 プロジェクトに入れる人数 */
 export const MAX_MEMBERS = 8;
@@ -274,17 +288,11 @@ export function mySpans(doc: CollabDoc, mid: string, laneId: string): [number, n
   return out;
 }
 
-/** 本譜面の、その tick を編集できるか */
-export function canEditMainAt(doc: CollabDoc, mid: string, lane: string, ticks: number[] | null): boolean {
+/** 本譜面を編集できるか（リーダーと、本譜面の権限がある人） */
+export function canEditMainAt(doc: CollabDoc, mid: string, _lane: string, _ticks: number[] | null): boolean {
   if (mid === doc.leader) return true;
   const m = doc.members[mid];
-  if (!m || m.viewer) return false;
-  if (m.perms.any) return true;
-  if (!ticks) return false;
-  const spans = mySpans(doc, mid, lane);
-  if (!spans.length) return false;
-  // 置く位置は範囲の中、終わりの位置は範囲の終わりちょうどでもよい
-  return ticks.every((t, i) => spans.some(([a, b]) => t >= a && (i === 0 ? t < b : t <= b)));
+  return !!m && !m.viewer && m.perms.any;
 }
 
 /** そのレーンのその tick を編集できるか（アプリのタップの判定にも使う） */
@@ -357,6 +365,7 @@ export function validOp(op: Op): boolean {
       return notes.every(([k, v]) => validNote(k, v)) && events.every(([k, v]) => validEvent(k, v)) && grads.every((g) => validGrad(g));
     }
     case 'lm': case 'm': return !!op.v && typeof op.v === 'object';
+    case 'pv': return typeof op.k === 'string' && TICK_RE.test(op.k) && (op.v === null || (!!op.v && typeof op.v === 'object' && fin(op.v.end, -MAX_TICK, MAX_TICK) && op.v.end > Number(op.k) && typeof op.v.by === 'string' && typeof op.v.color === 'string' && op.v.color.length <= 20));
   }
   return false;
 }
@@ -392,6 +401,8 @@ export function canApply(doc: CollabDoc, mid: string, op: Op): boolean {
       return op.lane.owner === mid;
     case 'm':
       return leader || m.perms.any;
+    case 'pv':
+      return !!doc.lanes[op.l]?.main && (leader || m.perms.any);
   }
 }
 
@@ -445,7 +456,7 @@ export function applyOp(doc: CollabDoc, op: Op): boolean {
       doc.lanes[l.id] = {
         id: l.id, course: String(l.course || 'Oni').slice(0, 20), name: String(l.name || '').slice(0, 40), owner: String(l.owner), color: String(l.color || COLORS[0]),
         main: !!l.main, order: Number(l.order) || 0, head: cleanHead(l.head, emptyHead()),
-        notes: { ...(l.notes ?? {}) }, events: { ...(l.events ?? {}) }, grads: { ...(l.grads ?? {}) },
+        notes: { ...(l.notes ?? {}) }, events: { ...(l.events ?? {}) }, grads: { ...(l.grads ?? {}) }, prov: { ...(l.prov ?? {}) },
       };
       return true;
     }
@@ -456,6 +467,14 @@ export function applyOp(doc: CollabDoc, op: Op): boolean {
       lane.notes = { ...(op.notes ?? {}) };
       lane.events = { ...(op.events ?? {}) };
       lane.grads = { ...(op.grads ?? {}) };
+      return true;
+    }
+    case 'pv': {
+      const lane = doc.lanes[op.l];
+      if (!lane) return false;
+      lane.prov ??= {};
+      if (op.v === null) delete lane.prov[op.k];
+      else lane.prov[op.k] = { end: op.v.end, by: String(op.v.by).slice(0, 40), color: String(op.v.color).slice(0, 20) };
       return true;
     }
     case 'm': {

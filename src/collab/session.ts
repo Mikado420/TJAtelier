@@ -73,7 +73,7 @@ function valueAt(doc: CollabDoc, op: Op): string | undefined {
 /** 1 つの変更が触る所（同じ所かどうかを見分ける） */
 function opKey(op: Op): string {
   switch (op.o) {
-    case 'n': case 'e': case 'g': return `${op.o}:${op.l}:${op.k}`;
+    case 'n': case 'e': case 'g': case 'pv': return `${op.o}:${op.l}:${op.k}`;
     case 'h': case 'lm': case 'rep': return `${op.o}:${op.l}`;
     case 'new': return `new:${op.lane.id}`;
     case 'm': return 'm';

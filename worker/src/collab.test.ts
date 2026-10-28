@@ -46,7 +46,7 @@ describe('合作プロジェクト（サーバー）', () => {
     expect(core.state.doc.meta.title).toBe('');
   });
 
-  it('本譜面はリーダーだけ。権限を渡すと担当範囲の中だけ、「範囲外も」で全部', async () => {
+  it('本譜面はリーダーだけ。本譜面の権限を渡すと編集できる', async () => {
     const { core, A, B, ca, cb, send } = await setup();
     await send(ca, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('M', A, true) }] });
     expect(core.state.doc.lanes.M.main).toBe(true);
@@ -54,29 +54,20 @@ describe('合作プロジェクト（サーバー）', () => {
     await put(0);
     expect(last(cb, 'ack')!.rej).toEqual([0]);
     expect(last(cb, 'lanes')!.lanes.M.id).toBe('M');
-    // 担当 A = 2 小節目。B を割り当てる
-    await send(ca, { t: 'cmd', x: 'groups', groups: { A: { id: 'A', name: 'A', color: '#f00', ranges: [{ lane: 'M', from: 2, to: 2 }], members: [B] } } });
-    const BAR = 6720 * 4;
-    await put(500);
-    expect(last(cb, 'ack')!.rej).toEqual([0]);
-    await put(BAR + 1500);
-    expect(last(cb, 'ack')!.rej).toEqual([]);
-    expect(core.state.doc.lanes.M.notes[String(BAR + 1500)]).toEqual({ type: 'don' });
-    // A（リーダー）に届く
-    expect(last(ca, 'ops')!.ops[0].k).toBe(String(BAR + 1500));
-    // 3 小節目の頭は範囲の外
-    await put(BAR * 2);
-    expect(last(cb, 'ack')!.rej).toEqual([0]);
-    // 1 小節目を 3/4 にすると、2 小節目が前にずれる（小節で合わせる）
-    await send(ca, { t: 'ops', c: 2, ops: [{ o: 'e', l: 'M', k: '0:measure', v: { tick: 0, kind: 'measure', num: 3, den: 4 } }] });
-    await put(BAR * 3 / 4 + 10);
-    expect(last(cb, 'ack')!.rej).toEqual([]);
-    // ヘッダーは範囲外も持っている人だけ
     await send(cb, { t: 'ops', c: 9, ops: [{ o: 'h', l: 'M', v: { bpm: 200 } }] });
     expect(core.state.doc.lanes.M.head.bpm).toBe(120);
     await send(ca, { t: 'cmd', x: 'perm', mid: B, perms: { any: true } });
     await put(500);
+    expect(last(cb, 'ack')!.rej).toEqual([]);
     expect(core.state.doc.lanes.M.notes['500']).toBeTruthy();
+    // A（リーダー）に届く
+    expect(last(ca, 'ops')!.ops[0].k).toBe('500');
+    // 小節の出どころ
+    await send(cb, { t: 'ops', c: 10, ops: [{ o: 'pv', l: 'M', k: '0', v: { end: 6720 * 4, by: B, color: '#8fd18f' } }] });
+    expect(core.state.doc.lanes.M.prov?.['0']?.by).toBe(B);
+    await send(ca, { t: 'cmd', x: 'perm', mid: B, perms: { any: false } });
+    await put(700);
+    expect(last(cb, 'ack')!.rej).toEqual([0]);
   });
 
   it('自分のレーンは本人だけが編集できる。ごみ箱に入れて戻せる', async () => {
@@ -222,10 +213,9 @@ describe('合作プロジェクト（サーバー）', () => {
     lb.update({ id: 'AAAAAA', gone: true });
     expect(lb.list(now)).toEqual([]);
   });
-  it('壊れた値は受け取らない。担当の人は BPM・拍子・DELAY を置けない', async () => {
+  it('壊れた値は受け取らない。本譜面の権限がない人は BPM なども置けない', async () => {
     const { core, A, B, ca, cb, send } = await setup();
     await send(ca, { t: 'ops', c: 1, ops: [{ o: 'new', lane: lane('M', A, true) }] });
-    await send(ca, { t: 'cmd', x: 'groups', groups: { A: { id: 'A', name: 'A', color: '#f00', ranges: [{ lane: 'M', from: 1, to: 4 }], members: [B] } } });
     await send(ca, { t: 'ops', c: 2, ops: [
       { o: 'n', l: 'M', k: '10', v: { type: 'xx' } },
       { o: 'e', l: 'M', k: '0:bpm', v: { tick: 0, kind: 'bpm', value: 0 } },
@@ -237,7 +227,7 @@ describe('合作プロジェクト（サーバー）', () => {
       { o: 'e', l: 'M', k: '960:bpm', v: { tick: 960, kind: 'bpm', value: 200 } },
       { o: 'e', l: 'M', k: '960:scroll', v: { tick: 960, kind: 'scroll', value: 2 } },
     ] });
-    expect(last(cb, 'ack')!.rej).toEqual([0]);
+    expect(last(cb, 'ack')!.rej).toEqual([0, 1]);
   });
 
   it('受け取りを返す前に保存する。送りすぎても変更は捨てない', async () => {

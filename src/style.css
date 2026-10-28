@@ -2290,6 +2290,40 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .cp-perm { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 12px; }
 .cp-perm label { display: flex; align-items: center; gap: 4px; }
 .cp-perm input { width: 16px; height: 16px; }
+.cp-perm .cp-sw { gap: 8px; font-weight: 700; }
+.cp-sw input { position: absolute; opacity: 0; pointer-events: none; }
+.cp-sw i { position: relative; width: 40px; height: 22px; border-radius: 11px; background: #4a4f55; transition: background 0.15s; }
+.cp-sw i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.15s; }
+.cp-sw input:checked + i { background: var(--accent); }
+.cp-sw input:checked + i::after { transform: translateX(18px); }
+.cp-sw input:focus-visible + i { outline: 2px solid #fff; }
+
+/* 合作: 案で選んだ範囲を本譜面へ */
+.cadopt {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(16, 19, 22, 0.96);
+  box-shadow: 0 0 0 1.5px var(--lc), 0 6px 18px rgba(0, 0, 0, 0.55);
+  max-width: calc(100% - 24px);
+}
+.cadopt .ca-t { padding: 0 8px; font-weight: 800; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cadopt button {
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: #3b4045;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  white-space: nowrap;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+.cadopt button.pri { background: var(--accent); }
 .cp-link { display: flex; gap: 6px; }
 .cp-link input { flex: 1; min-width: 0; font-size: 12px; padding: 8px; background: var(--inp); color: #fff; border: 1px solid var(--line); }
 

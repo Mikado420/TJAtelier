@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTJA } from '../chart/tja';
 import { courseToLane, diff, laneToChart, stateOf } from './bridge';
-import { applyOp, barAt, canEditLane, emptyDoc, type CollabDoc } from './protocol';
+import { applyOp, barAt, canApply, canEditLane, emptyDoc, type CollabDoc } from './protocol';
 
 const TJA = `TITLE:t
 BPM:150
@@ -67,22 +67,27 @@ describe('合作: レーン ⇔ 譜面', () => {
     expect(diff('L', prev, stateOf(back, back.courses[0]), back).ops).toEqual([]);
   });
 
-  it('担当の人は、担当の小節の中だけ編集できる（#MEASURE で小節が変わっても小節で合わせる）', () => {
+  it('本譜面は、リーダーと本譜面の権限がある人だけ。案は作った人だけ', () => {
     const doc = docWith();
-    const BAR = 6720 * 4;
-    doc.groups.A = { id: 'A', name: 'A', color: '#f00', ranges: [{ lane: 'L', from: 1, to: 1 }], members: ['b'] };
-    expect(canEditLane(doc, 'b', 'L', [100])).toBe(true);
-    expect(canEditLane(doc, 'b', 'L', [BAR])).toBe(false);
-    expect(canEditLane(doc, 'b', 'L', null)).toBe(false);
-    // 連打の終わりが範囲の終わりちょうどなら置ける。越えたらだめ
-    expect(canEditLane(doc, 'b', 'L', [0, BAR])).toBe(true);
-    expect(canEditLane(doc, 'b', 'L', [0, BAR + 1])).toBe(false);
-    // 1 小節目を 2/4 にすると、範囲もその長さになる
-    doc.lanes.L.events['0:measure'] = { tick: 0, kind: 'measure', num: 2, den: 4 };
-    expect(canEditLane(doc, 'b', 'L', [BAR / 2 + 10])).toBe(false);
-    expect(barAt(doc.lanes.L, BAR / 2 + 10)).toBe(2);
-    // 担当を外すと編集できない
-    doc.groups.A.members = [];
     expect(canEditLane(doc, 'b', 'L', [100])).toBe(false);
+    expect(canEditLane(doc, 'b', 'L', null)).toBe(false);
+    doc.members.b.perms = { main: true, any: true };
+    expect(canEditLane(doc, 'b', 'L', [100])).toBe(true);
+    applyOp(doc, { o: 'new', lane: { ...structuredClone(doc.lanes.L), id: 'P', main: false, owner: 'b' } });
+    expect(canEditLane(doc, 'b', 'P', [100])).toBe(true);
+    expect(canEditLane(doc, 'a', 'P', [100])).toBe(false);
+    expect(barAt(doc.lanes.L, 6720 * 4 + 10)).toBe(2);
+  });
+
+  it('本譜面の小節の出どころは、本譜面を編集できる人だけ付けられる', () => {
+    const doc = docWith();
+    const op = { o: 'pv', l: 'L', k: '0', v: { end: 6720 * 4, by: 'b', color: '#8fd18f' } } as const;
+    expect(canApply(doc, 'b', op)).toBe(false);
+    expect(canApply(doc, 'a', op)).toBe(true);
+    expect(applyOp(doc, op)).toBe(true);
+    expect(doc.lanes.L.prov?.['0']?.by).toBe('b');
+    expect(canApply(doc, 'a', { o: 'pv', l: 'L', k: '0', v: { end: -1, by: 'b', color: '#fff' } })).toBe(false);
+    applyOp(doc, { o: 'pv', l: 'L', k: '0', v: null });
+    expect(doc.lanes.L.prov?.['0']).toBeUndefined();
   });
 });

@@ -155,6 +155,8 @@ export interface GhostRow {
   bars: number[];
   /** レーンの譜面そのもの（縦に並べて、命令・GOGO なども描くため） */
   chart?: EChart;
+  /** 本譜面の小節の出どころ（そのレーンの tick） */
+  bands?: { a: number; b: number; color: string; label: string }[];
 }
 
 /** ほかのレーンを描くための表（譜面が変わったら作り直す） */
@@ -820,11 +822,11 @@ export class EditorView {
       ctx.fillStyle = C.gogo;
       for (const [a, b] of ranges) for (const sp of spansX(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
 
-      // 合作: 担当の範囲（レーンの上の縁に色の帯。自分の担当は太く・頭に名前）
+      // 合作: 本譜面の小節の出どころ（レーンの上の縁に案の色の帯・頭に名前）
       for (const bd of this.bands) {
-        const bh = Math.max(3, (bd.mine ? 12 : 5) * s);
+        const bh = Math.max(3, 8 * s);
         for (const sp of spansX(bd.a, bd.b)) {
-          ctx.globalAlpha = bd.mine ? 0.9 : 0.55;
+          ctx.globalAlpha = 0.9;
           ctx.fillStyle = bd.color;
           ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, bh);
           ctx.globalAlpha = 1;
@@ -1557,6 +1559,19 @@ export class EditorView {
       // ゴーゴー
       ctx.fillStyle = C.gogo;
       for (const [a, b] of geo.gogo) for (const sp of spans(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
+      // 本譜面の小節の出どころ
+      for (const bd of g.bands ?? []) {
+        const bh = Math.max(3, 8 * s);
+        ctx.fillStyle = bd.color;
+        for (const sp of spans(bd.a, bd.b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, bh);
+        const x = Xt(bd.a);
+        if (x >= x0 - 4 && x <= this.w) {
+          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px system-ui, sans-serif`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(bd.label, Math.max(x0 + 2, x + 3 * s), rowG(ln.rowOf(bd.a)).y + bh + 2 * s);
+        }
+      }
       // グラデ（下の端に紫の帯）
       for (const gr of grads) {
         const bh = Math.max(4, 10 * s);
