@@ -1048,8 +1048,8 @@ function syncAudioName() {
   const a = ed.audio;
   const w = ed.chart.wave;
   if (!a || !w || w === a.name) return;
-  const name = oggName(w);
-  ed.chart.wave = name;
+  // WAVE: の書き方はそのまま（TJA のテキストを変えない）。音源のファイル名だけ合わせる
+  const name = isVideoName(a.name) ? a.name : oggName(w);
   if (name === a.name) return;
   ed.audio = { name, data: a.data };
   void persist(ed.audio);
@@ -1788,14 +1788,15 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
         const c = await convertAudio(sng.audio, sng.chart.title || sng.audio.name);
         a = c.file;
         len = c.length;
-        sng.chart.wave = a.name;
+        // 読み込んだ TJA のテキストは元のまま（WAVE: が無いときだけ入れる）
+        if (!sng.chart.wave) sng.chart.wave = a.name;
       } catch {
         // 動画の音が読めない（音の無い動画など）: 動画だけ使う
         if (sng.video?.fromAudio) sng.video = { name: sng.video.name, data: sng.video.data };
         else r.skipped.push(sng.audio.name);
       }
     }
-    if (sng.video) setBgMovie(sng.chart, sng.video.name);
+    if (sng.video && !sng.chart.extra.some(([k]) => k.toUpperCase() === 'BGMOVIE')) setBgMovie(sng.chart, sng.video.name);
     const id = newId();
     // genre.ini があれば、そのジャンル名のフォルダに入れる
     const f = sng.genre ? sng.genre.split('/').map((x) => x.slice(0, 40)).join('/') : folder;
