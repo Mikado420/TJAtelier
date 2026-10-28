@@ -1,5 +1,5 @@
 import { TPB, type EEvent } from '../chart/model';
-import { BIG_SCALE, drawAny, drawRoll, hexPath } from '../render/notes';
+import { drawAny, drawRoll, hexPath } from '../render/notes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
 import type { Grad } from './grad';
@@ -352,10 +352,18 @@ export class EditorView {
     return this.xOfD(this.lanes.disp(tick));
   }
 
-  /** タイムラインの 1 拍の px（判定枠の x から右端までで 3 小節） */
-  get tlZoom() {
+  /**
+   * タイムラインはレーンを縮めたもの（音符の大きさと間隔の比はレーンと同じ）。
+   * 拡大率 100% で判定枠の x から右端までが 3 小節。レーンを拡大・縮小すると同じ割合で変わる
+   */
+  get tlScale() {
     const L = this.L;
-    return Math.max(8, (this.w - L.playX - 6 * L.s) / TL_BEATS);
+    const base = Math.max(8, (this.w - L.playX - 6 * L.s) / TL_BEATS);
+    return base / this.defaultZoom;
+  }
+  /** タイムラインの 1 拍の px */
+  get tlZoom() {
+    return Math.max(4, this.zoom * this.tlScale);
   }
   private xOfTl(d: number, dpos = this.dpos) {
     return this.L.playX + ((d - dpos) / TPB) * this.tlZoom;
@@ -1175,7 +1183,10 @@ export class EditorView {
     ctx.beginPath();
     ctx.rect(x0, notesTop - noteH, x1 - x0, noteH * 2);
     ctx.clip();
-    const r = Math.max(5, noteH * 0.36);
+    // 音符の大きさもレーンと同じ比で縮める（段の高さには収める）
+    const k = this.tlScale;
+    const r = Math.max(3, Math.min(L.r * k, noteH * 0.34));
+    const bigR = Math.max(4, Math.min(L.bigR * k, noteH * 0.48));
     const notes = course.notes;
     for (let i = notes.length - 1; i >= 0; i--) {
       const n = notes[i];
@@ -1190,7 +1201,7 @@ export class EditorView {
         ctx.globalAlpha = 1;
         drawAny(ctx, n.type, x, ny, r, undefined, n.hits ?? 5);
       } else {
-        drawAny(ctx, n.type, x, ny, big ? r * BIG_SCALE : r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
+        drawAny(ctx, n.type, x, ny, big ? bigR : r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
       }
     }
     if (ed.sel) {
@@ -1200,7 +1211,7 @@ export class EditorView {
         if (n.tick < leftTick || n.tick > rightTick) continue;
         const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
         ctx.beginPath();
-        ctx.arc(xt(n.tick), ny, (big ? r * BIG_SCALE : r) + 3 * s, 0, Math.PI * 2);
+        ctx.arc(xt(n.tick), ny, (big ? bigR : r) + 3 * s, 0, Math.PI * 2);
         ctx.stroke();
       }
     }
