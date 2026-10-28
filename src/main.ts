@@ -221,11 +221,11 @@ let stageKey = '';
 function syncStageVars() {
   const stage = $('editor').parentElement!;
   const L = view.L;
-  const key = `${view.stack}|${L.evTop}|${L.evH}`;
+  const key = `${view.stack}|${L.ctlTop}|${L.evH}`;
   if (key === stageKey) return;
   stageKey = key;
   stage.classList.toggle('stack', view.stack);
-  stage.style.setProperty('--ev-top', `${L.evTop}px`);
+  stage.style.setProperty('--ev-top', `${L.ctlTop}px`);
   stage.style.setProperty('--ev-h', `${L.evH}px`);
 }
 const onViewResize = () => {

@@ -271,8 +271,9 @@ export class EditorView {
       const vis = this.visRows;
       const subGap = R.subGap * s;
       const blockH = vis * laneH + (vis - 1) * subGap;
-      // レーン（段が 2 つならその 2 つ）は縦の真ん中。下の命令とツールが入らなければ、その分だけ上へ
-      const laneY = Math.min((this.h - blockH) / 2, this.h - this.toolsH - evH - 8 * s - blockH);
+      // 1 段目はいつも縦の真ん中（下の命令とツールが入らない画面だけ上へ）。2 段目以降はその下に続ける。
+      // 上のタイムラインの大きさは段の数で変えない
+      const laneY = Math.min((this.h - laneH) / 2, this.h - this.toolsH - evH - 8 * s - laneH);
       const cy = laneY + laneH / 2;
       const tlTop = 8 * s;
       return {
@@ -288,6 +289,8 @@ export class EditorView {
         evY: laneY + blockH,
         evH,
         evTop: laneY + blockH + 6 * s,
+        /** 拡大率の表示の位置（命令の段の右。ツールの台に重ならないように） */
+        ctlTop: Math.min(laneY + blockH + 6 * s, this.h - this.toolsH - evH),
         cy,
         playX: R.judgeX * s,
         r: R.noteR * s,
@@ -306,6 +309,7 @@ export class EditorView {
     return {
       vis: 1,
       blockH: laneH,
+      ctlTop: 0,
       tlX: 0,
       tlTop: 0,
       tlBottom: 0,
