@@ -183,21 +183,13 @@
     <div id="result" class="res hidden">
       <div class="res-bg" aria-hidden="true">
         <svg class="res-obj" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMax slice">
-          <defs>
-            <linearGradient id="resM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="m1"/><stop offset="1" class="m2"/></linearGradient>
-            <radialGradient id="resF" cx="0.42" cy="0.35" r="0.75"><stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
-          </defs>
+          <defs><linearGradient id="resM" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="m1"/><stop offset="1" class="m2"/></linearGradient>
+<radialGradient id="resF" cx="0.42" cy="0.35" r="0.75"><stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient></defs>
+
           <!-- 斜めの光の柱 -->
           <g class="shaft"><path d="M380 0 h90 l-80 560 h-90 z"/><path d="M520 0 h40 l-80 560 h-40 z"/><path d="M930 0 h120 l-80 560 h-120 z"/></g>
-          <!-- まわる輪 -->
-          <g class="orbit"><circle cx="760" cy="470" r="372"/><circle class="o2" cx="760" cy="470" r="430"/></g>
-          <!-- 大きな太鼓の面 -->
-          <circle class="rim" cx="760" cy="470" r="300"/>
-          <g class="studs"><circle cx="1032.0" cy="470.0" r="7"/><circle cx="1022.7" cy="540.4" r="7"/><circle cx="995.6" cy="606.0" r="7"/><circle cx="952.3" cy="662.3" r="7"/><circle cx="896.0" cy="705.6" r="7"/><circle cx="830.4" cy="732.7" r="7"/><circle cx="760.0" cy="742.0" r="7"/><circle cx="689.6" cy="732.7" r="7"/><circle cx="624.0" cy="705.6" r="7"/><circle cx="567.7" cy="662.3" r="7"/><circle cx="524.4" cy="606.0" r="7"/><circle cx="497.3" cy="540.4" r="7"/><circle cx="488.0" cy="470.0" r="7"/><circle cx="497.3" cy="399.6" r="7"/><circle cx="524.4" cy="334.0" r="7"/><circle cx="567.7" cy="277.7" r="7"/><circle cx="624.0" cy="234.4" r="7"/><circle cx="689.6" cy="207.3" r="7"/><circle cx="760.0" cy="198.0" r="7"/><circle cx="830.4" cy="207.3" r="7"/><circle cx="896.0" cy="234.4" r="7"/><circle cx="952.3" cy="277.7" r="7"/><circle cx="995.6" cy="334.0" r="7"/><circle cx="1022.7" cy="399.6" r="7"/></g>
-          <circle class="face" cx="760" cy="470" r="246"/>
-          <circle class="hl" cx="760" cy="470" r="246"/>
-          <circle class="ring" cx="760" cy="470" r="150"/>
-          <circle class="ring r2" cx="760" cy="470" r="196"/>
+          <!-- 斜めの面（UI の平行四辺形と同じ傾き） -->
+          <g class="shards" transform="translate(-20 -70)"><path class="s-out" d="M638.7 40 H968.7 L890.0 600 H560 Z"/><path class="s-main" d="M673.1 90 H1003.1 L930.0 610 H600 Z"/><path class="s-hl" d="M673.1 90 H1003.1 L930.0 610 H600 Z"/><path class="s-sub" d="M517.8 250 H637.8 L590.0 590 H470 Z"/><path class="s-sub" d="M1009.0 170 H1079.0 L1020.0 590 H950 Z"/><path class="s-thin" d="M963.1 60 H987.1 L914.0 580 H890 Z"/><path class="s-thin" d="M586.2 180 H598.2 L542.0 580 H530 Z"/><path class="s-line" d="M640.8 130 H890.8 L890.0 136 H640 Z"/><path class="s-line" d="M625.8 230 H875.8 L875.0 236 H625 Z"/><path class="s-line" d="M610.8 330 H860.8 L860.0 336 H610 Z"/></g>
         </svg>
         <div class="res-fw"><i></i><i></i><i></i><i></i></div>
       </div>
@@ -207,7 +199,7 @@
           <div class="res-head"><span class="res-course"></span><div class="res-gauge"><i></i><em></em><u></u></div></div>
           <div class="res-body">
             <div class="res-left">
-              <div class="res-score"><small>スコア</small><b id="resScore">0</b></div>
+              <div class="res-score"><small>スコア</small><b id="resScore">0</b><span class="res-best">自己ベスト更新</span></div>
               <div class="res-crowns"><span class="res-crown"></span><span class="res-acc"></span></div>
             </div>
             <ul class="res-counts">
@@ -227,7 +219,7 @@
           <div class="calib edgehint hidden">
             <button id="growFace"></button>
           </div>
-          <details class="res-detail"><summary>くわしい記録</summary><dl></dl><button id="copyLog" class="small">記録をコピー</button></details>
+          <dl class="res-dl"></dl>
           <div class="buttons">
             <button id="retry" class="primary">もう一度</button>
             <button id="back">エディタへ戻る</button>

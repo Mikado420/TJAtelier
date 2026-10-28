@@ -650,7 +650,7 @@ export class Home {
       ? `<span class="hdf-il">${esc(sel.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[sel.name] ?? sel.name)} ★${sel.level} の記録</span>
          <span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>
          <span class="hdf-ir"><span>王冠</span><b class="cr-${best?.crown ?? 'none'}">${best ? crownLabel[best.crown] ?? '' : 'なし'}</b></span>`
-      : '<span class="hdf-il">難易度をえらんでください</span>';
+      : '';
     const el = document.getElementById('homeDiff')!;
     el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));
     el.innerHTML = `

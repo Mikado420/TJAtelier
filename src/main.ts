@@ -1,6 +1,6 @@
 import { setUiSound } from './ui/curtain';
 import { OnlineScreen } from './online/online';
-import { saveBest } from './home/home';
+import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
@@ -2049,21 +2049,6 @@ $('growFace').addEventListener('click', () => {
   $('growFace').closest('.edgehint')!.classList.add('hidden');
   toast(`太鼓の大きさを ${settings.drumSize}% にしました`);
 });
-$('copyLog').addEventListener('click', async () => {
-  try {
-    await navigator.clipboard.writeText(play.lastLog);
-    toast('記録をコピーしました');
-  } catch {
-    // コピーできない環境では、選択できる形で表示する
-    const ta = document.createElement('textarea');
-    ta.value = play.lastLog;
-    ta.style.cssText = 'position:fixed;inset:10%;z-index:40;font-size:12px';
-    document.getElementById('root')!.appendChild(ta);
-    ta.select();
-    ta.addEventListener('blur', () => ta.remove());
-    toast('全部選択してコピーしてください');
-  }
-});
 $('applyCalib').addEventListener('click', () => {
   settings.offset = Math.max(-300, Math.min(300, play.suggested));
   saveSettings();
@@ -2122,8 +2107,20 @@ play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
 play.onError = (msg) => toast(msg);
 play.onFinished = (r) => {
-  if (currentSongId && lastTestFromStart) saveBest(currentSongId, ed.course.name, r.score, r.crown);
+  if (!currentSongId || !lastTestFromStart) return false;
+  const prev = loadBest(currentSongId, ed.course.name);
+  saveBest(currentSongId, ed.course.name, r.score, r.crown);
+  return !!prev && r.score > prev.score;
 };
+// 結果画面: Enter でもう一度、Esc で戻る
+window.addEventListener('keydown', (e) => {
+  if ($('result').classList.contains('hidden') || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === 'Enter') $('retry').click();
+  else if (e.key === 'Escape') $('back').click();
+  else return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}, true);
 
 // ---------- 起動 ----------
 

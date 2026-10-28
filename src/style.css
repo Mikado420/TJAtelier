@@ -1746,10 +1746,11 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 
 .res-side { align-self: end; justify-self: end; width: min(340px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 12px; background: rgba(29, 32, 35, 0.86); color: #fff; border-radius: 14px; }
 .res-h { margin: 0; font-size: 15px; font-weight: 900; }
-.res-detail summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--accent-hi); padding: 4px 0; }
-.res-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0; font-size: 12px; }
-.res-detail dt { color: var(--sub); }
-.res-detail dd { margin: 0; word-break: break-all; }
+.res-dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0; font-size: 12px; }
+.res-dl dt { color: var(--sub); }
+.res-dl dd { margin: 0; word-break: break-all; }
+/* 見出しと数値の一覧はタイミング調整のときだけ */
+.res:not(.res-calib) .res-h, .res:not(.res-calib) .res-dl { display: none; }
 .res-side .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .res-side .buttons button { height: 44px; font-size: 15px; font-weight: 900; border-radius: 0; color: #fff; background: var(--btn); --sk: calc(44px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
 .res-side .buttons button.primary { background: var(--accent); }
@@ -1985,16 +1986,14 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res-obj .m2 { stop-color: var(--m2); transition: stop-color 0.6s; }
 .res-obj .shaft path { fill: rgba(147, 205, 226, 0.07); }
 .res.go:not(.r-fail) .res-obj .shaft path { fill: rgba(147, 205, 226, 0.13); }
-.res-obj .orbit circle { fill: none; stroke: rgba(147, 205, 226, 0.28); stroke-width: 3; stroke-dasharray: 26 18; transform-box: view-box; transform-origin: 760px 470px; animation: resSpin 60s linear infinite; }
-.res-obj .orbit .o2 { stroke-width: 2; stroke-dasharray: 6 22; animation-direction: reverse; animation-duration: 90s; }
-.res-obj .rim { fill: #0d1418; stroke: rgba(147, 205, 226, 0.35); stroke-width: 4; }
-.res-obj .studs circle { fill: rgba(230, 243, 248, 0.55); }
-.res-obj .face { fill: url(#resM); }
-.res-obj .hl { fill: url(#resF); }
-.res-obj .ring { fill: none; stroke: rgba(255, 255, 255, 0.28); stroke-width: 6; }
-.res-obj .ring.r2 { stroke-width: 2; stroke: rgba(255, 255, 255, 0.18); }
-@keyframes resSpin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .res-obj .orbit circle { animation: none; } }
+.res-obj .shards .s-main { fill: url(#resM); }
+.res-obj .shards .s-hl { fill: url(#resF); }
+.res-obj .shards .s-out { fill: none; stroke: rgba(147, 205, 226, 0.45); stroke-width: 3; transform-box: view-box; transform-origin: 745px 320px; animation: resShard 6s ease-in-out infinite alternate; }
+.res-obj .shards .s-sub { fill: rgba(147, 205, 226, 0.16); stroke: rgba(147, 205, 226, 0.35); stroke-width: 2; }
+.res-obj .shards .s-thin { fill: rgba(255, 255, 255, 0.35); }
+.res-obj .shards .s-line { fill: rgba(255, 255, 255, 0.22); }
+@keyframes resShard { to { transform: translate(-14px, 6px); } }
+@media (prefers-reduced-motion: reduce) { .res-obj .shards .s-out { animation: none; } }
 .res .res-gauge { height: 16px; background: linear-gradient(90deg, #1d3442 0 var(--cl, 80%), #3d3a1e var(--cl, 80%) 100%); }
 .res .res-gauge i, .res.r-clear .res-gauge i, .res.r-fc .res-gauge i, .res.r-allgood .res-gauge i { background: linear-gradient(90deg, #5ab4d6 0 var(--cl, 80%), #ffd21f var(--cl, 80%) 100%) left / 100% 100% no-repeat; }
 .res .res-gauge i.full { background: linear-gradient(90deg, #ff5a7a, #ffb13a, #ffe94a, #5ee07a, #4ac8ff, #9a7bff) !important; background-size: 100% 100% !important; }
@@ -2387,3 +2386,35 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .stage.stack .zoom-ctl:not(:has(#zoomReset.on)) { display: none; }
 /* 選択の操作はツールの台のすぐ上に */
 .stage.stack .sel-bar { bottom: calc(40px * var(--es, 0.45) + var(--th) + 18px); }
+
+/* ---------- リザルト: 自己ベスト更新・難易度の札の形・順に出す ---------- */
+.res-score { position: relative; }
+.res-best {
+  position: absolute;
+  right: 6px;
+  top: -10px;
+  padding: 2px 12px;
+  font: 900 12px var(--fd);
+  color: #3a2600;
+  background: linear-gradient(#fff3a6, #ffcf3a);
+  --sk: calc(20px * var(--tan));
+  clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%);
+  opacity: 0;
+  transform: translateY(6px) scale(0.6);
+  display: none;
+}
+.res.r-best .res-best { display: block; }
+.res.go.r-best .res-best { opacity: 1; transform: none; transition: opacity 0.25s 0.55s, transform 0.4s cubic-bezier(0.3, 1.6, 0.5, 1) 0.55s; }
+/* 難易度の札は、ほかの UI と同じ斜めの形 */
+.res-course { border-radius: 0; padding: 2px 14px; --sk: calc(22px * var(--tan)); clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%); }
+/* 順に出す: 数え上げ（スコアと数）→ 王冠 → 精度 → 自己ベスト */
+.res-counts li { opacity: 0; transform: translateX(-10px); }
+.res.counting .res-counts li, .res.go .res-counts li { opacity: 1; transform: none; transition: opacity 0.2s, transform 0.25s; }
+.res.counting .res-counts li:nth-child(2) { transition-delay: 0.06s; }
+.res.counting .res-counts li:nth-child(3) { transition-delay: 0.12s; }
+.res.counting .res-counts li:nth-child(4) { transition-delay: 0.18s; }
+.res.counting .res-counts li:nth-child(5) { transition-delay: 0.24s; }
+.res-acc { opacity: 0; transition: opacity 0.3s 0.3s; }
+.res.go .res-acc, .res.res-calib .res-acc { opacity: 1; }
+/* 難易度を選ぶまでは、記録の欄は出さない */
+.hdf-info:empty { display: none; }

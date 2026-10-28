@@ -79,7 +79,8 @@ export class PlayMode {
   /** ポーズ画面で設定（オート）を変えたとき（保存用） */
   onSettingsChange: () => void = () => {};
   /** 結果が出たとき（自己ベストを残す）。オート・タイミング調整のときは呼ばない */
-  onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => void = () => {};
+  /** 終わったとき（自己ベストを更新したら true を返す） */
+  onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => boolean = () => false;
   /** ポーズの画面を出したとき（設定の欄を作る） */
   onPauseOpen: () => void = () => {};
   /** いちばん最後に始めたときの引数（「やりなおす」で同じ所から） */
@@ -128,9 +129,7 @@ export class PlayMode {
         }
       },
       () => !!this.settings.pointerInput,
-      (line, at) => {
-        if (this.active && this.raw.length < 5000) this.raw.push({ t: this.time(at), s: line });
-      },
+      () => {},
       () => !!this.settings.passiveTouch,
     );
     window.addEventListener('keydown', (e) => {
@@ -198,7 +197,6 @@ export class PlayMode {
     this.applyInputMode();
     this.input.refresh();
     resetTouchStats();
-    this.raw = [];
     this.game = game;
     this.root.classList.remove('hidden');
     this.root.classList.add('online');
@@ -347,7 +345,6 @@ export class PlayMode {
     this.applyInputMode();
     this.input.refresh();
     resetTouchStats();
-    this.raw = [];
     this.game = game;
 
     this.root.classList.remove('hidden');
@@ -954,7 +951,6 @@ export class PlayMode {
     }
     rows.push(['判定調整', `${this.settings.offset}ms`]);
     rows.push(['バージョン', BUILD_ID.slice(0, 7)]);
-    this.lastLog = this.logText(g);
     // 叩いた位置から、ドンの帯のちょうどいい幅を提案する
     const cur = this.settings.donWidth ?? 0.6;
     const sug = this.auto ? null : suggestDonWidth(zoneSamples(g.log, cur), cur);
@@ -984,9 +980,10 @@ export class PlayMode {
       Easy: ['かんたん', 'var(--c-easy)'], Normal: ['ふつう', 'var(--c-normal)'], Hard: ['むずかしい', 'var(--c-hard)'], Oni: ['おに', 'var(--c-oni)'], Edit: ['おに（裏）', 'var(--c-edit)'],
     };
     const [cl, cc] = COURSE[info.course] ?? [info.course, 'var(--btn)'];
-    R.classList.remove('res-calib', 'go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
+    R.classList.remove('res-calib', 'go', 'counting', 'r-best', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     R.classList.add(`r-${rank}`);
-    if (!this.auto) this.onFinished({ score: s.score, crown: rank });
+    // 自己ベストを更新したときだけ印を出す（はじめて遊んだときは出さない）
+    if (!this.auto && this.onFinished({ score: s.score, crown: rank })) R.classList.add('r-best');
     R.querySelector('.res-title')!.textContent = info.title;
     R.querySelector('.res-sub')!.textContent = `${cl} ★${info.level}`;
     const badge = R.querySelector<HTMLElement>('.res-course')!;
@@ -1002,7 +999,6 @@ export class PlayMode {
     ge?.style.setProperty('--cl', `${CLEAR_LINE}%`);
     R.querySelector<HTMLElement>('.res-gauge em')!.style.left = `${CLEAR_LINE}%`;
     R.querySelector('.res-acc')!.textContent = `精度 ${acc.toFixed(2)}%`;
-    R.querySelector('.res-detail')?.removeAttribute('open');
     const targets: [HTMLElement, number][] = [[R.querySelector<HTMLElement>('#resScore')!, s.score]];
     for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);
     for (const [el] of targets) el.textContent = '0';
@@ -1013,6 +1009,7 @@ export class PlayMode {
     const step = () => {
       if (R.classList.contains('hidden')) return;
       const k = Math.max(0, Math.min(1, (performance.now() - t0) / 800));
+      if (k > 0) R.classList.add('counting');
       const e = 1 - (1 - k) * (1 - k);
       for (const [el, v] of targets) el.textContent = String(Math.round(v * e));
       if (k < 1) requestAnimationFrame(step);
@@ -1027,32 +1024,7 @@ export class PlayMode {
   /** 結果画面で提案するドンの帯の幅（提案がなければ null） */
   suggestedDonWidth: number | null = null;
 
-  /** 直前のプレイの記録（「ログをコピー」で使う） */
-  lastLog = '';
 
-  /** 届いたタッチイベントそのものの記録（曲の時刻つき） */
-  private raw: { t: number; s: string }[] = [];
-
-  private logText(g: Game): string {
-    const f = (t: number) => t.toFixed(3);
-    const S = touchStats;
-    const lines = [
-      `version ${BUILD_ID.slice(0, 7)} offset ${this.settings.offset}ms input ${isNativeHost() ? 'native' : this.settings.pointerInput ? 'pointer' : 'touch'}${this.settings.passiveTouch ? '+passive' : ''}${this.settings.restZone ? '+rest' : ''} ua ${navigator.userAgent}`,
-      `touchstart ${S.starts} pointerdown ${S.pointers} recovered ${S.recovered} jumps ${S.jumps} rests ${S.rests} native ${S.native} cancel ${S.cancels}/${S.pointerCancels} maxFingers ${S.maxFingers}`,
-    ];
-    const items: { t: number; s: string }[] = this.raw.map((r) => ({ t: r.t, s: `    ${r.s}` }));
-    for (const x of g.log) {
-      if (x.e === 'miss') items.push({ t: x.t, s: `MISS ${x.type}` });
-      else {
-        const j = x.res === 'judged' ? ` ${x.judge} note=${f(x.note!)} (${Math.round((x.t - x.note!) * 1000)}ms)` : ` ${x.res}`;
-        items.push({ t: x.t, s: `tap ${x.kind}${j}${x.ring !== undefined ? ` ring=${x.ring.toFixed(2)}` : ''}` });
-      }
-    }
-    // 見逃しは判定した時刻ではなく音符の時刻に置く。同じ時刻なら元の順番のまま
-    items.sort((a, b) => a.t - b.t);
-    for (const it of items) lines.push(`${f(it.t)} ${it.s}`);
-    return lines.join('\n');
-  }
 
   private showCalibration(g: Game) {
     const all = [...g.deltas, ...g.outside].filter((d) => Math.abs(d) < 0.3).sort((a, b) => a - b);
@@ -1076,11 +1048,10 @@ export class PlayMode {
     const c = this.audio.clockInfo();
     rows.push(['音の遅れ', `${c.latencyMs}ms`]);
     rows.push(['バージョン', BUILD_ID.slice(0, 7)]);
-    this.result.classList.remove('go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
+    this.result.classList.remove('go', 'counting', 'r-best', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     this.result.classList.add('res-calib');
     this.result.querySelector('.res-title')!.textContent = 'タイミング調整';
     this.result.querySelector('.res-sub')!.textContent = '';
-    this.result.querySelector('.res-detail')?.setAttribute('open', '');
     this.result.querySelector('h2')!.textContent = 'タイミング調整の結果';
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     this.result.classList.remove('hidden');
