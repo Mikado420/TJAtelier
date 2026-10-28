@@ -546,7 +546,7 @@ $('divPrev').addEventListener('click', () => stepDivisor(-1));
 $('divNext').addEventListener('click', () => stepDivisor(1));
 $('divMid').addEventListener('click', () => {
   closeMenus();
-  const v = prompt('1 小節を何分割にするか（1 以上の整数。例: 13, 20, 36, 96）', String(ed.divisor));
+  const v = prompt('1 小節の分割数', String(ed.divisor));
   if (v === null) return;
   // 全角の数字も受け付ける。小数・負の数・0 は使えない
   const t = v.trim().replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
@@ -1459,7 +1459,7 @@ function syncTja() {
     return;
   }
   if (!chart.courses.length) {
-    setTjaStatus('#START〜#END が見つかりません（反映していません）', true);
+    setTjaStatus('#START〜#END が見つかりません', true);
     return;
   }
   tjaSync.last = text;
@@ -1682,16 +1682,16 @@ function addEventAction(kind: string) {
     const v = ask('BPM', String(ed.timing.bpmAt(tick)));
     if (v && Number(v) > 0) ev = { tick, kind: 'bpm', value: Number(v) };
   } else if (kind === 'scroll') {
-    const v = ask('SCROLL（倍率、負の値で逆走）', '1');
+    const v = ask('SCROLL', '1');
     if (v && Number.isFinite(Number(v))) ev = { tick, kind: 'scroll', value: Number(v) };
   } else if (kind === 'measure') {
     const m = ed.measureOf(tick);
-    const v = ask('拍子（例: 3/4, 7/8）', `${m.num}/${m.den}`);
+    const v = ask('拍子', `${m.num}/${m.den}`);
     const mm = v?.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
     if (mm && Number(mm[1]) > 0 && Number(mm[2]) > 0) ev = { tick, kind: 'measure', num: Number(mm[1]), den: Number(mm[2]) };
     else if (v) toast('「3/4」の形で入力してください');
   } else if (kind === 'delay') {
-    const v = ask('DELAY（秒）', '0.5');
+    const v = ask('DELAY', '0.5');
     if (v && Number.isFinite(Number(v))) ev = { tick, kind: 'delay', value: Number(v) };
   } else if (kind === 'gogoOn') ev = { tick, kind: 'gogo', on: true };
   else if (kind === 'gogoOff') ev = { tick, kind: 'gogo', on: false };
@@ -1922,7 +1922,7 @@ async function exportAudioData(a: AudioFile): Promise<ArrayBuffer> {
     return data;
   } catch (err) {
     busyEnd();
-    toast('音量を合わせられませんでした（元の音源で書き出します）');
+    toast('音量を合わせられませんでした');
     return a.data;
   }
 }
@@ -1985,7 +1985,7 @@ async function fileAction(act: string) {
         await new Promise((res) => setTimeout(res, 1500));
       }, (p) => busy('バックアップを作っています…', p));
       busyEnd();
-      toast(r.parts > 1 ? `${r.songs} 曲を ${r.parts} つのファイルに書き出しました（戻すときは全部選んでください）` : `${r.songs} 曲を書き出しました`);
+      toast(r.parts > 1 ? `${r.songs} 曲を ${r.parts} つのファイルに書き出しました` : `${r.songs} 曲を書き出しました`);
     } catch (err) {
       busyEnd();
       toast(`書き出せませんでした: ${(err as Error).message}`);
@@ -2085,7 +2085,7 @@ $('pauseRetry').addEventListener('click', () => void (play.lastWasCalibration ? 
 play.onPauseOpen = () => {
   // オンライン対戦: 曲は止まらない。やりなおし・オートは無く、「やめる」で部屋に戻る
   $('pauseBack').textContent = play.isOnline ? 'やめる' : playFromHome ? '曲えらびへ' : 'エディタへ';
-  $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー（曲は止まりません）' : 'ポーズ';
+  $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー' : 'ポーズ';
   $('pauseSettings').innerHTML = `
     <h3>プレイ</h3>
     ${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}
@@ -2361,8 +2361,6 @@ function renderGradSheet(body: HTMLElement) {
   const g = st.grad;
   const m1 = ed.measureOf(g.start);
   const m2 = ed.measureOf(g.end);
-  const hasBpm = ed.course.events.some((e) => e.kind === 'bpm' && e.tick > g.start && e.tick < g.end)
-    || ed.timing.bpmAt(g.start) !== ed.timing.bpmAt(g.end);
   const seg = (key: string, items: [string, string][], cur: string) =>
     `<div class="btns grad-seg" style="grid-template-columns: repeat(${items.length}, minmax(0, 1fr))">${items.map(([v, label]) => `<button data-gset="${key}" data-v="${v}" class="${v === cur ? 'primary' : ''}">${label}</button>`).join('')}</div>`;
   $('sheetTitle').textContent = st.old ? 'グラデを変更' : 'グラデ';
@@ -2375,7 +2373,7 @@ function renderGradSheet(body: HTMLElement) {
         <h3>進み方の基準</h3>
         ${seg('basis', [['time', '秒数'], ['count', '個数']], g.basis ?? 'count')}
         <label class="field"><span>小数の桁数</span><input type="number" min="0" max="6" step="1" inputmode="numeric" data-g="digits" value="${g.digits}"></label>
-        <h3>#BPMCHANGE${hasBpm ? '' : '（この範囲にはなし）'}</h3>
+        <h3>#BPMCHANGE</h3>
         ${seg('speed', [['visual', '見た目(終点)'], ['visualBase', '見た目(始点)'], ['scroll', 'SCROLL値']], g.speed ?? 'scroll')}
         <p class="grad-err" id="gradErr"></p>
         <div class="btns${st.old ? ' three' : ''}">
@@ -2385,7 +2383,7 @@ function renderGradSheet(body: HTMLElement) {
         </div>
       </div>
       <div class="grad-tja">
-        <div class="grad-tja-head">.tja での書き方（小節 ${m1.index + 1} 〜 ${m2.index + 1}）</div>
+        <div class="grad-tja-head">${m1.index + 1}〜${m2.index + 1}</div>
         <pre id="gradTja"></pre>
       </div>
     </div>`;
@@ -2911,7 +2909,7 @@ function renderTempoSheet(body: HTMLElement) {
       <div class="daw-lcd"><b id="tempoLcdPos"></b><small id="tempoLcdTime"></small></div>
       ${st.plan ? '<span class="tempo-tag">手で直した案</span>' : ''}
       <span class="daw-sp"></span>
-      <button class="daw-btn" data-tremeasure title="今の 1 拍目を小節の頭にして、曲全体を測り直す">測り直す</button>
+      <button class="daw-btn" data-tremeasure>測り直す</button>
       <button class="daw-ok" data-tact="ok">${IC.ok}<span>入れる</span></button>
     </header>
     <div class="daw-main">
@@ -4174,7 +4172,7 @@ function renderCutSheet(body: HTMLElement) {
   const insp = `
     ${sel && a.tool !== 'auto' ? `${valueBoxHtml('pos', 'クリップの位置', { steppers: false })}${valueBoxHtml('len', 'クリップの長さ', { steppers: false })}<span class="daw-vsep"></span>` : ''}
     <div class="dv dv-info"><span class="dv-l">音源の長さ</span><b id="arrLen"></b></div>
-    <div class="dv dv-info dv-wide"><span class="dv-l">OFFSET（1 小節目）</span><b id="arrOff"></b></div>
+    <div class="dv dv-info dv-wide"><span class="dv-l">OFFSET</span><b id="arrOff"></b></div>
     <div class="dv dv-info"><span class="dv-l">BPM（マークの所）</span><b id="arrBpm"></b></div>
     <div class="dv dv-info dv-narrow"><span class="dv-l">拍子</span><b id="arrMeter"></b></div>`;
   body.innerHTML = `<div class="daw">

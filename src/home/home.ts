@@ -766,14 +766,14 @@ export class Home {
       // オンライン: 対戦（遊ぶ）と作業（いっしょに作る）は部屋の一覧が別
       const c = this.host.collab;
       this.popup(x, [
-        ['オンライン対戦（いっしょに遊ぶ）', () => { this.stopPreview(); this.host.online(); }],
-        ['オンライン作業（いっしょに作る）', () => { this.stopPreview(); c.lobby(); }],
+        ['オンライン対戦', () => { this.stopPreview(); this.host.online(); }],
+        ['オンライン作業', () => { this.stopPreview(); c.lobby(); }],
       ]);
       return;
     }
     if ((x = d('[data-collabdel]'))) {
       const id = x.dataset.collabdel!;
-      this.popup(x, [['自分の一覧から外す（部屋は残ります）', () => { this.host.collab?.forget(id); this.render(); }, true]]);
+      this.popup(x, [['自分の一覧から外す', () => { this.host.collab?.forget(id); this.render(); }, true]]);
       return;
     }
     if ((x = d('[data-collabopen]')) || (x = d('[data-collab]'))) { this.stopPreview(); this.host.collab?.open((x.dataset.collabopen ?? x.dataset.collab)!); return; }
@@ -1027,7 +1027,7 @@ export class Home {
       this.render();
       this.host.toast(`${ids.length} 曲を削除しました`);
     } else if (a === 'clear') {
-      if (!confirm(`${ids.length} 曲を、入っているフォルダから全部外しますか？（曲は消えません）`)) return;
+      if (!confirm(`${ids.length} 曲を、入っているフォルダから全部外しますか？`)) return;
       for (const f of this.folders) await removeFromFolder(ids, f);
       await this.reload();
       this.render();

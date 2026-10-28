@@ -1417,14 +1417,7 @@ export class EditorView {
     const mid = L.waveY + L.waveH / 2;
     ctx.fillStyle = 'rgba(255,255,255,0.08)';
     ctx.fillRect(L.waveX, mid, this.w - L.waveX, 1);
-    if (!wv) {
-      ctx.font = `${Math.round(24 * L.s)}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#55555c';
-      ctx.fillText('音源なし（読み込み・書き出し → 音源を読み込む）', (L.waveX + this.w) / 2, mid);
-      return;
-    }
+    if (!wv) return;
     const ln = this.lanes;
     // 波形の棒は曲の中の位置（表示の位置）に固定した区切りで作る。画面の位置で区切ると、スクロールのたびに
     // 区切りが曲に対してずれて、波形が揺れて見えるため

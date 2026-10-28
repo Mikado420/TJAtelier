@@ -311,7 +311,7 @@ export class PlayMode {
     await this.start(
       { name: 'Oni', level: 0, notes, bars, gogo: [] },
       1,
-      { title: 'タイミング調整（クリック音に合わせて叩いてください）', course: 'Oni', level: 0 },
+      { title: 'タイミング調整', course: 'Oni', level: 0 },
       notes.map((n) => n.time),
     );
   }
@@ -893,7 +893,7 @@ export class PlayMode {
           ? Math.sqrt(g.deltas.reduce((a, b) => a + (b - mean) ** 2, 0) / g.deltas.length)
           : 0;
         const ms = Math.round(med * 1000);
-        rows.push(['ずれ（中央値）', `${ms > 0 ? '+' : ''}${ms}ms（${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}）`]);
+        rows.push(['ずれ', `${ms > 0 ? '+' : ''}${ms}ms（${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}）`]);
         if (g.deltas.length) rows.push(['ばらつき', `±${Math.round(sd * 1000)}ms`]);
         this.suggested = Math.round(this.settings.offset + med * 1000);
         if (Math.abs(ms) > 5) {
@@ -935,7 +935,7 @@ export class PlayMode {
     // 不具合を調べるための情報
     const c = this.audio.clockInfo();
     rows.push([
-      '音の遅れ（推定）',
+      '音の遅れ',
       `${c.latencyMs}ms（${c.mode === 'outputTimestamp' ? '再生位置から' : '端末の申告値'}、申告 ${c.outputLatencyMs}/${c.baseLatencyMs}ms）`,
     ]);
     const S = touchStats;
@@ -963,7 +963,6 @@ export class PlayMode {
     if (hint) {
       hint.classList.toggle('hidden', !sug);
       if (sug) {
-        hint.querySelector('p')!.textContent = `叩いた位置を見ると、ドンの帯（中央）の幅を変えると色の取り違えが ${sug.before} 回 → ${sug.after} 回に減ります。`;
         hint.querySelector('button')!.textContent = `ドンの幅を ${Math.round(sug.width * 100)}% にする（今 ${Math.round(cur * 100)}%）`;
       }
     }
@@ -1075,7 +1074,7 @@ export class PlayMode {
       calib.classList.add('hidden');
     }
     const c = this.audio.clockInfo();
-    rows.push(['音の遅れ（推定）', `${c.latencyMs}ms（${c.mode === 'outputTimestamp' ? '再生位置から' : '端末の申告値'}）`]);
+    rows.push(['音の遅れ', `${c.latencyMs}ms`]);
     rows.push(['バージョン', BUILD_ID.slice(0, 7)]);
     this.result.classList.remove('go', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     this.result.classList.add('res-calib');

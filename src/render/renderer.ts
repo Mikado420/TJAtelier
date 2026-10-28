@@ -2247,7 +2247,7 @@ export class Renderer {
       this.ctx.strokeRect(0, 0, P.w, rb);
       this.ctx.restore();
       this.ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      this.ctx.fillText('指置き（ここに 1 本ずっと触れておく・反応しません）', P.x, rb * 0.55);
+      this.ctx.fillText('指置き', P.x, rb * 0.55);
       this.ctx.restore();
     }
   }

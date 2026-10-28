@@ -112,7 +112,7 @@ export class CollabLobby {
       this.gone = ids.filter((id) => !mine.some((r) => r.id === id));
       this.pub = pub.filter((r) => !ids.includes(r.id));
     } catch {
-      this.h.toast('部屋の一覧を読み込めませんでした（つながっていないかもしれません）');
+      this.h.toast('部屋の一覧を読み込めませんでした');
     }
     this.loading = false;
     this.renderLists();
@@ -143,7 +143,7 @@ export class CollabLobby {
   private body(): string {
     const v = this.view;
     if (v.k === 'list') {
-      return `<div class="cl-top"><input id="clQuery" type="search" placeholder="部屋の名前・曲名・リーダー・部屋番号" value="${esc(this.query)}" autocomplete="off"><button data-cl="create" class="cl-new">＋ 部屋を作る</button></div>
+      return `<div class="cl-top"><input id="clQuery" type="search" placeholder="" value="${esc(this.query)}" autocomplete="off"><button data-cl="create" class="cl-new">＋ 部屋を作る</button></div>
         <div id="clLists"></div>`;
     }
     if (v.k === 'join') {

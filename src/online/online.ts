@@ -190,7 +190,7 @@ export class OnlineScreen {
       this.body.innerHTML = `
         <div class="ol-lobby">
           <aside class="ol-side">
-            <label class="ol-field"><span>名前</span><input id="olName" maxlength="12" placeholder="12文字まで" value="${esc(this.name)}" autocomplete="off"></label>
+            <label class="ol-field"><span>名前</span><input id="olName" maxlength="12" placeholder="" value="${esc(this.name)}" autocomplete="off"></label>
             <button class="ol-btn primary" data-ol="create">部屋を作る</button>
             <button class="ol-btn" data-ol="refresh">一覧を更新</button>
           </aside>

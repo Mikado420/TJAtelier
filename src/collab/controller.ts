@@ -17,7 +17,7 @@ import type { AudioFile } from '../io/load';
 import { uiScale } from '../orient';
 import { courseToLane, diff, laneToChart, stateOf, type LaneState } from './bridge';
 import {
-  canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes, TRASH_DAYS,
+  canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes,
   barSpan, COMPARE_MAX, type CollabDoc, type Group, type Lane, type Member, type NoteVal, type Op, type RoomSettings,
 } from './protocol';
 import { CollabSession, forgetJoined, joinedList, rememberJoined, type ChatMsg, type CollabLink, type JoinedProject, type JoinOpts } from './session';
@@ -306,7 +306,7 @@ export class Collab {
       this.h.busyEnd();
       if (!data) {
         this.loadedHash = '';
-        this.h.toast('音源を受け取れませんでした（あとでもう一度試します）');
+        this.h.toast('音源を受け取れませんでした');
         return;
       }
       void putCachedAudio(a.hash, data);
@@ -348,7 +348,7 @@ export class Collab {
     const ok = await s.uploadAudio(hash, f.data);
     this.h.busyEnd();
     if (!ok) {
-      this.h.toast('音源を送れませんでした（大きすぎるか、つながっていません）');
+      this.h.toast('音源を送れませんでした');
       return;
     }
     s.cmd('audioSet', { audio: { hash, name: f.name, size: f.data.byteLength }, shift, skip });
@@ -442,7 +442,7 @@ export class Collab {
     if (!ops.length) return;
     const doc = this.doc!;
     if (this.s.role !== 'edit' || ops.some((op) => !canApply(doc, this.me, op))) {
-      this.h.toast(this.s.role !== 'edit' ? '見るだけのリンクで入っています' : 'ここは編集できません（権限がありません）');
+      this.h.toast(this.s.role !== 'edit' ? '見るだけのリンクで入っています' : 'ここは編集できません');
       this.reloadLane();
       return;
     }
@@ -825,7 +825,7 @@ export class Collab {
       const blocks = groups.map((g) => {
         const ranges = g.ranges.map((r, i) => `<span class="cp-rg">${esc(laneName(r.lane))} ${r.from}〜${r.to} 小節${lead ? `<button data-cp="grDel" data-g="${g.id}" data-i="${i}" aria-label="外す">×</button>` : ''}</span>`).join('');
         const mem = lead
-          ? others.map((m) => `<label class="cp-gm"><input type="checkbox" data-gmem="${g.id}" data-mid="${m.id}" ${g.members.includes(m.id) ? 'checked' : ''}><i style="background:${m.color}"></i>${esc(m.name)}</label>`).join('') || '<small>（リーダーのほかにメンバーがいません）</small>'
+          ? others.map((m) => `<label class="cp-gm"><input type="checkbox" data-gmem="${g.id}" data-mid="${m.id}" ${g.members.includes(m.id) ? 'checked' : ''}><i style="background:${m.color}"></i>${esc(m.name)}</label>`).join('') || ''
           : g.members.map((x) => esc(this.memberName(x))).join('・') || '—';
         const add = lead
           ? `<div class="cp-gadd">
@@ -849,7 +849,7 @@ export class Collab {
     }
     if (p === 'vers') {
       const rows = [...s.vers].reverse().map((v) => `<div class="item"><div class="grow">${esc(v.name)}${v.auto ? ' <small>（自動）</small>' : ''}<div class="pos">${fmtDate(v.at)}${v.by ? ` ・ ${esc(this.memberName(v.by))}` : ''}</div></div>${this.isLeader ? `<button data-cp="verRestore" data-id="${v.id}">この版に戻す</button>` : ''}</div>`).join('');
-      return `${edit ? `<label class="field"><span>名前</span><input id="cpVerName" type="text" placeholder="例: サビまで完成" autocomplete="off"></label><div class="btns"><button data-cp="verSave">今の状態を版として残す</button></div>` : ''}
+      return `${edit ? `<label class="field"><span>名前</span><input id="cpVerName" type="text" autocomplete="off"></label><div class="btns"><button data-cp="verSave">今の状態を版として残す</button></div>` : ''}
         <div class="list">${rows || '<p class="note">まだありません</p>'}</div>`;
     }
     if (p === 'room') {
@@ -979,7 +979,7 @@ export class Collab {
       }
       case 'del': {
         const l = doc.lanes[id];
-        if (!l || !confirm(`レーン「${l.name}」をごみ箱に入れますか？（${TRASH_DAYS} 日の間は戻せます）`)) return;
+        if (!l || !confirm(`レーン「${l.name}」をごみ箱に入れますか？`)) return;
         s.cmd('del', { l: id });
         return;
       }
@@ -995,7 +995,7 @@ export class Collab {
       case 'adoptAll': {
         const l = doc.lanes[id];
         const main = l && sortedLanes(doc, l.course).find((x) => x.main);
-        if (!l || !main || !confirm(`「${l.name}」を ${l.course} の本譜面と丸ごと入れ替えますか？（今の本譜面はごみ箱に入ります）`)) return;
+        if (!l || !main || !confirm(`「${l.name}」を ${l.course} の本譜面と丸ごと入れ替えますか？`)) return;
         s.cmd('adoptAll', { src: id, dst: main.id });
         return;
       }
@@ -1078,7 +1078,7 @@ export class Collab {
       }
       case 'verRestore': {
         const v = s.vers.find((x) => x.id === id);
-        if (!v || !confirm(`版「${v.name}」（${fmtDate(v.at)}）に戻しますか？（全員の画面が戻ります。今の状態も版として残ります）`)) return;
+        if (!v || !confirm(`版「${v.name}」（${fmtDate(v.at)}）に戻しますか？`)) return;
         s.cmd('restoreVer', { id });
         this.closePanel();
         return;
@@ -1110,7 +1110,7 @@ export class Collab {
         await this.h.showHome();
         return;
       case 'forget':
-        if (!confirm('この部屋を自分の一覧から外しますか？（部屋は残ります。部屋番号で探せばまた入れます）')) return;
+        if (!confirm('この部屋を自分の一覧から外しますか？')) return;
         forgetJoined(s.link.id);
         this.closePanel();
         this.close(false);
@@ -1162,7 +1162,7 @@ export class Collab {
       notes: src ? structuredClone(src.notes) : {}, events: src ? structuredClone(src.events) : {}, grads: src ? structuredClone(src.grads) : {},
     };
     if (src && src.course !== course) lane.head.level = ref?.head.level ?? lane.head.level;
-    if (!canApply(doc, this.me, { o: 'new', lane })) { this.h.toast('このレーンは足せません（権限がありません）'); return; }
+    if (!canApply(doc, this.me, { o: 'new', lane })) { this.h.toast('このレーンは足せません'); return; }
     s.apply([{ o: 'new', lane }]);
     this.bump(lane.id);
     this.closePanel();
@@ -1200,10 +1200,8 @@ export class Collab {
       const t = Number(k);
       if (t >= a && t <= z) ops.push({ o: 'n', l: main.id, k, v: null });
     }
-    let off = 0;
     for (const n of ed.selectedNotes()) {
       const p = toDst(n.tick);
-      if (p.off) off++;
       const v: NoteVal = { type: n.type };
       if (n.endTick !== undefined) v.endTick = toDst(n.endTick).tick;
       if (n.hits !== undefined) v.hits = n.hits;
@@ -1223,7 +1221,7 @@ export class Collab {
     s.cmd('adoptNote', { src: src.id, dst: main.id, range: `${fmt(ta)}〜${fmt(tb)}` });
     this.refreshGhosts();
     this.h.updateHeader();
-    this.h.toast(off ? `本譜面へ採用しました（${off} 個の音符が本譜面のグリッドに合わず、一番近い 1/192 に置きました）` : '本譜面へ採用しました（音符だけ。命令はそのままです）');
+    this.h.toast('本譜面へ採用しました');
   }
 
   /**

@@ -1031,20 +1031,6 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 }
 .note-tools, .cmd-tools { grid-auto-columns: var(--tw); gap: max(4px, calc(10px * var(--es, 0.45))); }
 .tool { --sk: calc(var(--th) * var(--tan)); }
-/* グループの名前（台の上に小さく） */
-.note-tools, .cmd-tools, .grid-step { position: relative; }
-.note-tools::after, .cmd-tools::after, .grid-step::after {
-  content: attr(data-label);
-  position: absolute;
-  left: 4px;
-  bottom: calc(100% + 9px);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--sub);
-  white-space: nowrap;
-  pointer-events: none;
-}
 /* 間隔: ‹ 1/16 › */
 .grid-step { display: flex; align-items: stretch; gap: 3px; }
 .grid-step button {
@@ -2399,7 +2385,5 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .stage.stack .zoom-ctl button { width: 44px; }
 .stage.stack .zoom-ctl #zoomReset { flex-direction: row; gap: 2px; }
 .stage.stack .zoom-ctl:not(:has(#zoomReset.on)) { display: none; }
-/* ツールの台の上の見出しは出さない */
-.stage.stack .note-tools::after, .stage.stack .cmd-tools::after, .stage.stack .grid-step::after { display: none; }
 /* 選択の操作はツールの台のすぐ上に */
 .stage.stack .sel-bar { bottom: calc(40px * var(--es, 0.45) + var(--th) + 18px); }

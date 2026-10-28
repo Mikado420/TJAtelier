@@ -103,7 +103,7 @@ export function gradTargets(c: ECourse, g: Pick<Grad, 'start' | 'end' | 'speed' 
 
 export function gradValid(g: Pick<Grad, 'from' | 'to' | 'mode'>): string | null {
   if (!Number.isFinite(g.from) || !Number.isFinite(g.to)) return '数値を入力してください';
-  if (g.mode === 'geometric' && !(g.from * g.to > 0)) return '等比は、開始値と終了値が両方とも正（または両方とも負）のときだけ使えます';
+  if (g.mode === 'geometric' && !(g.from * g.to > 0)) return '等比は開始値と終了値の符号をそろえてください';
   return null;
 }
 
