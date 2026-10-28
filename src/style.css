@@ -2451,3 +2451,24 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res.go .res-acc, .res.res-calib .res-acc { opacity: 1; }
 /* 難易度を選ぶまでは、記録の欄は出さない */
 .hdf-info:empty { display: none; }
+
+/* ---------- BPM 測定・切り貼り: 削った版 ---------- */
+.sheet .daw-lcd.empty { visibility: hidden; }
+/* 操作はアイコンだけの四角いボタン（下の欄の右端） */
+.sheet .daw-acts.ic { display: flex; gap: 6px; align-items: center; flex: none; }
+.sheet .daw-acts.ic button {
+  width: 52px;
+  height: 46px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: var(--btn);
+  --sk: calc(46px * var(--tan));
+  clip-path: polygon(var(--sk) 0, 100% 0, calc(100% - var(--sk)) 100%, 0 100%);
+}
+.sheet .daw-acts.ic button svg { width: 22px; height: 22px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sheet .daw-acts.ic button svg .fill { fill: #fff; stroke: none; }
+.sheet .daw-acts.ic button.on { background: var(--accent); }
+.sheet .daw-acts.ic button.bad svg { stroke: #ff8a80; }
+.sheet .daw-acts.ic button:disabled { opacity: 0.35; }
+.sheet .daw-insp.hidden { display: none; }

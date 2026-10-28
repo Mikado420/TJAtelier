@@ -2836,6 +2836,7 @@ const IC = {
   minus: ic('<path d="M5 12h14"/>'),
   fit: ic('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   ok: ic('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+  trash: ic('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
 };
 
 /** 上のバーの表示（カーソルまたは再生中の位置: 小節 : 拍 と、時刻） */
@@ -2846,7 +2847,8 @@ function updateTempoLcd() {
   if (!pos || !p) return;
   const at = tempoPreview.on ? audio.now() : st.cursor >= 0 ? st.cursor : -1;
   pos.textContent = at >= 0 ? tempoBarLabel(p, Math.round(tickAtTime(p, TPB, at))).replace('小節 ', '').replace(' 拍 ', ' : ') : '—';
-  $('tempoLcdTime').textContent = at >= 0 ? fmtSec(at) : 'カーソルなし';
+  $('tempoLcdTime').textContent = at >= 0 ? fmtSec(at) : '';
+  pos.closest('.daw-lcd')?.classList.toggle('empty', at < 0);
 }
 
 /** 区間の BPM を変えるドラッグ・tap 入力・‹ › を、元に戻すの記録 1 回にまとめる */
@@ -2867,7 +2869,7 @@ function renderTempoSheet(body: HTMLElement) {
   if (st.running || st.error || !st.result || !curTempoPlan()) {
     const msg = st.running ? '曲全体を調べています…' : st.error ? `測れませんでした: ${st.error}` : '拍が見つかりませんでした';
     body.innerHTML = `<div class="daw">
-      <header class="daw-top"><button class="daw-ic" data-tact="cancel" aria-label="閉じる">${IC.close}</button><b class="daw-title">BPM・OFFSET</b></header>
+      <header class="daw-top"><button class="daw-ic" data-tact="cancel" aria-label="閉じる">${IC.close}</button></header>
       <div class="daw-wait"><p>${msg}</p>${st.running ? `<div class="tempo-progress"><i id="tempoBar" style="width:${Math.round(st.progress * 100)}%"></i></div>` : ''}</div>
     </div>`;
     bindCancel();
@@ -2895,14 +2897,12 @@ function renderTempoSheet(body: HTMLElement) {
   body.innerHTML = `<div class="daw">
     <header class="daw-top">
       <button class="daw-ic" data-tact="cancel" aria-label="やめる">${IC.close}</button>
-      <b class="daw-title">BPM・OFFSET</b>
       <button class="daw-ic" data-tundo aria-label="元に戻す" ${st.undo.length ? '' : 'disabled'}>${IC.undo}</button>
       <button class="daw-ic" data-tredo aria-label="やり直す" ${st.redo.length ? '' : 'disabled'}>${IC.redo}</button>
       <span class="daw-sep"></span>
       <button class="daw-ic" data-thome aria-label="区間の頭へ">${IC.home}</button>
       <button class="daw-ic daw-play ${playing ? 'on' : ''}" data-tplayhere aria-label="${playing ? '止める' : 'カーソルから再生'}">${playing ? IC.stop : IC.play}</button>
       <div class="daw-lcd"><b id="tempoLcdPos"></b><small id="tempoLcdTime"></small></div>
-      ${st.plan ? '<span class="tempo-tag">手で直した案</span>' : ''}
       <span class="daw-sp"></span>
       <button class="daw-btn" data-tremeasure>測り直す</button>
       <button class="daw-ok" data-tact="ok">${IC.ok}<span>入れる</span></button>
@@ -2910,9 +2910,6 @@ function renderTempoSheet(body: HTMLElement) {
     <div class="daw-main">
       <nav class="daw-tools">
         ${TEMPO_TOOLS.map(([k, label, d]) => `<button data-ttool="${k}" class="${st.tool === k ? 'on' : ''}">${ic(d)}<small>${label}</small></button>`).join('')}
-        <span class="daw-sp"></span>
-        <button data-tzoom="0.5" aria-label="拡大">${IC.plus}</button>
-        <button data-tzoom="2" aria-label="縮小">${IC.minus}</button>
       </nav>
       <div class="daw-stage">
         <canvas id="tempoOverview" class="daw-ov"></canvas>
@@ -2923,18 +2920,12 @@ function renderTempoSheet(body: HTMLElement) {
       ${valueBoxHtml('sec', '区間', { cls: 'dv-sec' })}
       ${valueBoxHtml('bpm', 'BPM', { cls: 'dv-big', extra: '<div class="dv-x"><button data-tmul="0.5">÷2</button><button data-tmul="2">×2</button></div>' })}
       <div class="dv"><span class="dv-l">拍子</span>${meterSel}</div>
-      ${valueBoxHtml('start', '始まり')}
-      ${valueBoxHtml('end', '終わり')}
-      <span class="daw-vsep"></span>
-      ${valueBoxHtml('fine', '拍の線')}
       ${valueBoxHtml('shift', '1 拍目')}
-      <span class="daw-vsep"></span>
-      <div class="daw-acts">
-        <button data-tsplit ${st.cursor >= 0 ? '' : 'disabled'}>✂ カーソルで分ける</button>
-        <button data-tfrom ${st.cursor >= 0 && st.sel > 0 ? '' : 'disabled'}>⇤ ここから</button>
-        <button data-tto ${st.cursor >= 0 && st.sel + 1 < secs.length ? '' : 'disabled'}>ここまで ⇥</button>
-        <button data-tplay class="${tempoPreview.row === st.sel ? 'on' : ''}">${tempoPreview.row === st.sel ? '■ 止める' : '▶ 区間を再生'}</button>
-        <button data-tdel class="bad" ${secs.length > 1 ? '' : 'disabled'}>消す</button>
+      <span class="daw-sp"></span>
+      <div class="daw-acts ic">
+        <button data-tplay class="${tempoPreview.row === st.sel ? 'on' : ''}" aria-label="${tempoPreview.row === st.sel ? '止める' : '区間を再生'}">${tempoPreview.row === st.sel ? IC.stop : IC.play}</button>
+        <button data-tsplit ${st.cursor >= 0 ? '' : 'disabled'} aria-label="カーソルで分ける">${ic(TEMPO_TOOLS[2][2])}</button>
+        <button data-tdel class="bad" ${secs.length > 1 ? '' : 'disabled'} aria-label="区間を消す">${IC.trash}</button>
       </div>
     </footer>
   </div>`;
@@ -3960,7 +3951,7 @@ function drawArr(playhead = -1) {
     ctx.fillStyle = on ? '#1d2023' : '#fff';
     ctx.font = '700 11px system-ui, sans-serif';
     const nm = c.srcId ? `${arrSources[c.srcId]?.name ?? ''} ` : '';
-    ctx.fillText(`${nm}${fmtCut(c.src)}〜${fmtCut(c.src + c.len)}`, Math.max(xa, 0) + 6, y0 + 12);
+    if (nm) ctx.fillText(nm, Math.max(xa, 0) + 6, y0 + 12);
     ctx.fillStyle = col.wave;
     drawClipWave(ctx, c, xa, xb, y0 + A_HEAD + 1, ch - A_HEAD - 2, W);
     // オートメーションの線（音量）。上が 100%、下が 0%。線より上を暗くして、下がっている所を見せる
@@ -4100,6 +4091,10 @@ function drawArr(playhead = -1) {
   }
   // 再生中の位置
   if (playhead >= 0) drawPlayhead(ctx, xOf(playhead), HH, A_RULER);
+  // 下の欄の「マークで分割」は、マークがクリップの中にあるときだけ
+  const sp = document.querySelector<HTMLButtonElement>('.daw-insp [data-abub="split"]');
+  const sc0 = a.clips[a.sel];
+  if (sp && sc0) sp.disabled = !(a.play > sc0.pos + MIN_LEN && a.play < clipEnd(sc0) - MIN_LEN);
   // クリップの上の操作ボタン（選んでいるとき・オートメーションでないとき）
   const bub = document.getElementById('arrBub');
   if (bub) {
@@ -4122,6 +4117,10 @@ function drawArr(playhead = -1) {
 }
 
 const ARR_IC = {
+  dup: '<rect x="8" y="8" width="12" height="12" rx="1"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  fin: '<path d="M3 20 21 5v15z"/>',
+  fout: '<path d="M3 5l18 15H3z"/>',
+  flat: '<path d="M3 8h18M3 8v12h18V8"/>',
   auto: '<path d="M3 17 9 8l6 6 6-9"/><circle cx="9" cy="8" r="2" class="fill"/><circle cx="15" cy="14" r="2" class="fill"/>',
   grid: '<path d="M4 4v16M10 4v16M16 4v16M20 4v16"/><path d="M2 20h20"/>',
 };
@@ -4164,16 +4163,18 @@ function renderCutSheet(body: HTMLElement) {
   const emptyTracks = Array.from({ length: a.tracks }, (_, i) => i).filter((i) => !usedTracks.has(i));
   // 下の欄: 新しい音源の長さ・OFFSET・マークの所の BPM と拍子（分割・複製などはクリップの上のボタンで）。
   // クリップを選んでいるときは、その位置と長さも（上下にドラッグ・タップで入力）
+  // 下の欄: 選んでいるクリップの位置・長さと操作。OFFSET は変わるときだけ
+  const offChanged = Math.abs(arrNewOffset() - ed.chart.offset) > 0.0005;
   const insp = `
-    ${sel && a.tool !== 'auto' ? `${valueBoxHtml('pos', 'クリップの位置', { steppers: false })}${valueBoxHtml('len', 'クリップの長さ', { steppers: false })}<span class="daw-vsep"></span>` : ''}
-    <div class="dv dv-info"><span class="dv-l">音源の長さ</span><b id="arrLen"></b></div>
-    <div class="dv dv-info dv-wide"><span class="dv-l">OFFSET</span><b id="arrOff"></b></div>
-    <div class="dv dv-info"><span class="dv-l">BPM（マークの所）</span><b id="arrBpm"></b></div>
-    <div class="dv dv-info dv-narrow"><span class="dv-l">拍子</span><b id="arrMeter"></b></div>`;
+    ${sel && a.tool !== 'auto' ? `${valueBoxHtml('pos', '位置', { steppers: false })}${valueBoxHtml('len', '長さ', { steppers: false })}` : ''}
+    ${offChanged ? `<div class="dv dv-info dv-wide"><span class="dv-l">OFFSET</span><b id="arrOff"></b></div>` : ''}
+    <span class="daw-sp"></span>
+    ${sel ? `<div class="daw-acts ic">${a.tool === 'auto'
+      ? `<button data-aenv="in" aria-label="フェードイン">${ic(ARR_IC.fin)}</button><button data-aenv="out" aria-label="フェードアウト">${ic(ARR_IC.fout)}</button><button data-aenv="clear" aria-label="音量を戻す" ${sel.env.length ? '' : 'disabled'}>${ic(ARR_IC.flat)}</button>`
+      : `<button data-abub="split" aria-label="マークで分割" ${a.play > sel.pos + MIN_LEN && a.play < clipEnd(sel) - MIN_LEN ? '' : 'disabled'}>${ic(TEMPO_TOOLS[2][2])}</button><button data-abub="dup" aria-label="複製">${ic(ARR_IC.dup)}</button><button data-abub="del" class="bad" aria-label="削除">${IC.trash}</button>`}</div>` : ''}`;
   body.innerHTML = `<div class="daw">
     <header class="daw-top">
       <button class="daw-ic" data-aact="cancel" aria-label="やめる">${IC.close}</button>
-      <b class="daw-title">音源の切り貼り</b>
       <button class="daw-ic" data-aundo aria-label="元に戻す" ${a.undo.length ? '' : 'disabled'}>${IC.undo}</button>
       <button class="daw-ic" data-aredo aria-label="やり直す" ${a.redo.length ? '' : 'disabled'}>${IC.redo}</button>
       <span class="daw-sep"></span>
@@ -4195,13 +4196,9 @@ function renderCutSheet(body: HTMLElement) {
       </div>` : ''}
       <div class="daw-stage">
         <div class="arr-row"><canvas id="arrHead" class="arr-head"></canvas><canvas id="arrWave" class="daw-wave"></canvas></div>
-        <div id="arrBub" class="arr-bub hidden">
-          <button data-abub="split" class="b-move">✂ マークで分割</button><button data-abub="dup" class="b-move">⧉ 複製</button><button data-abub="del" class="b-move">削除</button>
-          <button data-aenv="in" class="b-auto">フェードイン</button><button data-aenv="out" class="b-auto">フェードアウト</button><button data-aenv="clear" class="b-auto">音量を戻す</button>
-        </div>
       </div>
     </div>
-    <footer class="daw-insp fit">${insp}</footer>
+    <footer class="daw-insp fit ${sel || offChanged ? '' : 'hidden'}">${insp}</footer>
   </div>`;
   const rerender = () => renderCutSheet(body);
   // グリッド・「…」のメニューは、そのボタンの下に出す
