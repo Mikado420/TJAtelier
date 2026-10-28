@@ -1,5 +1,5 @@
 import type { NoteType } from './types';
-import { contentEnd, measures, sortCourse, type EChart, type ECourse, type EEvent } from './model';
+import { contentEnd, measures, scrollText, sortCourse, type EChart, type ECourse, type EEvent } from './model';
 
 /** 編集用モデル → TJA テキスト */
 
@@ -24,12 +24,13 @@ const num = (v: number) => String(Number(v.toFixed(6)));
 function eventLine(e: EEvent): string {
   switch (e.kind) {
     case 'bpm': return `#BPMCHANGE ${num(e.value)}`;
-    case 'scroll': return `#SCROLL ${num(e.value)}`;
+    case 'scroll': return `#SCROLL ${scrollText(e.value, e.im)}`;
     case 'measure': return `#MEASURE ${e.num}/${e.den}`;
     case 'gogo': return e.on ? '#GOGOSTART' : '#GOGOEND';
     case 'barline': return e.on ? '#BARLINEON' : '#BARLINEOFF';
     case 'delay': return `#DELAY ${num(e.value)}`;
     case 'jpos': return `#JPOSSCROLL ${num(e.time)} ${num(e.dist)} ${e.dir}`;
+    case 'lyric': return e.text ? `#LYRIC ${e.text}` : '#LYRIC';
   }
 }
 

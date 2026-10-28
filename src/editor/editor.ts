@@ -488,7 +488,7 @@ export class Editor {
   }
 
   /** その位置・種類の命令 */
-  eventAt(kind: 'scroll' | 'bpm' | 'measure', tick: number): EEvent | undefined {
+  eventAt(kind: 'scroll' | 'bpm' | 'measure' | 'lyric', tick: number): EEvent | undefined {
     return this.course.events.find((e) => e.kind === kind && e.tick === tick);
   }
 
@@ -539,7 +539,7 @@ export class Editor {
     // グラデの始点・終点に置く #SCROLL は、グラデの値の代わりにする（グラデを置き直しても消さない）
     if (ev.kind === 'scroll') {
       const t = ev.tick;
-      ev = { tick: t, kind: 'scroll', value: ev.value };
+      ev = { tick: t, kind: 'scroll', value: ev.value, ...(ev.im ? { im: ev.im } : {}) };
       if (this.course.grads?.some((g) => g.start === t || g.end === t)) ev.pin = true;
     }
     this.mutate(() => {

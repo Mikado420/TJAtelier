@@ -20,13 +20,15 @@ export interface ENote {
 export type EEvent =
   | { tick: number; kind: 'bpm'; value: number }
   /** pin: グラデの始点・終点に、グラデの値の代わりに置いた #SCROLL（グラデを置き直しても消さない） */
-  | { tick: number; kind: 'scroll'; value: number; pin?: boolean }
+  | { tick: number; kind: 'scroll'; value: number; pin?: boolean; im?: number }
   | { tick: number; kind: 'measure'; num: number; den: number }
   | { tick: number; kind: 'gogo'; on: boolean }
   | { tick: number; kind: 'barline'; on: boolean }
   | { tick: number; kind: 'delay'; value: number }
   /** #JPOSSCROLL: 判定枠を time 秒かけて dist ピクセル動かす（dir: 1 = 右、0 = 左） */
-  | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 };
+  | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 }
+  /** #LYRIC: 歌詞（次の #LYRIC まで出し続ける。空なら消す） */
+  | { tick: number; kind: 'lyric'; text: string };
 
 export type EventKind = EEvent['kind'];
 
@@ -84,7 +86,34 @@ export function newChart(title = '新しい譜面', bpm = 120): EChart {
 
 export const isLong = (t: NoteType) => t === 'roll' || t === 'bigRoll' || t === 'balloon';
 
-const EVENT_ORDER: EventKind[] = ['measure', 'bpm', 'scroll', 'gogo', 'barline', 'delay', 'jpos'];
+const EVENT_ORDER: EventKind[] = ['measure', 'bpm', 'scroll', 'gogo', 'barline', 'delay', 'jpos', 'lyric'];
+
+/** #SCROLL の値（a、a+bi・a-bi・bi のような複素数も）を読む。i の部分は縦の速さ */
+export function parseScroll(arg: string): { value: number; im: number } | null {
+  const s = arg.replace(/\s+/g, '').toLowerCase();
+  if (!s) return null;
+  if (!s.endsWith('i')) {
+    const v = Number(s);
+    return Number.isFinite(v) ? { value: v, im: 0 } : null;
+  }
+  const body = s.slice(0, -1);
+  // 実部と虚部の境目: 最後の + か -（先頭と、指数の e の直後は除く）
+  let k = -1;
+  for (let i = body.length - 1; i > 0; i--) if ((body[i] === '+' || body[i] === '-') && body[i - 1] !== 'e') { k = i; break; }
+  const reS = k < 0 ? '' : body.slice(0, k);
+  const imS = k < 0 ? body : body.slice(k);
+  const re = reS === '' ? 0 : Number(reS);
+  const im = imS === '' || imS === '+' ? 1 : imS === '-' ? -1 : Number(imS);
+  return Number.isFinite(re) && Number.isFinite(im) ? { value: re, im } : null;
+}
+
+/** #SCROLL の値を文字にする（虚部があれば a+bi） */
+export function scrollText(value: number, im = 0, digits = 6): string {
+  const f = (v: number) => String(Number(v.toFixed(digits)));
+  if (!im) return f(value);
+  const a = Math.abs(im);
+  return `${f(value)}${im < 0 ? '-' : '+'}${a === 1 ? '' : f(a)}i`;
+}
 
 export function sortCourse(c: ECourse) {
   c.notes.sort((a, b) => a.tick - b.tick);
@@ -224,6 +253,10 @@ export class Timing {
   scrollAt(tick: number) {
     return this.lastValue('scroll', tick)?.value ?? 1;
   }
+  /** #SCROLL の虚部（縦の速さ） */
+  scrollImAt(tick: number) {
+    return this.lastValue('scroll', tick)?.im ?? 0;
+  }
   gogoAt(tick: number) {
     return this.lastValue('gogo', tick)?.on ?? false;
   }
@@ -286,6 +319,8 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
       scroll: t.scrollAt(n.tick),
       gogo: t.gogoAt(n.tick),
     };
+    const im = t.scrollImAt(n.tick);
+    if (im) note.scrollY = im;
     if (n.endTick !== undefined) note.endTime = t.tickToTime(n.endTick);
     if (n.type === 'balloon') note.hits = n.hits ?? 5;
     if (bt) {
@@ -298,7 +333,8 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
   for (const m of measures(course, contentEnd(course))) {
     if (m.start > contentEnd(course)) break;
     if (!t.barlineAt(m.start)) continue;
-    bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(bt ? { beat: bt.beatOf(m.start) } : {}) });
+    const im = t.scrollImAt(m.start);
+    bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}) });
   }
   // ゴーゴー区間は「直前に通過したノーツ」ではなくイベントの時刻で決める
   // （#GOGOEND の後しばらくノーツがなくても、その時刻で解除されるように）
@@ -320,9 +356,12 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
     if (e.kind !== 'jpos') continue;
     jpos.push({ start: t.tickToTime(e.tick), time: e.time, dx: (e.dir ? 1 : -1) * e.dist });
   }
+  // 歌詞（#LYRIC）
+  const lyrics = course.events.filter((e) => e.kind === 'lyric').map((e) => ({ time: t.tickToTime(e.tick), text: (e as { text: string }).text }));
   return {
     name: course.name, level: course.level, notes, bars, gogo,
     ...(mode && bt ? { scrollMode: mode, beatPoints: bt.points } : {}),
     ...(jpos.length ? { jpos } : {}),
+    ...(lyrics.length ? { lyrics } : {}),
   };
 }

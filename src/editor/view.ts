@@ -1,4 +1,4 @@
-import { measures, Timing, TPB, type EChart, type EEvent, type ECourse, type Measure } from '../chart/model';
+import { measures, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type Measure } from '../chart/model';
 import { drawAny, drawRoll, hexPath } from '../render/notes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
@@ -88,12 +88,13 @@ const beatRels = (len: number) => { const r: number[] = []; for (let t = TPB; t 
 export function eventShort(e: EEvent): string {
   switch (e.kind) {
     case 'bpm': return `♩${Number(e.value.toFixed(3))}`;
-    case 'scroll': return `×${Number(e.value.toFixed(3))}`;
+    case 'scroll': return `×${scrollText(e.value, e.im, 3)}`;
     case 'measure': return `${e.num}/${e.den}`;
     case 'gogo': return e.on ? 'GOGO▶' : 'GOGO■';
     case 'barline': return e.on ? '|ON' : '|OFF';
     case 'delay': return `⏱${e.value}s`;
     case 'jpos': return `◎${e.dir ? '→' : '←'}${Number(e.dist.toFixed(1))}`;
+    case 'lyric': return e.text ? `♪${e.text.length > 12 ? `${e.text.slice(0, 12)}…` : e.text}` : '♪―';
   }
 }
 
@@ -106,6 +107,7 @@ export const EVENT_COLOR: Record<EEvent['kind'], string> = {
   barline: '#a8a8b0',
   delay: '#8fd18f',
   jpos: '#ff9ec7',
+  lyric: '#7fd6f5',
 };
 
 /** レーンの下に出す種類（設定で切り替える） */
@@ -121,12 +123,13 @@ export interface EventItem {
 export function eventText(e: EEvent): string {
   switch (e.kind) {
     case 'bpm': return `BPM ${Number(e.value.toFixed(3))}`;
-    case 'scroll': return `SCROLL ${Number(e.value.toFixed(3))}`;
+    case 'scroll': return `SCROLL ${scrollText(e.value, e.im, 3)}`;
     case 'measure': return `拍子 ${e.num}/${e.den}`;
     case 'gogo': return e.on ? 'GOGO 開始' : 'GOGO 終了';
     case 'barline': return e.on ? '小節線 ON' : '小節線 OFF';
     case 'delay': return `DELAY ${e.value}s`;
     case 'jpos': return `判定枠 ${e.dir ? '右' : '左'}へ ${Number(e.dist.toFixed(1))}px（${Number(e.time.toFixed(3))} 秒）`;
+    case 'lyric': return e.text ? `歌詞「${e.text}」` : '歌詞を消す';
   }
 }
 
@@ -185,7 +188,7 @@ export class EditorView {
   /** レーンの下のイベントの文字をタップしたとき（重なってまとめたものは全部） */
   onEventTap: (items: EventItem[]) => void = () => {};
   /** レーンの下に出す種類 */
-  evShow: EventShow = { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true };
+  evShow: EventShow = { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true };
   /** 最後に描いたイベントの文字の位置（タップの判定用） */
   private evBoxes: { x1: number; x2: number; y1: number; y2: number; items: EventItem[] }[] = [];
   onUserScroll: () => void = () => {};

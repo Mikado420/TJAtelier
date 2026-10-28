@@ -19,8 +19,10 @@ export interface Note {
   hits?: number;
   /** そのノーツ時点の BPM（スクロール速度計算用） */
   bpm: number;
-  /** #SCROLL の値 */
+  /** #SCROLL の値（実部） */
   scroll: number;
+  /** #SCROLL の虚部（縦の速さ。＋で下から、−で上から流れてくる） */
+  scrollY?: number;
   gogo: boolean;
   /** 流れ方が #HBSCROLL / #BMSCROLL のときの位置（拍の数。BPM だけで決まり、#SCROLL は入らない） */
   beat?: number;
@@ -32,6 +34,7 @@ export interface BarLine {
   time: number;
   bpm: number;
   scroll: number;
+  scrollY?: number;
   beat?: number;
 }
 
@@ -63,6 +66,8 @@ export interface Course {
   beatPoints?: BeatPoint[];
   /** 判定枠の移動（#JPOSSCROLL） */
   jpos?: JposMove[];
+  /** 歌詞（#LYRIC。時刻の順。text が空なら消す） */
+  lyrics?: { time: number; text: string }[];
 }
 
 /**
@@ -71,6 +76,30 @@ export interface Course {
  * - #HBSCROLL: (音符の拍 − 今の拍) × その音符の SCROLL。BPM が変わるとレーン全体の速さが変わる
  *   （#BMSCROLL はこのアプリでは使わない。読み込んだときは #HBSCROLL と同じにする）
  */
+/** 判定枠から何拍ぶん先か（SCROLL を掛ける前）。x は × scroll、y は × scrollY */
+export function scrollBase(
+  mode: Course['scrollMode'],
+  n: { time: number; bpm: number; beat?: number },
+  now: number,
+  beatNow: number | null,
+): number {
+  if (mode && beatNow !== null && n.beat !== undefined) return n.beat - beatNow;
+  return ((n.time - now) * n.bpm) / 60;
+}
+
+/** 時刻 now の歌詞（無ければ空） */
+export function lyricAt(lyrics: Course['lyrics'], now: number): string {
+  if (!lyrics?.length || now < lyrics[0].time) return '';
+  let lo = 0;
+  let hi = lyrics.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (lyrics[mid].time <= now) lo = mid;
+    else hi = mid - 1;
+  }
+  return lyrics[lo].text;
+}
+
 export function scrollAhead(
   mode: Course['scrollMode'],
   n: { time: number; bpm: number; scroll: number; beat?: number },

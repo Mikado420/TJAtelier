@@ -1,4 +1,4 @@
-import { beatAt, jposAt, scrollAhead, type Course, type Note } from '../chart/types';
+import { beatAt, jposAt, lyricAt, scrollAhead, scrollBase, type Course, type Note } from '../chart/types';
 import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type NoteState } from '../engine/game';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { pixelRatio } from '../orient';
@@ -648,6 +648,14 @@ export class Renderer {
   private xOf(time: number, beat: number | undefined, n: { bpm: number; scroll: number }, now: number) {
     return this.jx + scrollAhead(this.scrollMode, { time, bpm: n.bpm, scroll: n.scroll, beat }, now, this.beatNow) * (MEASURE_PX / 4) * this.speed;
   }
+  /** 複素数の #SCROLL の縦のずれ（＋で下。虚部が正なら下から、負なら上から流れてくる） */
+  private yOf(time: number, beat: number | undefined, n: { bpm: number; scrollY?: number }, now: number) {
+    if (!n.scrollY) return 0;
+    return scrollBase(this.scrollMode, { time, bpm: n.bpm, beat }, now, this.beatNow) * n.scrollY * (MEASURE_PX / 4) * this.speed;
+  }
+  /** 今の譜面に縦に流れる #SCROLL があるか（あれば、レーンの外まで描く） */
+  private hasY = false;
+  private hasYOf: Course | null = null;
 
   draw(game: Game, course: Course, now: number, info: { title: string; course: string; level: number; genre?: string }) {
     const bars = course.bars;
@@ -656,6 +664,10 @@ export class Renderer {
     this.jx = JX + jposAt(course.jpos, now) * JPOS_SCALE;
     this.beatNow = course.beatPoints?.length ? beatAt(course.beatPoints, now) : null;
     this.scrollMode = this.beatNow !== null ? course.scrollMode : undefined;
+    if (this.hasYOf !== course) {
+      this.hasYOf = course;
+      this.hasY = course.notes.some((n) => n.scrollY) || course.bars.some((b) => b.scrollY);
+    }
     const st = game.stats;
 
     if (st.combo > this.lastCombo) {
@@ -721,6 +733,7 @@ export class Renderer {
     this.drawSparkles(wall);
     this.drawRainbow(wall);
     this.drawBanner(wall);
+    this.drawLyric(V, course, now);
     this.drawEnd(V, wall);
     ctx.restore();
     if (this.touch) {
@@ -729,6 +742,24 @@ export class Renderer {
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  /** 歌詞（#LYRIC）: 画面の下に、白い文字・水色の縁で。次の #LYRIC まで出し続け、空なら消す */
+  private drawLyric(V: Rect, course: Course, now: number) {
+    const text = lyricAt(course.lyrics, now);
+    if (!text) return;
+    const ctx = this.ctx;
+    const font = `900 46px ${FONT}`;
+    ctx.font = font;
+    const w = ctx.measureText(text).width + 24;
+    const room = V.x1 - V.x0 - 48;
+    const k = w > room ? room / w : 1;
+    const y = V.y1 - 46;
+    ctx.save();
+    ctx.translate((V.x0 + V.x1) / 2, y);
+    ctx.scale(k, k);
+    drawCachedText(ctx, text, 0, 0, font, '#fff', '#1fa8e0', 9);
+    ctx.restore();
   }
 
   private drawTop(V: Rect, gogo: boolean, wall: number) {
@@ -849,12 +880,20 @@ export class Renderer {
       const share = false;
       if (share) this.visBars.length = 0;
       const far = share ? right * 1.5 : right;
+      if (this.hasY) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(LANE_X, V.y0, right - LANE_X, V.y1 - V.y0);
+        ctx.clip();
+      }
       for (const b of bars) {
         const x = this.xOf(b.time, b.beat, b, now);
         if (x < LANE_X || x > far) continue;
         if (share) this.visBars.push(x);
-        if (x <= right) ctx.fillRect(x - 1.5, LANE_TOP, 3, LANE_BOTTOM - LANE_TOP);
+        const dy = this.yOf(b.time, b.beat, b, now);
+        if (x <= right && LANE_BOTTOM + dy > V.y0 && LANE_TOP + dy < V.y1) ctx.fillRect(x - 1.5, LANE_TOP + dy, 3, LANE_BOTTOM - LANE_TOP);
       }
+      if (this.hasY) ctx.restore();
     }
 
 
@@ -862,7 +901,8 @@ export class Renderer {
     const labels = this.labelsFor(game);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(LANE_X, LANE_TOP - 80, right - LANE_X + 200, TEXT_BOTTOM - LANE_TOP + 80);
+    if (this.hasY && !opp) ctx.rect(LANE_X, V.y0, right - LANE_X + 200, V.y1 - V.y0);
+    else ctx.rect(LANE_X, LANE_TOP - 80, right - LANE_X + 200, TEXT_BOTTOM - LANE_TOP + 80);
     ctx.clip();
     ctx.font = `800 31px ${FONT}`;
     ctx.textAlign = 'center';
@@ -881,6 +921,8 @@ export class Renderer {
       const n = s.note;
       let x: number;
       let endX: number;
+      let dy = 0;
+      let endDy = 0;
       if (opp) {
         const m = opp.marks[i];
         const long = n.type === 'roll' || n.type === 'bigRoll' || n.type === 'balloon';
@@ -895,8 +937,13 @@ export class Renderer {
         if (hidden && !share) continue;
         x = this.xOf(n.time, n.beat, n, now);
         endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
+        if (n.scrollY) {
+          dy = this.yOf(n.time, n.beat, n, now);
+          endDy = n.endTime !== undefined ? this.yOf(n.endTime, n.endBeat, n, now) : dy;
+          if (Math.min(dy, endDy) > V.y1 - JY + 200 || Math.max(dy, endDy) < V.y0 - JY - 200) continue;
+        }
         // 相手のレーンは縮めると右に長くなるので、少し先まで入れておく
-        if (endX < LANE_X - 120 || x > (share ? right * 1.5 : right) + 120) continue;
+        if (Math.max(x, endX) < LANE_X - 120 || Math.min(x, endX) > (share ? right * 1.5 : right) + 120) continue;
         if (share) vis.push(i, x, endX);
         if (hidden || x > right + 120) continue;
       }
@@ -907,9 +954,18 @@ export class Renderer {
         const active = now >= n.time && now <= (n.endTime ?? n.time);
         // 叩いている間は、レーンの音符の代わりにふくらむ風船を出す
         if (active && !opp && this.rollFx?.balloon) continue;
-        if (active) x = this.jx;
+        if (active) { x = this.jx; dy = 0; }
         if (now > (n.endTime ?? n.time)) continue;
-        drawBalloon(ctx, x, JY, r, null);
+        drawBalloon(ctx, x, JY + dy, r, null);
+      } else if ((n.type === 'roll' || n.type === 'bigRoll') && (dy || endDy)) {
+        // 縦にも流れる連打: 頭から終わりの向きに傾けて描く
+        const ang = Math.atan2(endDy - dy, endX - x);
+        const len = Math.hypot(endX - x, endDy - dy);
+        ctx.save();
+        ctx.translate(x, JY + dy);
+        ctx.rotate(ang);
+        drawAny(ctx, n.type, 0, 0, r, len);
+        ctx.restore();
       } else if (n.type === 'roll' || n.type === 'bigRoll') {
         drawAny(ctx, n.type, x, JY, r, endX);
         // 音符の下: 「連打━━━━っ!!」
@@ -924,12 +980,12 @@ export class Renderer {
         }
         if (endX > LANE_X) drawCachedText(ctx, 'っ!!', endX, ly, `900 32px ${FONT}`, '#fff', '#2a2a2a', 7);
       } else {
-        drawNoteHead(ctx, x, JY, r, n.type);
+        drawNoteHead(ctx, x, JY + dy, r, n.type);
       }
 
       const label = labels.get(n);
       if (label && x > LANE_X - 40) {
-        drawCachedText(ctx, label, x, (LANE_BOTTOM + TEXT_BOTTOM) / 2 + 3, `900 32px ${FONT}`, '#fff', '#2a2a2a', 7);
+        drawCachedText(ctx, label, x, (LANE_BOTTOM + TEXT_BOTTOM) / 2 + 3 + dy, `900 32px ${FONT}`, '#fff', '#2a2a2a', 7);
       }
     }
     ctx.restore();

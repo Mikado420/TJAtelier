@@ -4,7 +4,7 @@ import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
-import { COURSE_NAMES, contentEnd, newChart, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
+import { COURSE_NAMES, contentEnd, newChart, parseScroll, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
@@ -101,7 +101,7 @@ const settings = {
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
-  evShow: { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true } as EventShow,
+  evShow: { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true } as EventShow,
   /** 打音の比率の初期値を 0.8 にした版 */
   hitVolVer: 0,
 };
@@ -205,7 +205,7 @@ if (settings.zoomVer !== 2) {
   settings.zoomVer = 2;
 }
 view.playSpeed = settings.speed;
-settings.evShow = Object.assign({ bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true }, settings.evShow);
+settings.evShow = Object.assign({ bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true }, settings.evShow);
 view.evShow = settings.evShow;
 view.onEventTap = (items) => openEvents(items);
 const applyMix = () => audio.setMix({ music: settings.volMusic, hit: settings.volHit, metro: settings.volMetro, ui: settings.volUi });
@@ -2457,9 +2457,9 @@ function gradTjaPreview(g: Grad, old?: Grad): string {
 
 // ---------- SCROLL / BPMCHANGE / MEASURE（1 か所） ----------
 
-let pointEdit: { kind: 'scroll' | 'bpm' | 'measure'; tick: number } | null = null;
+let pointEdit: { kind: 'scroll' | 'bpm' | 'measure' | 'lyric'; tick: number } | null = null;
 
-function openPoint(kind: 'scroll' | 'bpm' | 'measure', tick: number) {
+function openPoint(kind: 'scroll' | 'bpm' | 'measure' | 'lyric', tick: number) {
   pointEdit = { kind, tick };
   openSheet('point');
 }
@@ -2469,17 +2469,18 @@ function renderPointSheet(body: HTMLElement) {
   const m = ed.measureOf(tick);
   const beat = (tick - m.start) / ((TPB * 4) / m.den) + 1;
   const cur = ed.eventAt(kind, tick);
-  const title = { scroll: '#SCROLL', bpm: '#BPMCHANGE', measure: '#MEASURE' }[kind];
+  const title = { scroll: '#SCROLL', bpm: '#BPMCHANGE', measure: '#MEASURE', lyric: '#LYRIC' }[kind];
   let value = '';
-  if (kind === 'scroll') value = String(cur && cur.kind === 'scroll' ? cur.value : ed.timing.scrollAt(tick));
+  if (kind === 'scroll') value = cur && cur.kind === 'scroll' ? scrollText(cur.value, cur.im) : scrollText(ed.timing.scrollAt(tick), ed.timing.scrollImAt(tick));
+  else if (kind === 'lyric') value = cur && cur.kind === 'lyric' ? cur.text : '';
   else if (kind === 'bpm') value = String(cur && cur.kind === 'bpm' ? cur.value : ed.timing.bpmAt(tick));
   else value = `${m.num}/${m.den}`;
   $('sheetTitle').textContent = title;
   const where = kind === 'measure' ? `小節 ${m.index + 1} から` : `小節 ${m.index + 1}・${Number(beat.toFixed(2))} 拍目から`;
-  const label = { scroll: 'SCROLL', bpm: 'BPM', measure: '拍子' }[kind];
+  const label = { scroll: 'SCROLL', bpm: 'BPM', measure: '拍子', lyric: '歌詞' }[kind];
   body.innerHTML = `
     <p class="note">${where}</p>
-    <label class="field"><span>${label}</span><input type="text" autocapitalize="off" autocomplete="off" id="pointValue" value="${value}"></label>
+    <label class="field"><span>${label}</span><input type="text" autocapitalize="off" autocomplete="off" id="pointValue" value="${esc(value)}"></label>
     <div class="btns${cur ? ' three' : ''}">
       ${cur ? '<button data-pact="del">消す</button>' : ''}
       <button data-pact="cancel">やめる</button>
@@ -2490,7 +2491,10 @@ function renderPointSheet(body: HTMLElement) {
     const v = inp.value.trim();
     let ev: EEvent | null = null;
     if (kind === 'scroll') {
-      if (v !== '' && Number.isFinite(Number(v))) ev = { tick, kind: 'scroll', value: Number(v) };
+      const sc = parseScroll(v);
+      if (sc) ev = { tick, kind: 'scroll', value: sc.value, ...(sc.im ? { im: sc.im } : {}) };
+    } else if (kind === 'lyric') {
+      ev = { tick, kind: 'lyric', text: v.slice(0, 500) };
     } else if (kind === 'bpm') {
       if (Number(v) > 0) ev = { tick, kind: 'bpm', value: Number(v) };
     } else {
@@ -2524,7 +2528,7 @@ function renderPointSheet(body: HTMLElement) {
 // ---------- レーンの下のイベント（タップしたとき） ----------
 
 const EV_NAMES: Partial<Record<keyof EventShow, string>> = {
-  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動',
+  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動', lyric: '歌詞',
 };
 
 /** 一覧に出しているイベント */
@@ -2540,7 +2544,7 @@ function openEvents(items: EventItem[]) {
       openSheet('grad');
       return;
     }
-    if (e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure') {
+    if (e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric') {
       openPoint(e.kind, e.tick);
       return;
     }
@@ -2558,8 +2562,8 @@ function renderEvListSheet(body: HTMLElement) {
   }
   body.innerHTML = `<div class="ev-list">${items.map((it, i) => {
     const e = it.events[0];
-    const name = it.grad ? `グラデ ${it.grad.from}→${it.grad.to}（${it.grad.mode === 'linear' ? '等差' : '等比'}）` : eventText(e);
-    const editable = !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure';
+    const name = it.grad ? `グラデ ${it.grad.from}→${it.grad.to}（${it.grad.mode === 'linear' ? '等差' : '等比'}）` : esc(eventText(e));
+    const editable = !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric';
     return `<div class="ev-row"><i style="background:${EVENT_COLOR[e.kind]}"></i><div class="ev-name">${name}<small>${posText(it.tick)}</small></div>
       ${editable ? `<button data-evi="${i}" data-evact="edit">変更</button>` : ''}<button data-evi="${i}" data-evact="del">消す</button></div>`;
   }).join('')}</div>`;

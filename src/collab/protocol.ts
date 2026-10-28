@@ -18,12 +18,13 @@ export interface NoteVal {
 /** 命令（tick と種類は鍵の方にも持つ） */
 export type EventVal =
   | { tick: number; kind: 'bpm'; value: number }
-  | { tick: number; kind: 'scroll'; value: number }
+  | { tick: number; kind: 'scroll'; value: number; im?: number }
   | { tick: number; kind: 'measure'; num: number; den: number }
   | { tick: number; kind: 'gogo'; on: boolean }
   | { tick: number; kind: 'barline'; on: boolean }
   | { tick: number; kind: 'delay'; value: number }
-  | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 };
+  | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 }
+  | { tick: number; kind: 'lyric'; text: string };
 
 /** グラデ（エディタの Grad と同じ形。id で見分ける） */
 export interface GradVal {
@@ -328,7 +329,8 @@ export function validEvent(k: string, v: EventVal | null): boolean {
   if (!v || typeof v !== 'object' || v.kind !== kind || !fin(v.tick, -MAX_TICK, MAX_TICK) || Math.round(v.tick) !== Number(t)) return false;
   switch (v.kind) {
     case 'bpm': return fin(v.value, 0.0001, 100000);
-    case 'scroll': return fin(v.value, -100000, 100000);
+    case 'scroll': return fin(v.value, -100000, 100000) && (v.im === undefined || fin(v.im, -100000, 100000));
+    case 'lyric': return typeof v.text === 'string' && v.text.length <= 500;
     case 'measure': return Number.isInteger(v.num) && Number.isInteger(v.den) && v.num >= 1 && v.den >= 1 && v.num <= 100000 && v.den <= 100000;
     case 'gogo': case 'barline': return typeof v.on === 'boolean';
     case 'delay': return fin(v.value, -600, 600);

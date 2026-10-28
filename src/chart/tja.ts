@@ -1,11 +1,11 @@
 import type { NoteType } from './types';
-import { measureTicks, newCourse, sortCourse, TPB, type EChart, type ECourse, type EEvent } from './model';
+import { measureTicks, newCourse, parseScroll, sortCourse, TPB, type EChart, type ECourse, type EEvent } from './model';
 
 /**
  * TJA → 編集用モデル（tick ベース）
  * 対応: TITLE SUBTITLE BPM OFFSET WAVE DEMOSTART COURSE LEVEL BALLOON（他のヘッダは保持）
  *       #START #END #BPMCHANGE #SCROLL #MEASURE #DELAY #GOGOSTART #GOGOEND #BARLINEON #BARLINEOFF
- *       #HBSCROLL #BMSCROLL（#START の直前） #JPOSSCROLL
+ *       #HBSCROLL #BMSCROLL（#START の直前） #JPOSSCROLL #LYRIC（#SCROLL は a+bi の複素数も）
  * 譜面分岐は「普通譜面 (#N)」だけ採用。2P 譜面 (#START P2) は無視。
  */
 
@@ -223,7 +223,11 @@ function toEvent(name: string, arg: string, tick: number): EEvent | null {
   const v = Number(arg);
   switch (name) {
     case 'BPMCHANGE': return v > 0 ? { tick, kind: 'bpm', value: v } : null;
-    case 'SCROLL': return Number.isFinite(v) && arg !== '' ? { tick, kind: 'scroll', value: v } : null;
+    case 'SCROLL': {
+      const s = parseScroll(arg);
+      return s ? { tick, kind: 'scroll', value: s.value, ...(s.im ? { im: s.im } : {}) } : null;
+    }
+    case 'LYRIC': return { tick, kind: 'lyric', text: arg.slice(0, 500) };
     case 'DELAY': return Number.isFinite(v) && arg !== '' ? { tick, kind: 'delay', value: v } : null;
     case 'GOGOSTART': return { tick, kind: 'gogo', on: true };
     case 'GOGOEND': return { tick, kind: 'gogo', on: false };
