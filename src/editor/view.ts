@@ -210,7 +210,7 @@ export class EditorView {
   private vrowRaw = 0;
   private vAnim = 0;
   get vrow() {
-    return Math.min(Math.max(0, this.vrowRaw), this.totalRows - this.visRows);
+    return Math.min(Math.max(0, this.vrowRaw), this.totalRows - 1);
   }
   /** 同時に見せる段の数（#DELAY で重なる所は、1 段目の下に同じ大きさで 2 段目まで並べる。3 段以上は上下にスクロール） */
   get visRows() {
@@ -627,7 +627,7 @@ export class EditorView {
       }
       const ax = Math.abs(pt.x - this.drag.startX);
       const ay = Math.abs(pt.y - this.drag.startY);
-      if (!this.drag.moved && L.rows > L.vis && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
+      if (!this.drag.moved && L.rows > 1 && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
         this.drag.moved = true;
         this.drag.v = true;
         this.drag.lastY = pt.y;
@@ -674,10 +674,10 @@ export class EditorView {
         const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
         if (e.ctrlKey || e.metaKey || (!horiz && !e.shiftKey)) {
           this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.002));
-        } else if (e.shiftKey && !horiz && this.L.rows > this.L.vis && e.altKey) {
+        } else if (e.shiftKey && !horiz && this.L.rows > 1 && e.altKey) {
           // Shift + Alt + ホイールで段を切り替える
           const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-          if (d) this.settleRow(Math.min(this.L.rows - this.L.vis, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
+          if (d) this.settleRow(Math.min(this.L.rows - 1, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
         } else {
           this.onUserScroll();
           this.stopSettle();
@@ -873,7 +873,7 @@ export class EditorView {
       const dr = Math.max(3, 6 * s);
       const gap = dr * 3;
       const y0 = L.laneY + L.blockH / 2 - ((L.rows - 1) * gap) / 2;
-      for (let r = 0; r < L.rows && L.rows > L.vis; r++) {
+      for (let r = 0; r < L.rows && L.rows > 1; r++) {
         ctx.fillStyle = r >= cur && r <= last ? EVENT_COLOR.delay : 'rgba(255,255,255,0.3)';
         ctx.beginPath();
         ctx.arc(this.w - dr * 2.5, y0 + r * gap, dr, 0, Math.PI * 2);
