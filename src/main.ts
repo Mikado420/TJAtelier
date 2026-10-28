@@ -216,16 +216,21 @@ const applyPlayZoom = () => {
 };
 // 拡大率: 自分で変えるまではプレイ画面と同じ音符の間隔（画面の高さに比例）
 // 右のアイコンバーとツールも Malody の画面と同じ比率で大きさを決める（CSS の --es）
+/** 上のタイムラインの配置: レーンの下の命令の段の位置（拡大率の表示をそこに出す）。#DELAY の段の数でも変わる */
+let stageKey = '';
+function syncStageVars() {
+  const stage = $('editor').parentElement!;
+  const L = view.L;
+  const key = `${view.stack}|${L.evTop}|${L.evH}`;
+  if (key === stageKey) return;
+  stageKey = key;
+  stage.classList.toggle('stack', view.stack);
+  stage.style.setProperty('--ev-top', `${L.evTop}px`);
+  stage.style.setProperty('--ev-h', `${L.evH}px`);
+}
 const onViewResize = () => {
   document.documentElement.style.setProperty('--es', String(view.s));
-  // 上のタイムラインの配置: レーンの下の命令の段の位置（拡大率の表示をそこに出す）
-  const stage = $('editor').parentElement!;
-  stage.classList.toggle('stack', view.stack);
-  if (view.stack) {
-    const L = view.L;
-    stage.style.setProperty('--ev-top', `${L.evTop}px`);
-    stage.style.setProperty('--ev-h', `${L.evH}px`);
-  }
+  syncStageVars();
   if (!settings.zoomSet) view.setZoom(view.defaultZoom);
 };
 view.onResize = onViewResize;
@@ -567,6 +572,7 @@ $('zoomReset').addEventListener('click', resetZoom);
 // 今の位置の小節・BPM・拍子と、拡大率の表示（毎フレーム、変わったときだけ書き換える）
 let hudKey = '';
 function updateHud() {
+  syncStageVars();
   const at = Math.max(0, ed.snap(view.pos));
   const m = ed.measureOf(at);
   const bpm = String(Number(ed.timing.bpmAt(at).toFixed(3)));

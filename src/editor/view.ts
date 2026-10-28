@@ -203,7 +203,11 @@ export class EditorView {
   private vrowRaw = 0;
   private vAnim = 0;
   get vrow() {
-    return Math.min(Math.max(0, this.vrowRaw), this.lanes.rows - 1);
+    return Math.min(Math.max(0, this.vrowRaw), this.lanes.rows - this.visRows);
+  }
+  /** 同時に見せる段の数（#DELAY で重なる所は、1 段目の下に同じ大きさで 2 段目まで並べる。3 段以上は上下にスクロール） */
+  get visRows() {
+    return this.stack ? Math.min(this.lanes.rows, 2) : 1;
   }
   /** 再生中の時刻（DELAY の空きの間も判定枠を進めるため） */
   posTime: number | null = null;
@@ -264,21 +268,26 @@ export class EditorView {
     if (this.stack) {
       const laneH = (R.laneBottom - R.laneTop) * s;
       const evH = Math.max(16, (R.evBottom - R.evTop) * s);
-      // レーンは縦の真ん中。下の命令とツールが入らなければ、その分だけ上へ
-      const laneY = Math.min((this.h - laneH) / 2, this.h - this.toolsH - evH - 8 * s - laneH);
+      const vis = this.visRows;
+      const subGap = R.subGap * s;
+      const blockH = vis * laneH + (vis - 1) * subGap;
+      // レーン（段が 2 つならその 2 つ）は縦の真ん中。下の命令とツールが入らなければ、その分だけ上へ
+      const laneY = Math.min((this.h - blockH) / 2, this.h - this.toolsH - evH - 8 * s - blockH);
       const cy = laneY + laneH / 2;
       const tlTop = 8 * s;
       return {
         sub: this.lanes.rows - 1,
-        subGap: R.subGap * s,
+        vis,
+        blockH,
+        subGap,
         s,
         colW: R.laneX * s,
         colLine1: R.colLine1 * s,
         laneY,
         laneH,
-        evY: laneY + laneH,
+        evY: laneY + blockH,
         evH,
-        evTop: laneY + laneH + 6 * s,
+        evTop: laneY + blockH + 6 * s,
         cy,
         playX: R.judgeX * s,
         r: R.noteR * s,
@@ -295,6 +304,8 @@ export class EditorView {
     const laneY = R.laneTop * s;
     const laneH = (R.laneBottom - R.laneTop) * s;
     return {
+      vis: 1,
+      blockH: laneH,
       tlX: 0,
       tlTop: 0,
       tlBottom: 0,
@@ -389,7 +400,7 @@ export class EditorView {
     const L = this.L;
     const near = Math.round(this.vrow);
     if (y < L.laneY) return y >= L.laneY - L.r * 0.5 ? near : -1;
-    if (y > L.laneY + L.laneH) return y <= L.evTop + L.evH ? near : -1;
+    if (y > L.laneY + L.blockH) return y <= L.evTop + L.evH ? near : -1;
     const c = y - L.laneY + this.vrow * (L.laneH + L.subGap);
     const row = Math.floor(c / (L.laneH + L.subGap));
     return c - row * (L.laneH + L.subGap) <= L.laneH ? Math.min(row, L.sub) : -1;
@@ -540,7 +551,7 @@ export class EditorView {
       }
       const ax = Math.abs(pt.x - this.drag.startX);
       const ay = Math.abs(pt.y - this.drag.startY);
-      if (!this.drag.moved && L.sub && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.laneH) {
+      if (!this.drag.moved && L.sub >= L.vis && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
         this.drag.moved = true;
         this.drag.v = true;
         this.drag.lastY = pt.y;
@@ -587,10 +598,10 @@ export class EditorView {
         const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
         if (e.ctrlKey || e.metaKey || (!horiz && !e.shiftKey)) {
           this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.002));
-        } else if (e.shiftKey && !horiz && this.L.sub && e.altKey) {
+        } else if (e.shiftKey && !horiz && this.L.sub >= this.L.vis && e.altKey) {
           // Shift + Alt + ホイールで段を切り替える
           const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-          if (d) this.settleRow(Math.min(this.L.sub, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
+          if (d) this.settleRow(Math.min(this.L.sub + 1 - this.L.vis, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
         } else {
           this.onUserScroll();
           this.stopSettle();
@@ -662,7 +673,7 @@ export class EditorView {
     const laneClip = (fn: () => void) => {
       ctx.save();
       ctx.beginPath();
-      if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.laneH);
+      if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
       else ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
       ctx.clip();
       fn();
@@ -696,7 +707,7 @@ export class EditorView {
       // レーン（#DELAY の段は、重なった所だけ緑がかった色。それ以外は何もない所なので暗く）
       for (let r = 0; r <= L.sub; r++) {
         const g = this.rowGeom(r);
-        if (g.y > L.laneY + L.laneH || g.y + g.h < L.laneY) continue;
+        if (g.y > L.laneY + L.blockH || g.y + g.h < L.laneY) continue;
         ctx.fillStyle = r === 0 ? C.lane : C.emptyLane;
         ctx.fillRect(L.colW, g.y, this.w - L.colW, g.h);
       }
@@ -751,28 +762,38 @@ export class EditorView {
     ctx.shadowColor = 'rgba(30,136,255,0.8)';
     ctx.shadowBlur = 8 * s;
     const edge = Math.max(1, 2 * s);
-    ctx.fillRect(L.colW, L.laneY - edge / 2, this.w - L.colW, edge);
-    ctx.fillRect(L.colW, L.laneY + L.laneH - edge / 2, this.w - L.colW, edge);
+    // 段ごとに上下の縁（見えている段だけ。スクロール中は枠からはみ出さない）
+    ctx.beginPath();
+    ctx.rect(L.colW, L.laneY - edge, this.w - L.colW, L.blockH + edge * 2);
+    ctx.clip();
+    for (let r = 0; r <= L.sub; r++) {
+      const g = this.rowGeom(r);
+      if (g.y > L.laneY + L.blockH + 1 || g.y + g.h < L.laneY - 1) continue;
+      ctx.fillRect(L.colW, g.y - edge / 2, this.w - L.colW, edge);
+      ctx.fillRect(L.colW, g.y + g.h - edge / 2, this.w - L.colW, edge);
+      if (!L.sub) break;
+    }
     ctx.restore();
 
-    // ほかの段に音符がある所: レーンの上下の縁を緑にして知らせる。右の端に、今の段の印
+    // 見えていない段に音符がある所: 上下の縁を緑にして知らせる。右の端に、見ている段の印
     if (L.sub) {
       const cur = Math.round(this.vrow);
+      const last = cur + L.vis - 1;
       const bh = Math.max(3, 6 * s);
       ctx.fillStyle = EVENT_COLOR.delay;
       for (const p of ln.pieces) {
-        if (p.row === cur || p.row === 0) continue;
+        if ((p.row >= cur && p.row <= last) || p.row === 0) continue;
         const x1 = Math.max(L.colW, xd(p.a));
         const x2 = Math.min(this.w, xd(p.b));
         if (x2 <= x1) continue;
-        if (p.row > cur) ctx.fillRect(x1, L.laneY + L.laneH - bh, x2 - x1, bh);
+        if (p.row > last) ctx.fillRect(x1, L.laneY + L.blockH - bh, x2 - x1, bh);
         else ctx.fillRect(x1, L.laneY, x2 - x1, bh);
       }
       const dr = Math.max(3, 6 * s);
       const gap = dr * 3;
-      const y0 = L.cy - (L.sub * gap) / 2;
-      for (let r = 0; r <= L.sub; r++) {
-        ctx.fillStyle = r === cur ? EVENT_COLOR.delay : 'rgba(255,255,255,0.3)';
+      const y0 = L.laneY + L.blockH / 2 - (L.sub * gap) / 2;
+      for (let r = 0; r <= L.sub && L.sub >= L.vis; r++) {
+        ctx.fillStyle = r >= cur && r <= last ? EVENT_COLOR.delay : 'rgba(255,255,255,0.3)';
         ctx.beginPath();
         ctx.arc(this.w - dr * 2.5, y0 + r * gap, dr, 0, Math.PI * 2);
         ctx.fill();
@@ -967,7 +988,7 @@ export class EditorView {
     // ノーツ（後ろから描く）
     ctx.save();
     ctx.beginPath();
-    if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.laneH);
+    if (L.sub) ctx.rect(L.colW, L.laneY, this.w - L.colW, L.blockH);
     else ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
     ctx.clip();
     const notes = course.notes;
