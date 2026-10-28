@@ -749,16 +749,16 @@ export class Renderer {
     const text = lyricAt(course.lyrics, now);
     if (!text) return;
     const ctx = this.ctx;
-    const font = `900 46px ${FONT}`;
+    const font = `900 60px ${FONT}`;
     ctx.font = font;
     const w = ctx.measureText(text).width + 24;
     const room = V.x1 - V.x0 - 48;
     const k = w > room ? room / w : 1;
-    const y = V.y1 - 46;
+    const y = V.y1 - 56;
     ctx.save();
     ctx.translate((V.x0 + V.x1) / 2, y);
     ctx.scale(k, k);
-    drawCachedText(ctx, text, 0, 0, font, '#fff', '#1fa8e0', 9);
+    drawCachedText(ctx, text, 0, 0, font, '#fff', '#4d9fbe', 11);
     ctx.restore();
   }
 
