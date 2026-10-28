@@ -218,6 +218,14 @@ const applyPlayZoom = () => {
 // 右のアイコンバーとツールも Malody の画面と同じ比率で大きさを決める（CSS の --es）
 const onViewResize = () => {
   document.documentElement.style.setProperty('--es', String(view.s));
+  // 上のタイムラインの配置: レーンの下の命令の段の位置（拡大率の表示をそこに出す）
+  const stage = $('editor').parentElement!;
+  stage.classList.toggle('stack', view.stack);
+  if (view.stack) {
+    const L = view.L;
+    stage.style.setProperty('--ev-top', `${L.evTop}px`);
+    stage.style.setProperty('--ev-h', `${L.evH}px`);
+  }
   if (!settings.zoomSet) view.setZoom(view.defaultZoom);
 };
 view.onResize = onViewResize;
