@@ -237,6 +237,17 @@ export class Home {
     if (e) void this.startPreview(e);
   }
 
+  /** 読み込んだ曲: 一覧を読み直すだけ（フォルダは開いている所のまま。今のフォルダに見えていれば選ぶ） */
+  async added(id: string) {
+    await this.reload();
+    const e = this.songs.find((x) => x.id === id);
+    if (e && this.open && this.inView(e)) {
+      this.sel = id;
+      this.focus = 'song';
+    }
+    this.render(true);
+  }
+
   /** 今のフォルダを開いて、その曲を選んだ状態にする */
   private openOn() {
     this.open = true;
@@ -314,8 +325,8 @@ export class Home {
           const on = this.focus === 'folder' && k === this.fbar && !pk;
           const user = k !== ALL && k !== UNCAT;
           const acts = pk ? '' : `<span class="hfb-acts">${user
-            ? `<button data-h="new" aria-label="ここに新しい譜面">${ic('M12 5v14M5 12h14')}<small>譜面</small></button><button data-fsub="${esc(k)}" aria-label="中にフォルダを作る">${ic('M3 6.5h6l2 2h10v10H3zM12 11v6M9 14h6')}<small>フォルダ</small></button><button data-frename="${esc(k)}" aria-label="名前を変える">${ic('M4 20h4L19 9l-4-4L4 16z')}<small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す">${ic('M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13')}<small>消す</small></button>`
-            : `<button data-h="new" aria-label="ここに新しい譜面">${ic('M12 5v14M5 12h14')}<small>新しい譜面</small></button>`}</span>`;
+            ? `<button data-fsub="${esc(k)}" aria-label="中にフォルダを作る">${ic('M3 6.5h6l2 2h10v10H3zM12 11v6M9 14h6')}<small>フォルダ</small></button><button data-frename="${esc(k)}" aria-label="名前を変える">${ic('M4 20h4L19 9l-4-4L4 16z')}<small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す">${ic('M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13')}<small>消す</small></button>`
+            : ''}</span>`;
           rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col};--dp:${dp}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${acts}<i class="hfb-ar" aria-hidden="true"></i></div>`);
           if (!isOpen) return;
           const kids = user ? this.childFolders(k) : [];

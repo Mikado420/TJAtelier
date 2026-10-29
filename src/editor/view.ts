@@ -128,6 +128,7 @@ export interface EventItem {
 
 /** 譜面分岐の色（普通・玄人・達人） */
 export const BRANCH_COLOR = ['#9aa3aa', '#3a96d2', '#c846be'];
+export const BRANCH_NAME = ['NORMAL', 'EXPERT', 'MASTER'];
 
 export function eventText(e: EEvent): string {
   switch (e.kind) {

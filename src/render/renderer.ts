@@ -24,6 +24,7 @@ const NR = 54; // 通常ノーツの半径（黒縁を含む）
 const MEASURE_PX = 1470; // ハイスピード 1.0 で 1 小節が流れる距離
 /** 譜面分岐のレーンの色（普通・玄人・達人） */
 const BRANCH_TINT = ['', 'rgba(58,150,210,0.30)', 'rgba(200,70,190,0.30)'];
+const BRANCH_NAME = ['NORMAL', 'EXPERT', 'MASTER'];
 
 /** #JPOSSCROLL の距離（px）は、横 1280 の画面での px として、この画面の基準座標（横 2000）に直す */
 const JPOS_SCALE = REF_W / 1280;
@@ -665,6 +666,8 @@ export class Renderer {
   }
   /** 今の譜面に縦に流れる #SCROLL があるか（あれば、レーンの外まで描く） */
   private hasY = false;
+  /** 今の譜面に譜面分岐があるか */
+  private hasBranch = false;
   private hasYOf: Course | null = null;
 
   draw(game: Game, course: Course, now: number, info: { title: string; course: string; level: number; genre?: string }) {
@@ -676,6 +679,7 @@ export class Renderer {
     this.scrollMode = this.beatNow !== null ? course.scrollMode : undefined;
     if (this.hasYOf !== course) {
       this.hasYOf = course;
+      this.hasBranch = !!course.branches?.length;
       this.hasY = course.notes.some((n) => n.scrollY) || course.bars.some((b) => b.scrollY);
     }
     const st = game.stats;
@@ -850,6 +854,18 @@ export class Renderer {
         ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - p)})`;
         ctx.fillRect(Math.max(LANE_X, cut - 26), LANE_TOP, 26, LANE_BOTTOM - LANE_TOP);
       } else tint(game.branch, LANE_X, right);
+      // 分岐のある譜面: レーンの右に今の分岐の名前
+      if (this.hasBranch) {
+        const name = BRANCH_NAME[fx && p < 1 ? fx.to : game.branch];
+        ctx.save();
+        ctx.globalAlpha = 0.2 + 0.5 * (fx && p < 1 ? 1 - p : 0);
+        ctx.font = `italic 900 76px ${FONT}`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(name, Math.min(right, V.x1) - 36, (LANE_TOP + LANE_BOTTOM) / 2 + 4);
+        ctx.restore();
+      }
     }
 
     // 叩いたときにレーン全体が色づく（ドン＝赤茶、カッ＝青）

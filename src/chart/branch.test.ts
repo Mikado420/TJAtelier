@@ -145,3 +145,15 @@ describe('譜面分岐: 区間を足す・中を変える', () => {
     expect(parseTJA(t2).courses[0].branches).toHaveLength(2);
   });
 });
+
+describe('譜面分岐: p,-2,-1', () => {
+  it('達人譜面に決める（#LEVELHOLD があっても）', async () => {
+    const { Game } = await import('../engine/game');
+    const src = TJA.replace('#BRANCHSTART p,60,80', '#BRANCHSTART p,-2,-1').replace('#SECTION\n', '#LEVELHOLD\n');
+    const chart = parseTJA(src);
+    const p = toPlayable(chart, chart.courses[0]);
+    const g = new Game(p.notes, p);
+    g.update(5);
+    expect(g.branch).toBe(2);
+  });
+});

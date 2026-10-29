@@ -19,7 +19,7 @@ import { applyGrad, gradValid, type Grad } from './editor/grad';
 import { writeCourseBody } from './chart/tjaWrite';
 
 import { DIVISORS, Editor, type Tool } from './editor/editor';
-import { BRANCH_COLOR, EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow, type GhostRow } from './editor/view';
+import { BRANCH_COLOR, BRANCH_NAME, EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow, type GhostRow } from './editor/view';
 import { isVideoName, loadFiles, type AudioFile } from './io/load';
 import { encodeSJIS } from './chart/sjis';
 import { analyzeCourse, simulateRolls } from './chart/analyze';
@@ -906,7 +906,7 @@ function renderAnalysisSheet(body: HTMLElement) {
     <div class="an-head">
       <div class="an-title"><h1>${esc(chart.title || '（無題）')}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>
       <div class="an-tabs">${tabs}</div>
-      ${hasBr ? `<div class="an-br">${['普通', '玄人', '達人'].map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n}</button>`).join('')}</div>` : ''}
+      ${hasBr ? `<div class="an-br">${BRANCH_NAME.map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n}</button>`).join('')}</div>` : ''}
     </div>
     <div class="an-tiles">
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
@@ -1097,7 +1097,7 @@ ed.onChange((structural) => {
 
 // ---------- 譜面分岐（エディタ） ----------
 
-const BR_SHORT = ['普', '玄', '達'];
+const BR_SHORT = ['N', 'E', 'M'];
 const BR_TYPE: Record<EBranch['type'], string> = { p: '精度', r: '連打', s: 'スコア' };
 const brCtl = document.createElement('div');
 brCtl.className = 'br-ctl hidden';
@@ -1154,7 +1154,7 @@ function syncBranches(force = false) {
     const chart: EChart = { ...ed.chart, courses: [path] };
     const pc = toPlayable(chart, path);
     rows.push({
-      id: `br:${k}`, name: ['普通', '玄人', '達人'][k], color: BRANCH_COLOR[k], main: false,
+      id: `br:${k}`, name: BRANCH_NAME[k], color: BRANCH_COLOR[k], main: false,
       notes: pc.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: pc.bars.map((b) => b.time), chart,
       focus: bs.map((b) => [b.start, b.end] as [number, number]),
     });
@@ -1171,8 +1171,8 @@ function renderBranchSheet(body: HTMLElement) {
   $('sheetTitle').textContent = '#BRANCHSTART';
   body.innerHTML = `
     <div class="st-seg br-type">${(['p', 'r', 's'] as const).map((t) => `<button data-bt="${t}" class="${t === type ? 'on' : ''}">${BR_TYPE[t]}</button>`).join('')}</div>
-    <label class="field br-f1"><span>玄人</span><input type="number" inputmode="decimal" step="any" id="brX" value="${b.x}"></label>
-    <label class="field br-f2"><span>達人</span><input type="number" inputmode="decimal" step="any" id="brY" value="${b.y}"></label>
+    <label class="field br-f1"><span>EXPERT</span><input type="number" inputmode="decimal" step="any" id="brX" value="${b.x}"></label>
+    <label class="field br-f2"><span>MASTER</span><input type="number" inputmode="decimal" step="any" id="brY" value="${b.y}"></label>
     <div class="btns three">
       <button data-bact="del">消す</button>
       <button data-bact="cancel">やめる</button>
@@ -1657,7 +1657,7 @@ function playSettingRows() {
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}
     <div class="st-row"><span>譜面分岐</span><div class="st-seg four">${BRANCH_MODES.map(([v, l]) => `<button data-brmode="${v}" class="${settings.branch === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
 }
-const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', '普通'], ['E', '玄人'], ['M', '達人']];
+const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', 'N'], ['E', 'E'], ['M', 'M']];
 function onBranchModeClick(b: HTMLButtonElement) {
   settings.branch = b.dataset.brmode as typeof settings.branch;
   saveSettings();
@@ -1974,9 +1974,9 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   const skip = r.skipped.length ? `（読めなかったファイル: ${r.skipped.slice(0, 3).join('、')}${r.skipped.length > 3 ? ' ほか' : ''}）` : '';
   if (!added.length) { toast(`読み込めるファイルがありませんでした${skip}`); return; }
   toast(`${added.length} 曲を追加しました${skip}`);
-  if (home.visible) await home.select(added[0]);
+  if (home.visible) await home.added(added[0]);
   else if (added.length === 1) await openSong(added[0], 'edit');
-  else await home.show(added[0]);
+  else await home.show();
 }
 
 /** 譜面のヘッダの BGMOVIE: を、背景の動画の名前にする（TJAPlayer などでもその動画が流れるように） */
