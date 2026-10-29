@@ -327,7 +327,7 @@ export class PlayMode {
     // （最初から通したときと、最後のコンボ数・点数・ゲージが一致する）
     const fix = ({ N: 0, E: 1, M: 2 } as Record<string, number | undefined>)[this.settings.branch ?? 'auto'];
     const game = new Game(course.notes, { ...course, fixed: fix });
-    game.onBranch = (_i, a, b) => this.renderer.pushBranch(a, b);
+    game.onBranch = (i, a, b) => this.renderer.pushBranch(a, b, course.branches?.[i]?.start ?? 0);
     const split = from - 0.05;
     const allAuto = buildAutoEvents(course.notes);
     for (const e of allAuto) {

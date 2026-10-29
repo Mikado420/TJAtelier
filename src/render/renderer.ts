@@ -23,7 +23,7 @@ const JY = 402;
 const NR = 54; // 通常ノーツの半径（黒縁を含む）
 const MEASURE_PX = 1470; // ハイスピード 1.0 で 1 小節が流れる距離
 /** 譜面分岐のレーンの色（普通・玄人・達人） */
-const BRANCH_TINT = ['', 'rgba(58,150,210,0.30)', 'rgba(200,70,190,0.30)'];
+const BRANCH_TINT = ['', 'rgba(58,150,210,0.36)', 'rgba(200,70,190,0.36)'];
 const BRANCH_NAME = ['NORMAL', 'EXPERT', 'MASTER'];
 
 /** #JPOSSCROLL の距離（px）は、横 1280 の画面での px として、この画面の基準座標（横 2000）に直す */
@@ -607,9 +607,12 @@ export class Renderer {
   /** 曲の終わりの帯（クリア成功・クリア失敗・フルコンボ・全良） */
   private endFx: { kind: EndKind; t: number } | null = null;
   /** 譜面分岐が変わった */
-  private branchFx: { from: number; to: number; t: number } | null = null;
-  pushBranch(from: number, to: number) {
-    if (from !== to) this.branchFx = { from, to, t: performance.now() };
+  private branchFx: { from: number; to: number; t: number; at: number } | null = null;
+  /** 分岐の切り替わり方（試作: ride = 区間の小節線に乗って流れる・flash = 一瞬で光って替わる・wipe = 境目の線なしで速く塗る） */
+  branchStyle: 'ride' | 'flash' | 'wipe' = 'ride';
+  /** at = 区間の始まりの時刻 */
+  pushBranch(from: number, to: number, at = 0) {
+    if (from !== to) this.branchFx = { from, to, t: performance.now(), at };
   }
   /** 帯を出す。見せる長さ（ms）を返す */
   showEnd(kind: EndKind) {
@@ -656,6 +659,13 @@ export class Renderer {
    * 音符・小節線の x。ふつうは音符ごとの BPM・SCROLL の速さで流れる。
    * #HBSCROLL は拍の数の差で決め、音符ごとの SCROLL を掛ける（BPM が変わるとレーン全体の速さが変わる）
    */
+  /** その時刻の小節線の BPM・SCROLL（無ければ前の小節線） */
+  private barAt(bars: Course['bars'], t: number) {
+    let b = bars[0];
+    for (const x of bars) { if (x.time > t + 1e-6) break; b = x; }
+    return b;
+  }
+
   private xOf(time: number, beat: number | undefined, n: { bpm: number; scroll: number }, now: number) {
     return this.jx + scrollAhead(this.scrollMode, { time, bpm: n.bpm, scroll: n.scroll, beat }, now, this.beatNow) * (MEASURE_PX / 4) * this.speed;
   }
@@ -836,70 +846,57 @@ export class Renderer {
       ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
     }
 
-    // 譜面分岐: 玄人は青、達人は紫にレーンを染める（変わったときは判定枠から右へ、斜めの境目で塗り替える）
+    // 譜面分岐: 玄人は青、達人は紫にレーンを染める
     if (!opp) {
       const fx = this.branchFx;
-      const p = fx ? Math.min(1, (wall - fx.t) / 170) : 1;
-      const ease = 1 - (1 - p) ** 2;
       const top = LANE_TOP;
       const bot = LANE_BOTTOM;
-      const lean = (bot - top) * 0.1405; // UI の斜めと同じ傾き
-      const cut = this.jx + (right - this.jx + lean * 2) * ease;
-      /** 境目より左（at = 境目の真ん中の x）の斜めの形 */
-      const leftOf = (at: number) => {
-        ctx.beginPath();
-        ctx.moveTo(LANE_X, top);
-        ctx.lineTo(at + lean / 2, top);
-        ctx.lineTo(at - lean / 2, bot);
-        ctx.lineTo(LANE_X, bot);
-        ctx.closePath();
-      };
-      const tint = (b: number) => {
+      const tint = (b: number, x1 = LANE_X, x2 = right) => {
         const c = BRANCH_TINT[b];
-        if (!c) return;
+        if (!c || x2 <= x1) return;
         ctx.fillStyle = c;
-        ctx.fillRect(LANE_X, top, right - LANE_X, bot - top);
+        ctx.fillRect(x1, top, x2 - x1, bot - top);
       };
-      if (fx && p < 1) {
-        // 右側は前の分岐、左側は新しい分岐
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cut + lean / 2, top);
-        ctx.lineTo(right, top);
-        ctx.lineTo(right, bot);
-        ctx.lineTo(cut - lean / 2, bot);
-        ctx.closePath();
-        ctx.clip();
-        tint(fx.from);
-        ctx.restore();
-        ctx.save();
-        leftOf(cut);
-        ctx.clip();
-        tint(fx.to);
-        ctx.restore();
-        // 境目の細い光
-        ctx.save();
-        ctx.globalAlpha = 0.85 * (1 - p * 0.6);
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.moveTo(cut + lean / 2, top);
-        ctx.lineTo(cut + lean / 2 + 5, top);
-        ctx.lineTo(cut - lean / 2 + 5, bot);
-        ctx.lineTo(cut - lean / 2, bot);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
+      const style = this.branchStyle;
+      /** 切り替わりの途中か・進み具合（0〜1） */
+      let p = 1;
+      let shown = game.branch;
+      if (fx) {
+        if (style === 'ride') {
+          // 区間の始まりの小節線より右は新しい色。小節線が判定枠に来たら全部
+          const bar = this.barAt(bars, fx.at);
+          const x = fx.at <= now ? this.jx : bar && Math.abs(bar.time - fx.at) < 1e-3 ? this.xOf(bar.time, bar.beat, bar, now) : this.xOf(fx.at, undefined, { bpm: bar?.bpm ?? 120, scroll: bar?.scroll ?? 1 }, now);
+          if (x > this.jx + 1) {
+            p = 0;
+            tint(fx.from, LANE_X, Math.min(right, x));
+            tint(fx.to, Math.max(LANE_X, x), right);
+            shown = fx.from;
+          } else tint(game.branch);
+        } else if (style === 'flash') {
+          p = Math.min(1, (wall - fx.t) / 140);
+          tint(game.branch);
+          if (p < 1) {
+            ctx.fillStyle = `rgba(255,255,255,${0.32 * (1 - p) ** 2})`;
+            ctx.fillRect(LANE_X, top, right - LANE_X, bot - top);
+          }
+        } else {
+          p = Math.min(1, (wall - fx.t) / 110);
+          const cut = this.jx + (right - this.jx) * (1 - (1 - p) ** 2);
+          if (p < 1) {
+            tint(fx.from, Math.max(LANE_X, cut), right);
+            tint(fx.to, LANE_X, Math.min(right, cut));
+          } else tint(game.branch);
+        }
       } else tint(game.branch);
       // 分岐のある譜面: レーンの右に今の分岐の名前
       if (this.hasBranch) {
-        const name = BRANCH_NAME[fx && p < 1 ? fx.to : game.branch];
         ctx.save();
-        ctx.globalAlpha = fx && p < 1 ? 0.45 + 0.4 * (1 - p) : 0.45;
+        ctx.globalAlpha = 0.45 + (p < 1 && style !== 'ride' ? 0.4 * (1 - p) : 0);
         ctx.font = `italic 900 76px ${FONT}`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#fff';
-        ctx.fillText(name, Math.min(right, V.x1) - 36, (LANE_TOP + LANE_BOTTOM) / 2 + 4);
+        ctx.fillText(BRANCH_NAME[shown], Math.min(right, V.x1) - 36, (top + bot) / 2 + 4);
         ctx.restore();
       }
     }
