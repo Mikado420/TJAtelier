@@ -46,6 +46,8 @@ export interface PlaySettings {
   videoMode?: 'full' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
+  /** 譜面分岐: 自動・普通・玄人・達人に固定 */
+  branch?: 'auto' | 'N' | 'E' | 'M';
 }
 
 /** オンライン対戦のプレイ（PlayMode.startOnline に渡す） */
@@ -323,12 +325,15 @@ export class PlayMode {
     const notes = course.notes.filter((n) => (n.endTime ?? n.time) >= from - 0.05);
     // 判定・点数・ゲージは譜面全体で数える。途中から始めたときは、そこまでをオートで叩いた状態にしておく
     // （最初から通したときと、最後のコンボ数・点数・ゲージが一致する）
-    const game = new Game(course.notes);
+    const fix = ({ N: 0, E: 1, M: 2 } as Record<string, number | undefined>)[this.settings.branch ?? 'auto'];
+    const game = new Game(course.notes, { ...course, fixed: fix });
+    game.onBranch = (_i, a, b) => this.renderer.pushBranch(a, b);
     const split = from - 0.05;
     const allAuto = buildAutoEvents(course.notes);
     for (const e of allAuto) {
       if (e.t >= split) break;
       game.update(e.t);
+      if (e.note && !game.active(e.note)) continue;
       game.hit(e.kind, e.t);
     }
     game.update(split);
@@ -811,9 +816,11 @@ export class PlayMode {
   private scheduleSounds(now: number) {
     const ev = this.autoEvents;
     const on = this.hitOn;
+    const g = this.game;
     while (this.soundIdx < ev.length && ev[this.soundIdx].t <= now + 0.3) {
       const e = ev[this.soundIdx++];
       if (!on || e.t < now - 0.05) continue;
+      if (e.note && g && !g.active(e.note)) continue;
       this.audio.scheduleHit(e.kind, e.t, this.ownPan);
       if (e.pop) this.audio.scheduleHit('balloon', e.t, this.ownPan);
     }
@@ -824,6 +831,8 @@ export class PlayMode {
     const ev = this.autoEvents;
     while (this.autoIdx < ev.length && ev[this.autoIdx].t <= now) {
       const e = ev[this.autoIdx++];
+      game.update(e.t);
+      if (e.note && !game.active(e.note)) continue;
       this.autoSide = this.autoSide === 'L' ? 'R' : 'L';
       this.renderer.pushHit(e.kind, this.autoSide);
       this.pushTap(e.kind, this.autoSide, e.t);

@@ -1,6 +1,6 @@
 import {
-  measureAt, measures, newChart, newCourse, sortCourse, Timing, TPB, contentEnd, isLong,
-  type EChart, type ECourse, type EEvent, type ENote, type Measure,
+  branchPath, measureAt, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
+  type BranchNo, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
 import type { AudioFile } from '../io/load';
@@ -58,8 +58,34 @@ export class Editor {
     this.refresh();
   }
 
-  get course(): ECourse {
+  /** 譜面分岐: 編集している分岐（0 = 普通・1 = 玄人・2 = 達人） */
+  branch: BranchNo = 0;
+  /** 玄人・達人を編集しているときの、その分岐で通した譜面（変更は mutate のあとで書き戻す） */
+  private path: { of: ECourse; k: BranchNo; c: ECourse } | null = null;
+
+  /** 難易度の譜面そのもの（分岐の区間を持つ。区間の中の音符は普通譜面） */
+  get mainCourse(): ECourse {
     return this.chart.courses[this.courseIndex];
+  }
+
+  /** 編集する譜面（玄人・達人を開いているときは、その分岐で通した譜面） */
+  get course(): ECourse {
+    const main = this.mainCourse;
+    if (!this.branch || !main?.branches?.length) return main;
+    const p = this.path;
+    if (p && p.of === main && p.k === this.branch) return p.c;
+    const c = branchPath(main, this.branch);
+    this.path = { of: main, k: this.branch, c };
+    return c;
+  }
+
+  /** 開く分岐を替える */
+  setBranch(k: BranchNo) {
+    if (this.branch === k) return;
+    this.branch = k;
+    this.path = null;
+    this.pendingLong = null;
+    this.emit(true);
   }
 
   onChange(fn: (structural: boolean) => void) {
@@ -68,13 +94,14 @@ export class Editor {
 
   /** structural=true: 譜面の内容が変わった（保存対象） */
   emit(structural = false) {
-    if (structural) this.refresh();
+    if (structural) { this.refresh(); this.version++; }
     for (const fn of this.listeners) fn(structural);
   }
 
   private refresh() {
     if (!this.chart.courses.length) this.chart.courses.push(newCourse());
     this.courseIndex = Math.min(this.courseIndex, this.chart.courses.length - 1);
+    this.path = null;
     for (const c of this.chart.courses) sortCourse(c);
     this.timing = new Timing(this.chart, this.course);
     this.measureCache = [];
@@ -102,6 +129,7 @@ export class Editor {
   private restore(s: string) {
     const o = JSON.parse(s) as { chart: EChart; courseIndex: number };
     if (this.chart.source) o.chart.source = this.chart.source;
+    this.path = null;
     this.chart = o.chart;
     this.courseIndex = o.courseIndex;
     this.pendingLong = null;
@@ -114,8 +142,62 @@ export class Editor {
     if (this.undoStack.length > 300) this.undoStack.shift();
     this.redoStack = [];
     fn();
+    // 玄人・達人の変更を、難易度の譜面に書き戻す
+    const p = this.path;
+    if (p) setBranchPath(p.of, p.k, p.c);
+    this.path = null;
     this.applyGrads();
     this.emit(true);
+  }
+
+  // ---------- 譜面分岐 ----------
+
+  /** 小節 [a, b) を分岐の区間にする（玄人・達人は普通譜面を写す）。重なる区間があれば作らない */
+  addBranch(startTick: number, endTick: number): EBranch | null {
+    const main = this.mainCourse;
+    const ms = this.measuresUntil(endTick + 1);
+    const a = measureAt(ms, startTick).start;
+    const m2 = measureAt(ms, Math.max(startTick, endTick));
+    const b = m2.start + m2.length;
+    if ((main.branches ?? []).some((x) => x.start < b && a < x.end)) return null;
+    let out: EBranch | null = null;
+    this.mutate(() => {
+      const c = this.mainCourse;
+      const notes = c.notes.filter((n) => n.tick >= a && n.tick < b);
+      const events = c.events.filter((e) => e.tick >= a && e.tick < b && e.kind !== 'bpm' && e.kind !== 'measure' && e.kind !== 'delay');
+      const copy = () => ({ notes: notes.map((n) => ({ ...n })), events: events.map((e) => ({ ...e })) });
+      out = { start: a, end: b, type: 'p', x: 60, y: 80, close: true, e: copy(), m: copy() };
+      (c.branches ??= []).push(out);
+      sortCourse(c);
+    });
+    return out;
+  }
+
+  /** 区間を消す（その区間は、開いている分岐の譜面を残す） */
+  removeBranch(b: EBranch) {
+    this.mutate(() => {
+      const c = this.mainCourse;
+      const k = this.branch;
+      if (k) {
+        const part = k === 1 ? b.e : b.m;
+        c.notes = [...c.notes.filter((n) => n.tick < b.start || n.tick >= b.end), ...part.notes];
+        c.events = [...c.events.filter((e) => e.tick < b.start || e.tick >= b.end || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'delay'), ...part.events];
+      }
+      c.branches = (c.branches ?? []).filter((x) => x !== b);
+      if (!c.branches.length) delete c.branches;
+      sortCourse(c);
+    });
+    this.path = null;
+  }
+
+  /** 区間の条件を変える */
+  setBranchCond(b: EBranch, type: EBranch['type'], x: number, y: number) {
+    this.mutate(() => {
+      const t = (this.mainCourse.branches ?? []).find((q) => q.start === b.start) ?? b;
+      t.type = type;
+      t.x = x;
+      t.y = y;
+    });
   }
 
   /** グラデの範囲の #SCROLL を置き直す（範囲の中の音符が増えたり減ったりしても、値が合うように） */
@@ -156,6 +238,9 @@ export class Editor {
   }
 
   get canUndo() { return this.undoStack.length > 0; }
+  /** 変更のたびに増える数（描き直しの目印） */
+  get undoCount() { return this.undoStack.length + this.redoStack.length * 1000 + this.version; }
+  private version = 0;
   get canRedo() { return this.redoStack.length > 0; }
 
   undo() {
@@ -559,6 +644,7 @@ export class Editor {
 
   selectCourse(i: number) {
     this.courseIndex = i;
+    this.path = null;
     this.pendingLong = null;
     this.sel = null;
     this.emit(true);
@@ -566,8 +652,9 @@ export class Editor {
 
   addCourse(name: string, level: number, copyFrom?: ECourse) {
     this.mutate(() => {
-      const c = copyFrom
-        ? { ...(JSON.parse(JSON.stringify(copyFrom)) as ECourse), name, level }
+      const src = copyFrom === this.path?.c ? this.mainCourse : copyFrom;
+      const c = src
+        ? { ...(JSON.parse(JSON.stringify(src)) as ECourse), name, level }
         : newCourse(name, level);
       this.chart.courses.push(c);
       this.courseIndex = this.chart.courses.length - 1;

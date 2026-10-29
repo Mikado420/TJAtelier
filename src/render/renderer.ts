@@ -22,6 +22,9 @@ const JX = 634; // 判定枠の中心
 const JY = 402;
 const NR = 54; // 通常ノーツの半径（黒縁を含む）
 const MEASURE_PX = 1470; // ハイスピード 1.0 で 1 小節が流れる距離
+/** 譜面分岐のレーンの色（普通・玄人・達人） */
+const BRANCH_TINT = ['', 'rgba(58,150,210,0.30)', 'rgba(200,70,190,0.30)'];
+
 /** #JPOSSCROLL の距離（px）は、横 1280 の画面での px として、この画面の基準座標（横 2000）に直す */
 const JPOS_SCALE = REF_W / 1280;
 const GAUGE = { x1: 768, x2: 1812, y1: 258, y2: 291, segs: 50 };
@@ -173,7 +176,7 @@ export class Renderer {
   private scoreFx: { add: number; t: number } | null = null;
   private lastScore = 0;
   private rollFx: { count: number; t: number; balloon: boolean; hits: number } | null = null;
-  private labels = new WeakMap<Game, Map<Note, string>>();
+  private labels = new WeakMap<Game, Map<Note, string>[]>();
   private topPattern: CanvasPattern | null = null;
   private topTile: HTMLCanvasElement | null = null;
   private bandTile: HTMLCanvasElement | null = null;
@@ -273,6 +276,7 @@ export class Renderer {
     vis.length = 0;
     const states = game.states;
     for (let i = states.length - 1; i >= 0; i--) {
+      if (states[i].skip) continue;
       const n = states[i].note;
       const x = this.xOf(n.time, n.beat, n, now);
       const endX = n.endTime !== undefined ? this.xOf(n.endTime, n.endBeat, n, now) : x;
@@ -601,6 +605,11 @@ export class Renderer {
 
   /** 曲の終わりの帯（クリア成功・クリア失敗・フルコンボ・全良） */
   private endFx: { kind: EndKind; t: number } | null = null;
+  /** 譜面分岐が変わった */
+  private branchFx: { from: number; to: number; t: number } | null = null;
+  pushBranch(from: number, to: number) {
+    if (from !== to) this.branchFx = { from, to, t: performance.now() };
+  }
   /** 帯を出す。見せる長さ（ms）を返す */
   showEnd(kind: EndKind) {
     this.endFx = { kind, t: performance.now() };
@@ -609,6 +618,7 @@ export class Renderer {
 
   reset() {
     this.endFx = null;
+    this.branchFx = null;
     // 曲ごとの絵（曲名・難易度のパネル）は曲が変わると使わないので手放す。
     // iPhone はキャンバスのメモリに上限があり、たまると画面が描けなくなって落ちる
     for (const [k, sp] of this.sprites) {
@@ -822,6 +832,26 @@ export class Renderer {
       ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
     }
 
+    // 譜面分岐: 玄人は青、達人は紫にレーンを染める（変わったときは判定枠から右へ塗り替える）
+    if (!opp) {
+      const fx = this.branchFx;
+      const p = fx ? Math.min(1, (wall - fx.t) / 360) : 1;
+      const ease = 1 - (1 - p) ** 3;
+      const cut = this.jx + (right - this.jx + 40) * ease;
+      const tint = (b: number, x1: number, x2: number) => {
+        const c = BRANCH_TINT[b];
+        if (!c || x2 <= x1) return;
+        ctx.fillStyle = c;
+        ctx.fillRect(x1, LANE_TOP, x2 - x1, LANE_BOTTOM - LANE_TOP);
+      };
+      if (fx && p < 1) {
+        tint(fx.from, Math.max(LANE_X, cut), right);
+        tint(fx.to, LANE_X, Math.min(right, cut));
+        ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - p)})`;
+        ctx.fillRect(Math.max(LANE_X, cut - 26), LANE_TOP, 26, LANE_BOTTOM - LANE_TOP);
+      } else tint(game.branch, LANE_X, right);
+    }
+
     // 叩いたときにレーン全体が色づく（ドン＝赤茶、カッ＝青）
     for (const f of opp ? [] : this.flashes) {
       const a = 1 - (wall - f.t) / 170;
@@ -919,6 +949,8 @@ export class Renderer {
       const i = opp ? vis[q * 3] : k;
       const s = states[i];
       const n = s.note;
+      // 譜面分岐で通らない音符（まだ決まっていない区間は、今の分岐の音符だけ）
+      if (s.skip || (n.sec !== undefined && !game.active(n))) continue;
       let x: number;
       let endX: number;
       let dy = 0;
@@ -983,7 +1015,7 @@ export class Renderer {
         drawNoteHead(ctx, x, JY + dy, r, n.type);
       }
 
-      const label = labels.get(n);
+      const label = labels[n.sec === undefined ? (opp ? 0 : game.branch) : (n.br ?? 0)]?.get(n) ?? labels[0].get(n);
       if (label && x > LANE_X - 40) {
         drawCachedText(ctx, label, x, (LANE_BOTTOM + TEXT_BOTTOM) / 2 + 3 + dy, `900 32px ${FONT}`, '#fff', '#2a2a2a', 7);
       }
@@ -1294,11 +1326,18 @@ export class Renderer {
 
 
   /** 音符の下の文字（ドン / ド / コ / カッ / カ / 連打 / ふうせん） */
-  private labelsFor(game: Game): Map<Note, string> {
+  private labelsFor(game: Game): Map<Note, string>[] {
     const cached = this.labels.get(game);
     if (cached) return cached;
+    const all = game.states.map((s) => s.note);
+    // 譜面分岐があるときは、分岐ごとに並べて決める（前後の音符で「ド」「コ」が変わるため）
+    const maps = (all.some((n) => n.sec !== undefined) ? [0, 1, 2] : [0]).map((k) => this.labelsOf(all.filter((n) => n.sec === undefined || (n.br ?? 0) === k)));
+    this.labels.set(game, maps);
+    return maps;
+  }
+
+  private labelsOf(notes: Note[]): Map<Note, string> {
     const map = new Map<Note, string>();
-    const notes = game.states.map((s) => s.note);
     let prevShort = false;
     let prevLabel = '';
     for (let i = 0; i < notes.length; i++) {
@@ -1322,7 +1361,6 @@ export class Renderer {
       prevShort = short;
       prevLabel = label;
     }
-    this.labels.set(game, map);
     return map;
   }
 

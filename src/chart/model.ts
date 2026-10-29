@@ -28,7 +28,11 @@ export type EEvent =
   /** #JPOSSCROLL: 判定枠を time 秒かけて dist ピクセル動かす（dir: 1 = 右、0 = 左） */
   | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 }
   /** #LYRIC: 歌詞（次の #LYRIC まで出し続ける。空なら消す） */
-  | { tick: number; kind: 'lyric'; text: string };
+  | { tick: number; kind: 'lyric'; text: string }
+  /** #SECTION: 分岐の判定に使う数をここから数え直す */
+  | { tick: number; kind: 'section' }
+  /** #LEVELHOLD: ここから先は分岐しない */
+  | { tick: number; kind: 'levelhold' };
 
 export type EventKind = EEvent['kind'];
 
@@ -46,6 +50,79 @@ export interface ECourse {
   scrollMode?: 'hb' | 'bm';
   /** グラデ（エディタの中だけで使う。.tja には書き込まない） */
   grads?: Grad[];
+  /** 譜面分岐の区間（時刻の順。区間の中の普通譜面は notes・events にある） */
+  branches?: EBranch[];
+  /** BALLOONNOR・BALLOONEXP・BALLOONMAS で風船の打数を書く */
+  balloonPaths?: boolean;
+}
+
+/** 分岐の 1 つの譜面（区間の中の音符と命令） */
+export interface BranchPart {
+  notes: ENote[];
+  events: EEvent[];
+}
+
+/** 譜面分岐の区間 [start, end)（#BRANCHSTART の小節から） */
+export interface EBranch {
+  start: number;
+  end: number;
+  /** p = 精度（%）・r = 連打数・s = スコア */
+  type: 'p' | 'r' | 's';
+  /** 玄人譜面になる値 */
+  x: number;
+  /** 達人譜面になる値 */
+  y: number;
+  /** 区間の終わりに #BRANCHEND を書く */
+  close: boolean;
+  e: BranchPart;
+  m: BranchPart;
+}
+
+/** 0 = 普通・1 = 玄人・2 = 達人 */
+export type BranchNo = 0 | 1 | 2;
+
+/** 分岐しても全部の譜面で同じにする命令（時間の流れ） */
+export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay']);
+
+const secOf = (bs: EBranch[], tick: number) => bs.findIndex((b) => tick >= b.start && tick < b.end);
+
+/**
+ * その分岐で通したときの譜面（区間の外は共通、区間の中はその分岐の音符・命令。時間の流れは普通譜面のもの）。
+ * 普通（0）・分岐なしは course そのもの。音符・命令は同じものを指す（写さない）
+ */
+export function branchPath(c: ECourse, k: BranchNo): ECourse {
+  const bs = c.branches ?? [];
+  if (!k || !bs.length) return c;
+  const part = (b: EBranch) => (k === 1 ? b.e : b.m);
+  const path: ECourse = {
+    ...c,
+    notes: [...c.notes.filter((n) => secOf(bs, n.tick) < 0), ...bs.flatMap((b) => part(b).notes)],
+    events: [...c.events.filter((e) => secOf(bs, e.tick) < 0 || SHARED_KINDS.has(e.kind)), ...bs.flatMap((b) => part(b).events.filter((e) => !SHARED_KINDS.has(e.kind)))],
+  };
+  delete path.branches;
+  sortCourse(path);
+  return path;
+}
+
+/** branchPath で作った譜面の変更を、元の譜面（c）に書き戻す */
+export function setBranchPath(c: ECourse, k: BranchNo, path: ECourse) {
+  const bs = c.branches ?? [];
+  if (!k || !bs.length || path === c) return;
+  const ins = (t: number) => secOf(bs, t) >= 0;
+  bs.forEach((b, i) => {
+    const part = k === 1 ? b.e : b.m;
+    part.notes = path.notes.filter((n) => secOf(bs, n.tick) === i);
+    part.events = path.events.filter((e) => secOf(bs, e.tick) === i && !SHARED_KINDS.has(e.kind));
+  });
+  c.notes = [...c.notes.filter((n) => ins(n.tick)), ...path.notes.filter((n) => !ins(n.tick))];
+  c.events = [...c.events.filter((e) => ins(e.tick) && !SHARED_KINDS.has(e.kind)), ...path.events.filter((e) => !ins(e.tick) || SHARED_KINDS.has(e.kind))];
+  c.name = path.name;
+  c.level = path.level;
+  c.extra = path.extra;
+  if (path.scrollMode) c.scrollMode = path.scrollMode;
+  else delete c.scrollMode;
+  c.grads = path.grads;
+  sortCourse(c);
 }
 
 export interface EChart {
@@ -86,7 +163,7 @@ export function newChart(title = '新しい譜面', bpm = 120): EChart {
 
 export const isLong = (t: NoteType) => t === 'roll' || t === 'bigRoll' || t === 'balloon';
 
-const EVENT_ORDER: EventKind[] = ['measure', 'bpm', 'scroll', 'gogo', 'barline', 'delay', 'jpos', 'lyric'];
+const EVENT_ORDER: EventKind[] = ['section', 'measure', 'bpm', 'scroll', 'gogo', 'barline', 'delay', 'jpos', 'lyric', 'levelhold'];
 
 /** #SCROLL の値（a、a+bi・a-bi・bi のような複素数も）を読む。i の部分は縦の速さ */
 export function parseScroll(arg: string): { value: number; im: number } | null {
@@ -116,8 +193,13 @@ export function scrollText(value: number, im = 0, digits = 6): string {
 }
 
 export function sortCourse(c: ECourse) {
+  const ev = (a: EEvent, b: EEvent) => a.tick - b.tick || EVENT_ORDER.indexOf(a.kind) - EVENT_ORDER.indexOf(b.kind);
   c.notes.sort((a, b) => a.tick - b.tick);
-  c.events.sort((a, b) => a.tick - b.tick || EVENT_ORDER.indexOf(a.kind) - EVENT_ORDER.indexOf(b.kind));
+  c.events.sort(ev);
+  if (c.branches) {
+    c.branches.sort((a, b) => a.start - b.start);
+    for (const b of c.branches) for (const p of [b.e, b.m]) { p.notes.sort((x, y) => x.tick - y.tick); p.events.sort(ev); }
+  }
 }
 
 // ---------- 小節 ----------
@@ -179,6 +261,14 @@ export function contentEnd(c: ECourse): number {
   let end = 0;
   for (const n of c.notes) end = Math.max(end, n.endTick ?? n.tick);
   for (const e of c.events) end = Math.max(end, e.tick);
+  for (const b of c.branches ?? []) {
+    // 区間の終わり（#BRANCHEND の位置）まで小節を書く
+    if (Number.isFinite(b.end)) end = Math.max(end, b.end - 1);
+    for (const p of [b.e, b.m]) {
+      for (const n of p.notes) end = Math.max(end, n.endTick ?? n.tick);
+      for (const e of p.events) end = Math.max(end, e.tick);
+    }
+  }
   return end;
 }
 
@@ -305,8 +395,42 @@ export function beatTable(chart: EChart, course: ECourse) {
   return { beatOf, points: time };
 }
 
-/** 編集用モデル → プレイ用（秒ベース）に変換 */
+/** 編集用モデル → プレイ用（秒ベース）に変換。分岐があれば、全部の分岐の音符を入れて、区間と分岐の印を付ける */
 export function toPlayable(chart: EChart, course: ECourse): Course {
+  const bs = course.branches ?? [];
+  if (!bs.length) return playOne(chart, course);
+  sortCourse(course);
+  const tagOf = (k: BranchNo) => (n: Note, tick: number) => {
+    const i = secOf(bs, tick);
+    if (i >= 0) { n.sec = i; n.br = k; }
+  };
+  const base = playOne(chart, course, tagOf(0));
+  const paths = ([1, 2] as const).map((k) => ({ k, p: playOne(chart, branchPath(course, k), tagOf(k)) }));
+  const notes = [...base.notes];
+  for (const { p } of paths) for (const n of p.notes) if (n.sec !== undefined) notes.push(n);
+  notes.sort((a, b) => a.time - b.time || (a.br ?? 0) - (b.br ?? 0));
+  const t = new Timing(chart, course);
+  const ms = measures(course, Math.max(0, ...bs.map((b) => b.start)));
+  const branches = bs.map((b) => {
+    const i = ms.findIndex((m) => m.start >= b.start);
+    const judgeTick = i > 0 ? ms[i - 1].start : b.start;
+    return { start: t.tickToTime(b.start), end: Number.isFinite(b.end) ? t.tickToTime(b.end) : Infinity, judge: t.tickToTime(judgeTick), type: b.type, x: b.x, y: b.y };
+  });
+  // #SECTION（どの分岐に書いてあっても）・#LEVELHOLD（分岐の中なら、その分岐にいるときだけ）
+  const sections = new Set<number>();
+  const holds: { time: number; br?: number }[] = [];
+  ([0, 1, 2] as const).forEach((k) => {
+    for (const e of branchPath(course, k).events) {
+      const inSec = secOf(bs, e.tick) >= 0;
+      if (e.kind === 'section') sections.add(t.tickToTime(e.tick));
+      if (e.kind === 'levelhold' && (inSec || k === 0)) holds.push({ time: t.tickToTime(e.tick), ...(inSec ? { br: k } : {}) });
+    }
+  });
+  return { ...base, notes, branches, sections: [...sections].sort((a, b) => a - b), holds: holds.sort((a, b) => a.time - b.time) };
+}
+
+/** 分岐の無い 1 本の譜面 → プレイ用 */
+function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) => void): Course {
   sortCourse(course);
   const t = new Timing(chart, course);
   const mode = course.scrollMode;
@@ -327,6 +451,7 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
       note.beat = bt.beatOf(n.tick);
       if (n.endTick !== undefined) note.endBeat = bt.beatOf(n.endTick);
     }
+    tag?.(note, n.tick);
     return note;
   });
   const bars: BarLine[] = [];

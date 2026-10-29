@@ -24,7 +24,9 @@ export type EventVal =
   | { tick: number; kind: 'barline'; on: boolean }
   | { tick: number; kind: 'delay'; value: number }
   | { tick: number; kind: 'jpos'; time: number; dist: number; dir: 0 | 1 }
-  | { tick: number; kind: 'lyric'; text: string };
+  | { tick: number; kind: 'lyric'; text: string }
+  | { tick: number; kind: 'section' }
+  | { tick: number; kind: 'levelhold' };
 
 /** グラデ（エディタの Grad と同じ形。id で見分ける） */
 export interface GradVal {
@@ -331,6 +333,7 @@ export function validEvent(k: string, v: EventVal | null): boolean {
     case 'bpm': return fin(v.value, 0.0001, 100000);
     case 'scroll': return fin(v.value, -100000, 100000) && (v.im === undefined || fin(v.im, -100000, 100000));
     case 'lyric': return typeof v.text === 'string' && v.text.length <= 500;
+    case 'section': case 'levelhold': return true;
     case 'measure': return Number.isInteger(v.num) && Number.isInteger(v.den) && v.num >= 1 && v.den >= 1 && v.num <= 100000 && v.den <= 100000;
     case 'gogo': case 'barline': return typeof v.on === 'boolean';
     case 'delay': return fin(v.value, -600, 600);

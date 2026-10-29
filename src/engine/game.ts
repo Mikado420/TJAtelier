@@ -1,4 +1,4 @@
-import { isDon, isHitNote, type Note } from '../chart/types';
+import { isDon, isHitNote, type Course, type Note } from '../chart/types';
 
 export type Judge = 'good' | 'ok' | 'bad';
 export type HitKind = 'don' | 'ka';
@@ -44,7 +44,12 @@ export interface NoteState {
   count: number;
   /** 叩かずに見逃した（画面左まで流れ続ける） */
   missed?: boolean;
+  /** 通らなかった分岐の音符（判定も表示もしない） */
+  skip?: boolean;
 }
+
+/** 譜面分岐（toPlayable の branches・sections・holds）。fixed があれば、いつもその分岐 */
+export type BranchInfo = Pick<Course, 'branches' | 'sections' | 'holds'> & { fixed?: number };
 
 export interface JudgeEvent {
   judge: Judge;
@@ -101,22 +106,117 @@ export class Game {
   onJudge: (e: JudgeEvent) => void = () => {};
   /** 連打・風船を叩いたとき */
   onRoll: (s: NoteState) => void = () => {};
+  /** 分岐が決まったとき（区間の番号・前の分岐・決まった分岐） */
+  onBranch: (sec: number, from: number, to: number) => void = () => {};
 
-  constructor(notes: Note[]) {
+  /** 今の分岐（0 = 普通・1 = 玄人・2 = 達人） */
+  branch = 0;
+  private readonly br: BranchInfo;
+  /** 区間ごとに決まった分岐 */
+  private readonly chosen: number[] = [];
+  private brIdx = 0;
+  private secIdx = 0;
+  private holdIdx = 0;
+  private held = false;
+  /** #SECTION（無ければ最初）からの数を出すための、その時の値 */
+  private mark = { good: 0, ok: 0, bad: 0, rolls: 0, score: 0 };
+  /** 連打・風船を叩いた数（分岐の判定用） */
+  private rollHits = 0;
+  /** 判定の分母（音符の数）。分岐があるときは、区間ごとにいちばん多い分岐で数える */
+  private readonly hitCount: number;
+
+  constructor(notes: Note[], branch?: BranchInfo) {
+    this.br = branch ?? {};
     this.states = notes
       .slice()
       .sort((a, b) => a.time - b.time)
       .map((note) => ({ note, done: false, count: 0 }));
     this.hitIdx = this.states.map((_, i) => i).filter((i) => isHitNote(this.states[i].note.type));
-    const balloonHits = notes.reduce((a, n) => a + (n.type === 'balloon' ? Math.max(1, n.hits ?? 5) : 0), 0);
-    this.base = scoreBase(this.hitIdx.length, balloonHits);
+    // 分岐の情報が無いのに分岐の音符があるときは、普通譜面だけ
+    const fixed = this.br.branches?.length ? this.br.fixed : 0;
+    if (fixed !== undefined) this.branch = fixed;
+    if (!this.br.branches?.length) for (const st of this.states) if ((st.note.br ?? 0) !== 0) { st.skip = true; st.done = true; }
+    const count = (pick: (n: Note) => boolean) => {
+      const per = new Map<number, number[]>();
+      let common = 0;
+      let balloon = 0;
+      for (const n of notes) {
+        if (!pick(n)) continue;
+        if (n.sec === undefined) {
+          if (isHitNote(n.type)) common++;
+          else if (n.type === 'balloon') balloon += Math.max(1, n.hits ?? 5);
+          continue;
+        }
+        const a = per.get(n.sec) ?? [0, 0, 0];
+        if (isHitNote(n.type)) a[n.br ?? 0]++;
+        per.set(n.sec, a);
+      }
+      return { hits: common + [...per.values()].reduce((x, a) => x + Math.max(...a), 0), balloon };
+    };
+    const c = count((n) => n.br === undefined || !!this.br.branches?.length || n.br === 0);
+    this.hitCount = c.hits;
+    this.base = scoreBase(c.hits, c.balloon);
+  }
+
+  /** その音符を、今の分岐で叩く・描くか */
+  active(n: Note): boolean {
+    if (n.sec === undefined) return true;
+    return (this.chosen[n.sec] ?? this.branch) === (n.br ?? 0);
+  }
+
+  /** 分岐を決める・#SECTION・#LEVELHOLD（時刻の順に） */
+  private stepBranch(now: number) {
+    const b = this.br;
+    const secs = b.sections ?? [];
+    const holds = b.holds ?? [];
+    const list = b.branches ?? [];
+    for (;;) {
+      const tS = this.secIdx < secs.length ? secs[this.secIdx] : Infinity;
+      const tH = this.holdIdx < holds.length ? holds[this.holdIdx].time : Infinity;
+      // 曲の最初の小節からの分岐は、始まる少し前に決める
+      const nb = list[this.brIdx];
+      const tB = nb ? Math.min(nb.judge, nb.start - 0.3) : Infinity;
+      const t = Math.min(tS, tH, tB);
+      if (t > now || t === Infinity) return;
+      if (t === tS) {
+        const st = this.stats;
+        this.mark = { good: st.good, ok: st.ok, bad: st.bad, rolls: this.rollHits, score: st.score };
+        this.secIdx++;
+      } else if (t === tH) {
+        const h = holds[this.holdIdx++];
+        if (h.br === undefined || h.br === this.branch) this.held = true;
+      } else {
+        const i = this.brIdx++;
+        const from = this.branch;
+        const to = b.fixed ?? (this.held ? this.branch : this.decide(nb));
+        this.chosen[i] = to;
+        this.branch = to;
+        for (const s of this.states) if (s.note.sec === i && (s.note.br ?? 0) !== to) { s.skip = true; s.done = true; }
+        this.onBranch(i, from, to);
+      }
+    }
+  }
+
+  private decide(nb: NonNullable<Course['branches']>[number]): number {
+    const st = this.stats;
+    const m = this.mark;
+    let v: number;
+    if (nb.type === 'r') v = this.rollHits - m.rolls;
+    else if (nb.type === 's') v = st.score - m.score;
+    else {
+      const good = st.good - m.good;
+      const ok = st.ok - m.ok;
+      const all = good + ok + (st.bad - m.bad);
+      v = all ? ((good + ok * 0.5) / all) * 100 : 0;
+    }
+    return v >= nb.y - 1e-9 ? 2 : v >= nb.x - 1e-9 ? 1 : 0;
   }
 
   /** 初項（「良」1 つの点数）。「可」はその半分（10 点未満は切り捨て） */
   readonly base: number;
 
   get totalHitNotes() {
-    return this.hitIdx.length;
+    return this.hitCount;
   }
 
   get finished() {
@@ -125,6 +225,7 @@ export class Game {
 
   /** 毎フレーム呼ぶ。見逃したノーツを「不可」にし、終わった連打を閉じる */
   update(now: number) {
+    this.stepBranch(now);
     while (this.cursor < this.hitIdx.length) {
       const s = this.states[this.hitIdx[this.cursor]];
       if (s.done) { this.cursor++; continue; }
@@ -148,6 +249,7 @@ export class Game {
   /** 叩いたときに呼ぶ */
   /** ring = タッチした場所が太鼓の面の中心からどれくらい離れていたか（1 が面と縁の境目）。キーボードのときはなし */
   hit(kind: HitKind, now: number, ring?: number): HitResult {
+    this.stepBranch(now);
     this.taps.total++;
     const r = this.hitInner(kind, now);
     this.log.push({
@@ -207,10 +309,12 @@ export class Game {
       if (n.type === 'balloon') {
         if (kind !== 'don') return { type: 'roll' }; // 風船はドンだけ。カッは何も起きない
         ls.count++;
+        this.rollHits++;
         this.stats.score += BALLOON_HIT_SCORE;
         if (ls.count >= (n.hits ?? 5)) ls.done = true;
       } else {
         ls.count++;
+        this.rollHits++;
         this.stats.rolls++;
         this.stats.score += n.type === 'bigRoll' ? 200 : 100;
       }
@@ -271,7 +375,7 @@ export class Game {
       st.score += judge === 'good' ? this.base : Math.floor(this.base / 2 / 10) * 10;
     }
     // 全部「良」なら音符の 6 割でクリア、7.5 割で満タン。「可」は半分、「不可」は 2 倍減る
-    const unit = 100 / Math.max(1, this.hitIdx.length * GAUGE_FULL_AT);
+    const unit = 100 / Math.max(1, this.hitCount * GAUGE_FULL_AT);
     const dg = judge === 'good' ? unit : judge === 'ok' ? unit * 0.5 : -unit * 2;
     st.gauge = Math.min(100, Math.max(0, st.gauge + dg));
     if (st.gauge > 100 - 1e-6) st.gauge = 100; // 小数の誤差で満タンにならないのを防ぐ

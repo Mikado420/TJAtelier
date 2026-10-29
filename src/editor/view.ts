@@ -95,6 +95,8 @@ export function eventShort(e: EEvent): string {
     case 'delay': return `⏱${e.value}s`;
     case 'jpos': return `◎${e.dir ? '→' : '←'}${Number(e.dist.toFixed(1))}`;
     case 'lyric': return e.text ? `♪${e.text.length > 12 ? `${e.text.slice(0, 12)}…` : e.text}` : '♪―';
+    case 'section': return 'SECTION';
+    case 'levelhold': return 'HOLD';
   }
 }
 
@@ -108,6 +110,8 @@ export const EVENT_COLOR: Record<EEvent['kind'], string> = {
   delay: '#8fd18f',
   jpos: '#ff9ec7',
   lyric: '#7fd6f5',
+  section: '#f0b64a',
+  levelhold: '#f0b64a',
 };
 
 /** レーンの下に出す種類（設定で切り替える） */
@@ -118,7 +122,12 @@ export interface EventItem {
   tick: number;
   events: EEvent[];
   grad?: Grad;
+  /** 譜面分岐の区間（その番号） */
+  branch?: number;
 }
+
+/** 譜面分岐の色（普通・玄人・達人） */
+export const BRANCH_COLOR = ['#9aa3aa', '#3a96d2', '#c846be'];
 
 export function eventText(e: EEvent): string {
   switch (e.kind) {
@@ -130,6 +139,8 @@ export function eventText(e: EEvent): string {
     case 'delay': return `DELAY ${e.value}s`;
     case 'jpos': return `判定枠 ${e.dir ? '右' : '左'}へ ${Number(e.dist.toFixed(1))}px（${Number(e.time.toFixed(3))} 秒）`;
     case 'lyric': return e.text ? `歌詞「${e.text}」` : '歌詞を消す';
+    case 'section': return '#SECTION';
+    case 'levelhold': return '#LEVELHOLD';
   }
 }
 
@@ -160,6 +171,8 @@ export interface GhostRow {
   chart?: EChart;
   /** 本譜面の小節の出どころ（そのレーンの tick） */
   bands?: { a: number; b: number; color: string; label: string }[];
+  /** ここだけ明るく、ほかは暗くする範囲（そのレーンの tick。譜面分岐の区間） */
+  focus?: [number, number][];
 }
 
 /** ほかのレーンを描くための表（譜面が変わったら作り直す） */
@@ -188,7 +201,7 @@ export class EditorView {
   /** レーンの下のイベントの文字をタップしたとき（重なってまとめたものは全部） */
   onEventTap: (items: EventItem[]) => void = () => {};
   /** レーンの下に出す種類 */
-  evShow: EventShow = { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true };
+  evShow: EventShow = { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true, section: true, levelhold: true };
   /** 最後に描いたイベントの文字の位置（タップの判定用） */
   private evBoxes: { x1: number; x2: number; y1: number; y2: number; items: EventItem[] }[] = [];
   onUserScroll: () => void = () => {};
@@ -198,6 +211,10 @@ export class EditorView {
   cursors: CursorMark[] = [];
   /** 合作: 本譜面の担当（A・B…）の範囲（tick）。レーンの上の縁に色で出す */
   bands: { a: number; b: number; color: string; label: string; mine: boolean }[] = [];
+  /** 譜面分岐の区間と、条件の短い文字 */
+  branches: { a: number; b: number; label: string }[] = [];
+  /** 編集している分岐 */
+  branchNo = 0;
   /** 合作: ほかのレーンの名前をタップしたとき */
   onGhostTap: (id: string) => void = () => {};
   /** 最後に描いたほかのレーンの名前の位置 */
@@ -825,6 +842,22 @@ export class EditorView {
       ctx.fillStyle = C.gogo;
       for (const [a, b] of ranges) for (const sp of spansX(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
 
+      // 譜面分岐の区間（玄人・達人はその色に染める。上の縁に分岐の色の帯）
+      for (const br of this.branches) {
+        const c = BRANCH_COLOR[this.branchNo];
+        for (const sp of spansX(br.a, br.b)) {
+          if (this.branchNo) {
+            ctx.globalAlpha = 0.26;
+            ctx.fillStyle = c;
+            ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
+          }
+          ctx.globalAlpha = 0.95;
+          ctx.fillStyle = c;
+          ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, Math.max(4, 10 * s));
+          ctx.globalAlpha = 1;
+        }
+      }
+
       // 合作: 本譜面の小節の出どころ（レーンの上の縁に案の色の帯・頭に名前）
       for (const bd of this.bands) {
         const bh = Math.max(3, 8 * s);
@@ -1012,9 +1045,25 @@ export class EditorView {
       }
       evItems.push({ tick: e.tick, events: [e] });
     }
+    // 譜面分岐の区間の始まり（条件）
+    this.branches.forEach((br, i) => {
+      if (br.a > rightTick) return;
+      const x = xt(br.a);
+      if (x >= L.colW && x <= this.w) {
+        const ey = evRowY(br.a);
+        ctx.fillStyle = BRANCH_COLOR[this.branchNo];
+        ctx.beginPath();
+        ctx.moveTo(x, ey - 6 * s + 2);
+        ctx.lineTo(x - 9 * s, ey - 2 * s);
+        ctx.lineTo(x + 9 * s, ey - 2 * s);
+        ctx.closePath();
+        ctx.fill();
+      }
+      evItems.push({ tick: br.a, events: [], branch: i });
+    });
     evItems.sort((a, b) => a.tick - b.tick);
-    const label = (it: EventItem) => (it.grad ? `×${it.grad.from}→${it.grad.to}` : eventShort(it.events[0]));
-    const color = (it: EventItem) => EVENT_COLOR[it.events[0].kind];
+    const label = (it: EventItem) => (it.branch !== undefined ? this.branches[it.branch]?.label ?? '' : it.grad ? `×${it.grad.from}→${it.grad.to}` : eventShort(it.events[0]));
+    const color = (it: EventItem) => (it.branch !== undefined ? BRANCH_COLOR[Math.max(1, this.branchNo)] : EVENT_COLOR[it.events[0].kind]);
     const pad = 7 * s;
     const boxH = 30 * s;
     this.evBoxes = [];
@@ -1638,6 +1687,18 @@ export class EditorView {
           drawAny(ctx, n.type, x, q.cy, q.r, undefined, n.hits ?? 5);
         } else {
           drawAny(ctx, n.type, x, q.cy, big ? q.bigR : q.r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
+        }
+      }
+      // 区間の外を暗く
+      if (g.focus) {
+        const fs = g.focus.flatMap(([a, b]) => spans(a, b));
+        ctx.fillStyle = 'rgba(12,14,17,0.62)';
+        for (let r = 0; r < ln.rows; r++) {
+          const q = rowG(r);
+          ctx.beginPath();
+          ctx.rect(x0, q.y, this.w - x0, q.h);
+          for (const sp of fs) if (sp.g.y === q.y) ctx.rect(sp.x1, q.y, sp.x2 - sp.x1, q.h);
+          ctx.fill('evenodd');
         }
       }
       // 縁

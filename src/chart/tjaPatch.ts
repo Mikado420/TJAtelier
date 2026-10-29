@@ -9,7 +9,7 @@
  * - 難易度が増えた・減ったときは、その難易度のところだけ足す・消す
  * 書き換えた結果を読み直して、今の譜面と同じにならなければ、ふつうの書き出し（コメントは消える）にする
  */
-import type { EChart, ECourse } from './model';
+import { measures, type EChart, type ECourse } from './model';
 import { parseTJA } from './tja';
 import { writeCourseHead, writeHead, writeMeasures, writeTJA } from './tjaWrite';
 
@@ -52,6 +52,8 @@ interface SrcCourse {
   inline: boolean;
   /** 譜面に関係しない行（コメントだけ・空行・使わない分岐） */
   keep: Set<number>;
+  /** 譜面分岐の区間の行（#BRANCHSTART から #BRANCHEND まで。#BRANCHEND が無ければ区間の最後の行まで） */
+  blocks: { from: number; to: number }[];
 }
 
 /** 元のテキストの、難易度・小節がどの行にあるか（parseTJA と同じ読み方） */
@@ -70,7 +72,7 @@ function mapSource(lines: string[]): SrcCourse[] | null {
         if (/P2/i.test(code.slice(6))) continue;
         inChart = true;
         branch = 'none';
-        cur = { headFrom, start: i, end: lines.length, measures: [], inline: false, keep: new Set() };
+        cur = { headFrom, start: i, end: lines.length, measures: [], inline: false, keep: new Set(), blocks: [] };
         from = -1;
         pending = false;
       }
@@ -80,7 +82,9 @@ function mapSource(lines: string[]): SrcCourse[] | null {
     if (!code) { c.keep.add(i); continue; }
     if (code.startsWith('#')) {
       const name = (code.match(/^#([A-Z0-9]+)/i)?.[1] ?? '').toUpperCase();
+      const openB = c.blocks[c.blocks.length - 1];
       if (name === 'END') {
+        if (openB && openB.to < 0) openB.to = i - 1;
         if (pending) c.measures.push({ from: from < 0 ? i : from, to: i - 1 });
         c.end = i;
         out.push(c);
@@ -89,6 +93,11 @@ function mapSource(lines: string[]): SrcCourse[] | null {
         headFrom = i + 1;
         continue;
       }
+      if (name === 'BRANCHSTART') {
+        if (openB && openB.to < 0) openB.to = i - 1;
+        c.blocks.push({ from: i, to: -1 });
+      }
+      if (name === 'BRANCHEND' && openB && openB.to < 0) openB.to = i;
       if (name === 'BRANCHSTART' || name === 'BRANCHEND') { branch = 'none'; c.keep.add(i); continue; }
       if (name === 'N' || name === 'E' || name === 'M') { branch = name; c.keep.add(i); continue; }
       if (branch === 'E' || branch === 'M') { c.keep.add(i); continue; }
@@ -110,6 +119,8 @@ function mapSource(lines: string[]): SrcCourse[] | null {
   }
   if (cur) {
     if (pending) cur.measures.push({ from: from < 0 ? lines.length - 1 : from, to: lines.length - 1 });
+    const ob = cur.blocks[cur.blocks.length - 1];
+    if (ob && ob.to < 0) ob.to = lines.length - 1;
     out.push(cur);
   }
   return out;
@@ -277,14 +288,38 @@ function patchBody(lines: string[], s: SrcCourse, oc: ECourse, nc: ECourse, spli
   const changed: number[] = [];
   for (let j = 0; j < Math.max(n, nb.length); j++) if (!same(j)) changed.push(j);
   if (!changed.length) return;
+  // 元の譜面分岐の区間: 中の小節が変わったら、区間の行（#BRANCHSTART〜）をまとめて書き直す
+  const obs = oc.branches ?? [];
+  const done = new Set<number>();
+  if (obs.length) {
+    if (obs.length !== s.blocks.length) {
+      const keep = [];
+      for (let l = s.start + 1; l < s.end; l++) {
+        const { code, comment } = splitComment(lines[l]);
+        if (!code.trim() && comment.trim()) keep.push(lines[l]);
+      }
+      splice(s.start + 1, s.end - s.start - 1, [...nb.flat(), ...keep]);
+      return;
+    }
+    const oms = measures(oc, Math.max(...obs.map((b) => (Number.isFinite(b.end) ? b.end : b.start))) + 1);
+    obs.forEach((b, i) => {
+      const js = oms.map((m, j) => (m.start >= b.start && m.start < b.end ? j : -1)).filter((j) => j >= 0);
+      for (const j of js) done.add(j);
+      if (!js.some((j) => changed.includes(j))) return;
+      const blk = s.blocks[i];
+      splice(blk.from, blk.to - blk.from + 1, js.flatMap((j) => nb[j] ?? []));
+    });
+  }
+  const todo = changed.filter((j) => !done.has(j));
+  if (!todo.length) return;
   // 1 行に小節がいくつもある書き方で、その小節が変わったときは、本体ごと書き直す（コメントだけの行は残す）
-  if (s.inline && changed.some((j) => j < n)) {
+  if (s.inline && todo.some((j) => j < n)) {
     const keep = [];
     for (let l = s.start + 1; l < s.end; l++) if (s.keep.has(l) && lines[l].trim()) keep.push(lines[l]);
     splice(s.start + 1, s.end - s.start - 1, [...nb.flat(), ...keep]);
     return;
   }
-  for (const j of changed) {
+  for (const j of todo) {
     if (j < n) replaceMeasure(lines, s, s.measures[j], nb[j] ?? [], splice);
   }
   // 元より小節が増えた: 最後の小節の後ろに足す

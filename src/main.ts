@@ -4,7 +4,7 @@ import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
-import { COURSE_NAMES, contentEnd, newChart, parseScroll, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
+import { branchPath, COURSE_NAMES, contentEnd, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
@@ -19,7 +19,7 @@ import { applyGrad, gradValid, type Grad } from './editor/grad';
 import { writeCourseBody } from './chart/tjaWrite';
 
 import { DIVISORS, Editor, type Tool } from './editor/editor';
-import { EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow } from './editor/view';
+import { BRANCH_COLOR, EditorView, eventText, EVENT_COLOR, type EventItem, type EventShow, type GhostRow } from './editor/view';
 import { isVideoName, loadFiles, type AudioFile } from './io/load';
 import { encodeSJIS } from './chart/sjis';
 import { analyzeCourse, simulateRolls } from './chart/analyze';
@@ -96,12 +96,16 @@ const settings = {
   volUi: 1,
   /** 背景の動画: 全面・下だけ・出さない */
   videoMode: 'full' as 'full' | 'bottom' | 'off',
+  /** 譜面分岐: 自動・普通・玄人・達人に固定 */
+  branch: 'auto' as 'auto' | 'N' | 'E' | 'M',
+  /** エディタ: 譜面分岐のほかの分岐も下に並べる */
+  brStack: false,
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim: 0.5,
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
-  evShow: { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true } as EventShow,
+  evShow: { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true, section: true, levelhold: true } as EventShow,
   /** 打音の比率の初期値を 0.8 にした版 */
   hitVolVer: 0,
 };
@@ -205,7 +209,7 @@ if (settings.zoomVer !== 2) {
   settings.zoomVer = 2;
 }
 view.playSpeed = settings.speed;
-settings.evShow = Object.assign({ bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true }, settings.evShow);
+settings.evShow = Object.assign({ bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true, section: true, levelhold: true }, settings.evShow);
 view.evShow = settings.evShow;
 view.onEventTap = (items) => openEvents(items);
 const applyMix = () => audio.setMix({ music: settings.volMusic, hit: settings.volHit, metro: settings.volMetro, ui: settings.volUi });
@@ -221,13 +225,16 @@ let stageKey = '';
 function syncStageVars() {
   const stage = $('editor').parentElement!;
   const L = view.L;
-  const key = `${view.stack}|${L.ctlTop}|${L.evH}|${L.tlBottom}`;
+  const key = `${view.stack}|${L.ctlTop}|${L.evH}|${L.tlBottom}|${L.laneY}|${L.laneH}|${L.colW}|${L.playX}`;
   if (key === stageKey) return;
   stageKey = key;
   stage.classList.toggle('stack', view.stack);
   stage.style.setProperty('--ev-top', `${L.ctlTop}px`);
   stage.style.setProperty('--ev-h', `${L.evH}px`);
   stage.style.setProperty('--tl-h', `${L.tlBottom - L.ctlTop}px`);
+  stage.style.setProperty('--lane-bot', `${L.laneY + L.laneH}px`);
+  stage.style.setProperty('--col-w', `${L.colW}px`);
+  stage.style.setProperty('--play-x', `${L.playX}px`);
 }
 const onViewResize = () => {
   document.documentElement.style.setProperty('--es', String(view.s));
@@ -811,12 +818,23 @@ function updateSelBar() {
   bar.querySelector<HTMLElement>('.sel-info')!.textContent = has ? `${n} 個` : ed.pendingLong !== null ? '終点をタップ' : '始点をタップ';
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
-    b.disabled = k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : !has || !n;
+    b.disabled = k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : !has || !n;
     if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
+    if (k === 'branch') b.classList.toggle('hidden', collab.active);
   });
 }
 function selAction(k: string) {
   if (k === 'adopt') { collab.adoptSelection(); updateSelBar(); view.invalidate(); return; }
+  if (k === 'branch') {
+    const s = ed.sel;
+    if (!s) return;
+    const b = ed.addBranch(s.start, s.end);
+    if (!b) return;
+    ed.clearSelection();
+    ed.setBranch(ed.branch);
+    updateSelBar();
+    return;
+  }
   if (k === 'copy') { const n = ed.copySelection(); toast(`${n} 個コピーしました`); }
   else if (k === 'cut') { const n = ed.cutSelection(); toast(`${n} 個切り取りました`); }
   else if (k === 'del') { const n = ed.deleteSelection(); toast(`${n} 個消しました`); }
@@ -837,7 +855,7 @@ $('selBar').addEventListener('click', (e) => {
 // ---------- 譜面情報 ----------
 
 /** 譜面情報を出す譜面（エディタの今の譜面か、曲選択で選んだ曲）と難易度、曲の長さ（秒） */
-let analysisOf: { chart: EChart; course: number; length: number } | null = null;
+let analysisOf: { chart: EChart; course: number; length: number; branch?: BranchNo } | null = null;
 /** 譜面画像の URL（作り直すときに前のものを空ける） */
 let analysisBlob = '';
 /** 譜面情報の「譜面の流れ」の後片付け */
@@ -861,9 +879,12 @@ function renderAnalysisSheet(body: HTMLElement) {
   const A = analysisOf!;
   const chart = A.chart;
   const ci = Math.max(0, Math.min(A.course, chart.courses.length - 1));
-  const course = chart.courses[ci];
+  const main = chart.courses[ci];
   $('sheetTitle').textContent = '譜面情報';
-  if (!course) { body.innerHTML = '<p class="note">難易度がありません</p>'; return; }
+  if (!main) { body.innerHTML = '<p class="note">難易度がありません</p>'; return; }
+  // 譜面分岐: 分岐ごとに通したときの数
+  const hasBr = !!main.branches?.length;
+  const course = hasBr ? branchPath(main, A.branch ?? 0) : main;
   const a = analyzeCourse(chart, course);
   const sum = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
   const donAll = a.don + a.bigDon;
@@ -885,6 +906,7 @@ function renderAnalysisSheet(body: HTMLElement) {
     <div class="an-head">
       <div class="an-title"><h1>${esc(chart.title || '（無題）')}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>
       <div class="an-tabs">${tabs}</div>
+      ${hasBr ? `<div class="an-br">${['普通', '玄人', '達人'].map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n}</button>`).join('')}</div>` : ''}
     </div>
     <div class="an-tiles">
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
@@ -950,6 +972,10 @@ function renderAnalysisSheet(body: HTMLElement) {
   }));
   body.querySelectorAll<HTMLButtonElement>('[data-an-course]').forEach((b) => b.addEventListener('click', () => {
     A.course = Number(b.dataset.anCourse);
+    renderAnalysisSheet(body);
+  }));
+  body.querySelectorAll<HTMLButtonElement>('[data-an-br]').forEach((b) => b.addEventListener('click', () => {
+    A.branch = Number(b.dataset.anBr) as BranchNo;
     renderAnalysisSheet(body);
   }));
 
@@ -1065,8 +1091,109 @@ ed.onChange((structural) => {
     clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => void persist(), 600);
     refreshSheet();
+    syncBranches();
   }
 });
+
+// ---------- 譜面分岐（エディタ） ----------
+
+const BR_SHORT = ['普', '玄', '達'];
+const BR_TYPE: Record<EBranch['type'], string> = { p: '精度', r: '連打', s: 'スコア' };
+const brCtl = document.createElement('div');
+brCtl.className = 'br-ctl hidden';
+brCtl.innerHTML = `${BR_SHORT.map((t, k) => `<button data-br="${k}" class="br-${k}">${t}</button>`).join('')}<button data-br="stack" class="br-stack" aria-label="分岐を並べる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg></button>`;
+$('editor').parentElement!.appendChild(brCtl);
+brCtl.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-br]');
+  if (!b) return;
+  if (b.dataset.br === 'stack') {
+    settings.brStack = !settings.brStack;
+    saveSettings();
+    syncBranches(true);
+    return;
+  }
+  ed.setBranch(Number(b.dataset.br) as BranchNo);
+});
+/** 下に並べたほかの分岐をタップしたら、その分岐を開く */
+{
+  const collabTap = view.onGhostTap;
+  view.onGhostTap = (id) => (id.startsWith('br:') ? ed.setBranch(Number(id.slice(3)) as BranchNo) : collabTap(id));
+}
+
+/** 選んだ範囲が、今ある区間に重なるか */
+function overlapsBranch() {
+  const sel = ed.sel;
+  if (!sel) return true;
+  return (ed.mainCourse.branches ?? []).some((b) => b.start <= sel.end && sel.start < b.end);
+}
+
+let brGhostKey = '';
+/** 区間・分岐の切り替え・下に並べる分岐を、譜面に合わせる */
+function syncBranches(force = false) {
+  const main = ed.mainCourse;
+  const bs = (!collab.active && main?.branches) || [];
+  if (!bs.length && ed.branch) ed.branch = 0;
+  view.branches = bs.map((b) => ({ a: b.start, b: b.end, label: `${BR_TYPE[b.type]} ${b.x}/${b.y}` }));
+  view.branchNo = ed.branch;
+  brCtl.classList.toggle('hidden', !bs.length);
+  brCtl.querySelectorAll<HTMLButtonElement>('[data-br]').forEach((b) => b.classList.toggle('on', b.dataset.br === 'stack' ? settings.brStack : Number(b.dataset.br) === ed.branch));
+  if (collab.active) return;
+  // ほかの分岐を下に並べる（区間の外は暗く）
+  const key = bs.length && settings.brStack ? `${ed.branch}|${ed.courseIndex}|${ed.undoCount}` : '';
+  if (!force && key === brGhostKey) return;
+  brGhostKey = key;
+  if (!key) {
+    if (view.ghosts.some((g) => g.id.startsWith('br:'))) view.ghosts = [];
+    view.invalidate();
+    return;
+  }
+  const rows: GhostRow[] = [];
+  for (const k of [0, 1, 2] as BranchNo[]) {
+    if (k === ed.branch) continue;
+    const path = k ? branchPath(main, k) : { ...main, branches: undefined };
+    const chart: EChart = { ...ed.chart, courses: [path] };
+    const pc = toPlayable(chart, path);
+    rows.push({
+      id: `br:${k}`, name: ['普通', '玄人', '達人'][k], color: BRANCH_COLOR[k], main: false,
+      notes: pc.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: pc.bars.map((b) => b.time), chart,
+      focus: bs.map((b) => [b.start, b.end] as [number, number]),
+    });
+  }
+  view.ghosts = rows;
+  view.invalidate();
+}
+
+/** 区間の条件の画面 */
+let brEdit: EBranch | null = null;
+function renderBranchSheet(body: HTMLElement) {
+  const b = brEdit!;
+  let type = b.type;
+  $('sheetTitle').textContent = '#BRANCHSTART';
+  body.innerHTML = `
+    <div class="st-seg br-type">${(['p', 'r', 's'] as const).map((t) => `<button data-bt="${t}" class="${t === type ? 'on' : ''}">${BR_TYPE[t]}</button>`).join('')}</div>
+    <label class="field br-f1"><span>玄人</span><input type="number" inputmode="decimal" step="any" id="brX" value="${b.x}"></label>
+    <label class="field br-f2"><span>達人</span><input type="number" inputmode="decimal" step="any" id="brY" value="${b.y}"></label>
+    <div class="btns three">
+      <button data-bact="del">消す</button>
+      <button data-bact="cancel">やめる</button>
+      <button data-bact="ok" class="primary">変更</button>
+    </div>`;
+  body.querySelectorAll<HTMLButtonElement>('[data-bt]').forEach((x) => x.addEventListener('click', () => {
+    type = x.dataset.bt as EBranch['type'];
+    body.querySelectorAll('[data-bt]').forEach((y) => y.classList.toggle('on', y === x));
+  }));
+  body.querySelectorAll<HTMLButtonElement>('[data-bact]').forEach((x) => x.addEventListener('click', () => {
+    const act = x.dataset.bact;
+    if (act === 'ok') {
+      const vx = Number(body.querySelector<HTMLInputElement>('#brX')!.value);
+      const vy = Number(body.querySelector<HTMLInputElement>('#brY')!.value);
+      if (!Number.isFinite(vx) || !Number.isFinite(vy)) return;
+      ed.setBranchCond(b, type, vx, vy);
+    } else if (act === 'del') ed.removeBranch(b);
+    brEdit = null;
+    closeSheet();
+  }));
+}
 
 // ---------- キーボード（PC） ----------
 
@@ -1164,7 +1291,7 @@ function toggleBigAtPos() {
 
 // ---------- シート ----------
 
-type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis';
+type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch';
 let sheet: SheetKind | null = null;
 
 function openSheet(kind: SheetKind) {
@@ -1221,7 +1348,7 @@ function refreshSheet() {
   if ($('sheetBody').contains(document.activeElement) && (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) return;
   // TJA のテキストは書き換え中かもしれないので、譜面が変わっても勝手に描き直さない
   if (sheet === 'events' && document.getElementById('tjaText')) return;
-  if (sheet === 'grad' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick' || sheet === 'analysis') return;
+  if (sheet === 'grad' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick' || sheet === 'analysis' || sheet === 'branch') return;
   if (sheet === 'evlist') { renderSheet(); return; }
   renderSheet();
 }
@@ -1325,6 +1452,8 @@ function renderSheet() {
     renderTempoSheet(body);
   } else if (sheet === 'evlist' && evList) {
     renderEvListSheet(body);
+  } else if (sheet === 'branch' && brEdit) {
+    renderBranchSheet(body);
   } else if (sheet === 'point' && pointEdit) {
     renderPointSheet(body);
   } else if (sheet === 'grad' && gradEdit) {
@@ -1525,7 +1654,14 @@ function playSettingRows() {
     ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
     ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}
     <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
+    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}
+    <div class="st-row"><span>譜面分岐</span><div class="st-seg four">${BRANCH_MODES.map(([v, l]) => `<button data-brmode="${v}" class="${settings.branch === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
+}
+const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', '普通'], ['E', '玄人'], ['M', '達人']];
+function onBranchModeClick(b: HTMLButtonElement) {
+  settings.branch = b.dataset.brmode as typeof settings.branch;
+  saveSettings();
+  b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
 }
 const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['bottom', '下だけ'], ['off', '出さない']];
 function volumeRows() {
@@ -1588,6 +1724,8 @@ $('sheetBody').addEventListener('click', (e) => {
   if (b) onHitModeClick(b);
   const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');
   if (v) onVideoModeClick(v);
+  const br = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-brmode]');
+  if (br) onBranchModeClick(br);
 });
 $('sheetBody').addEventListener('input', (e) => { onSettingInput(e.target as HTMLInputElement, false); });
 $('sheetBody').addEventListener('change', (e) => { onSettingInput(e.target as HTMLInputElement, true); });
@@ -2023,7 +2161,7 @@ async function startTest(fromStart = lastTestFromStart) {
   lastTestFromStart = fromStart;
   stopPlayback();
   closeSheet();
-  const course = toPlayable(ed.chart, ed.course);
+  const course = toPlayable(ed.chart, ed.mainCourse);
   if (!course.notes.length) {
     toast('ノーツがありません');
     return;
@@ -2085,6 +2223,8 @@ $('pauseSettings').addEventListener('click', (e) => {
   if (hm) onHitModeClick(hm);
   const vm = t.closest<HTMLButtonElement>('[data-vmode]');
   if (vm) onVideoModeClick(vm);
+  const br = t.closest<HTMLButtonElement>('[data-brmode]');
+  if (br) onBranchModeClick(br);
 });
 const onPauseSetting = (e: Event, commit: boolean) => {
   if (onSettingInput(e.target as HTMLInputElement, commit)) play.applySettings();
@@ -2529,7 +2669,7 @@ function renderPointSheet(body: HTMLElement) {
 // ---------- レーンの下のイベント（タップしたとき） ----------
 
 const EV_NAMES: Partial<Record<keyof EventShow, string>> = {
-  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動', lyric: '歌詞',
+  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動', lyric: '歌詞', section: 'SECTION', levelhold: 'LEVELHOLD',
 };
 
 /** 一覧に出しているイベント */
@@ -2540,6 +2680,11 @@ function openEvents(items: EventItem[]) {
   if (items.length === 1) {
     const it = items[0];
     const e = it.events[0];
+    if (it.branch !== undefined) {
+      const b = ed.mainCourse.branches?.[it.branch];
+      if (b) { brEdit = b; openSheet('branch'); }
+      return;
+    }
     if (it.grad) {
       gradEdit = { grad: { ...it.grad }, old: it.grad };
       openSheet('grad');
@@ -2555,7 +2700,7 @@ function openEvents(items: EventItem[]) {
 }
 
 function renderEvListSheet(body: HTMLElement) {
-  const items = (evList ?? []).filter((it) => it.events.some((e) => ed.course.events.includes(e)));
+  const items = (evList ?? []).filter((it) => (it.branch !== undefined && !!ed.mainCourse.branches?.[it.branch]) || it.events.some((e) => ed.course.events.includes(e)));
   $('sheetTitle').textContent = 'イベント';
   if (!items.length) {
     body.innerHTML = '<p class="note">イベントはありません</p>';
@@ -2563,9 +2708,10 @@ function renderEvListSheet(body: HTMLElement) {
   }
   body.innerHTML = `<div class="ev-list">${items.map((it, i) => {
     const e = it.events[0];
-    const name = it.grad ? `グラデ ${it.grad.from}→${it.grad.to}（${it.grad.mode === 'linear' ? '等差' : '等比'}）` : esc(eventText(e));
-    const editable = !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric';
-    return `<div class="ev-row"><i style="background:${EVENT_COLOR[e.kind]}"></i><div class="ev-name">${name}<small>${posText(it.tick)}</small></div>
+    const br = it.branch !== undefined ? ed.mainCourse.branches?.[it.branch] : undefined;
+    const name = br ? `#BRANCHSTART ${br.type},${br.x},${br.y}` : it.grad ? `グラデ ${it.grad.from}→${it.grad.to}（${it.grad.mode === 'linear' ? '等差' : '等比'}）` : esc(eventText(e));
+    const editable = !!br || !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric';
+    return `<div class="ev-row"><i style="background:${br ? BRANCH_COLOR[Math.max(1, ed.branch)] : EVENT_COLOR[e.kind]}"></i><div class="ev-name">${name}<small>${posText(it.tick)}</small></div>
       ${editable ? `<button data-evi="${i}" data-evact="edit">変更</button>` : ''}<button data-evi="${i}" data-evact="del">消す</button></div>`;
   }).join('')}</div>`;
   body.querySelectorAll<HTMLButtonElement>('[data-evact]').forEach((b) => {
@@ -2575,7 +2721,9 @@ function renderEvListSheet(body: HTMLElement) {
         openEvents([it]);
         return;
       }
-      if (it.grad) ed.removeGrad(it.grad);
+      const br = it.branch !== undefined ? ed.mainCourse.branches?.[it.branch] : undefined;
+      if (br) ed.removeBranch(br);
+      else if (it.grad) ed.removeGrad(it.grad);
       else ed.removeEvent(it.events[0]);
       toast('消しました');
       // 一覧を描き直す（refreshSheet から）

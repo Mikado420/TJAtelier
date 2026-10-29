@@ -28,6 +28,20 @@ export interface Note {
   beat?: number;
   /** 連打・風船の終点の beat */
   endBeat?: number;
+  /** 譜面分岐の区間の中の音符: 区間の番号と、どの分岐か（0 = 普通・1 = 玄人・2 = 達人） */
+  sec?: number;
+  br?: number;
+}
+
+/** 譜面分岐の区間（プレイ用） */
+export interface PlayBranch {
+  start: number;
+  end: number;
+  /** 分岐を決める時刻（区間の 1 小節前） */
+  judge: number;
+  type: 'p' | 'r' | 's';
+  x: number;
+  y: number;
 }
 
 export interface BarLine {
@@ -68,6 +82,12 @@ export interface Course {
   jpos?: JposMove[];
   /** 歌詞（#LYRIC。時刻の順。text が空なら消す） */
   lyrics?: { time: number; text: string }[];
+  /** 譜面分岐 */
+  branches?: PlayBranch[];
+  /** #SECTION の時刻 */
+  sections?: number[];
+  /** #LEVELHOLD の時刻（br があれば、その分岐にいるときだけ） */
+  holds?: { time: number; br?: number }[];
 }
 
 /**
