@@ -1,4 +1,4 @@
-import { measures, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type Measure } from '../chart/model';
+import { measures, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type ENote, type Measure } from '../chart/model';
 import { drawAny, drawRoll, hexPath } from '../render/notes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
@@ -157,6 +157,30 @@ const fmtTime = (t: number) => {
 const SCROLL_GAIN = 1.6;
 
 interface Box { x: number; y: number; r: number }
+
+/** 音符の並び（tick の順）のうち、[a, b] に掛かるものの範囲 [lo, hi)。連打・風船の長さの分だけ前から見る */
+const longest = new WeakMap<ENote[], { rev: number; span: number }>();
+function visRange(notes: ENote[], a: number, b: number, rev = 0): [number, number] {
+  let c = longest.get(notes);
+  if (!c || c.rev !== rev) {
+    let span = 0;
+    for (const n of notes) if (n.endTick !== undefined) span = Math.max(span, n.endTick - n.tick);
+    c = { rev, span };
+    longest.set(notes, c);
+  }
+  const span = c.span;
+  const first = (t: number) => {
+    let lo = 0;
+    let hi = notes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (notes[mid].tick < t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  return [first(a - span - 1), first(b + 1)];
+}
 
 /** 合作: ほかのレーン（波形の所に、時刻をそろえて小さく並べる） */
 export interface GhostRow {
@@ -368,7 +392,19 @@ export class EditorView {
     return 40 * s + Math.max(38, 124 * s) + 12 + 6;
   }
 
+  /** 配置は大きさ・段・スクロールが変わったときだけ計算し直す（1 フレームに何度も使うため） */
+  private lMemo: { s: number; w: number; h: number; stack: boolean; info: unknown; vrow: number; L: ReturnType<EditorView['calcL']> } | null = null;
   get L() {
+    const info = this.stack ? this.rowsInfo : this.lanes;
+    const vrow = this.stack ? this.vrow : 0;
+    const m = this.lMemo;
+    if (m && m.s === this.s && m.w === this.w && m.h === this.h && m.stack === this.stack && m.info === info && m.vrow === vrow) return m.L;
+    const L = this.calcL();
+    this.lMemo = { s: this.s, w: this.w, h: this.h, stack: this.stack, info, vrow, L };
+    return L;
+  }
+
+  private calcL() {
     const s = this.s;
     const box = (b: { x: number; y: number; r: number }): Box => ({ x: b.x * s, y: b.y * s, r: b.r * s });
     if (this.stack) {
@@ -1175,7 +1211,8 @@ export class EditorView {
     else ctx.rect(L.colW, L.laneY - L.bigR, this.w - L.colW, L.laneH + L.bigR * 2);
     ctx.clip();
     const notes = course.notes;
-    for (let i = notes.length - 1; i >= 0; i--) {
+    const [lo0, hi0] = visRange(notes, leftTick, rightTick, ed.undoCount);
+    for (let i = hi0 - 1; i >= lo0; i--) {
       const n = notes[i];
       const endT = n.endTick ?? n.tick;
       if (endT < leftTick || n.tick > rightTick) continue;
@@ -1418,7 +1455,8 @@ export class EditorView {
     const r = Math.max(3, Math.min(L.r * k, noteH * 0.34));
     const bigR = Math.max(4, Math.min(L.bigR * k, noteH * 0.48));
     const notes = course.notes;
-    for (let i = notes.length - 1; i >= 0; i--) {
+    const [lo1, hi1] = visRange(notes, leftTick, rightTick, this.ed.undoCount);
+    for (let i = hi1 - 1; i >= lo1; i--) {
       const n = notes[i];
       const endT = n.endTick ?? n.tick;
       if (endT < leftTick || n.tick > rightTick) continue;
@@ -1693,7 +1731,8 @@ export class EditorView {
       }
       // 音符（後ろから）
       const notes = geo.course.notes;
-      for (let i = notes.length - 1; i >= 0; i--) {
+      const [lo2, hi2] = visRange(notes, leftTick, rightTick);
+      for (let i = hi2 - 1; i >= lo2; i--) {
         const n = notes[i];
         const endT = n.endTick ?? n.tick;
         if (endT < leftTick || n.tick > rightTick) continue;

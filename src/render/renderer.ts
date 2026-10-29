@@ -836,29 +836,65 @@ export class Renderer {
       ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
     }
 
-    // 譜面分岐: 玄人は青、達人は紫にレーンを染める（変わったときは判定枠から右へ塗り替える）
+    // 譜面分岐: 玄人は青、達人は紫にレーンを染める（変わったときは判定枠から右へ、斜めの境目で塗り替える）
     if (!opp) {
       const fx = this.branchFx;
-      const p = fx ? Math.min(1, (wall - fx.t) / 360) : 1;
-      const ease = 1 - (1 - p) ** 3;
-      const cut = this.jx + (right - this.jx + 40) * ease;
-      const tint = (b: number, x1: number, x2: number) => {
+      const p = fx ? Math.min(1, (wall - fx.t) / 170) : 1;
+      const ease = 1 - (1 - p) ** 2;
+      const top = LANE_TOP;
+      const bot = LANE_BOTTOM;
+      const lean = (bot - top) * 0.1405; // UI の斜めと同じ傾き
+      const cut = this.jx + (right - this.jx + lean * 2) * ease;
+      /** 境目より左（at = 境目の真ん中の x）の斜めの形 */
+      const leftOf = (at: number) => {
+        ctx.beginPath();
+        ctx.moveTo(LANE_X, top);
+        ctx.lineTo(at + lean / 2, top);
+        ctx.lineTo(at - lean / 2, bot);
+        ctx.lineTo(LANE_X, bot);
+        ctx.closePath();
+      };
+      const tint = (b: number) => {
         const c = BRANCH_TINT[b];
-        if (!c || x2 <= x1) return;
+        if (!c) return;
         ctx.fillStyle = c;
-        ctx.fillRect(x1, LANE_TOP, x2 - x1, LANE_BOTTOM - LANE_TOP);
+        ctx.fillRect(LANE_X, top, right - LANE_X, bot - top);
       };
       if (fx && p < 1) {
-        tint(fx.from, Math.max(LANE_X, cut), right);
-        tint(fx.to, LANE_X, Math.min(right, cut));
-        ctx.fillStyle = `rgba(255,255,255,${0.5 * (1 - p)})`;
-        ctx.fillRect(Math.max(LANE_X, cut - 26), LANE_TOP, 26, LANE_BOTTOM - LANE_TOP);
-      } else tint(game.branch, LANE_X, right);
+        // 右側は前の分岐、左側は新しい分岐
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cut + lean / 2, top);
+        ctx.lineTo(right, top);
+        ctx.lineTo(right, bot);
+        ctx.lineTo(cut - lean / 2, bot);
+        ctx.closePath();
+        ctx.clip();
+        tint(fx.from);
+        ctx.restore();
+        ctx.save();
+        leftOf(cut);
+        ctx.clip();
+        tint(fx.to);
+        ctx.restore();
+        // 境目の細い光
+        ctx.save();
+        ctx.globalAlpha = 0.85 * (1 - p * 0.6);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.moveTo(cut + lean / 2, top);
+        ctx.lineTo(cut + lean / 2 + 5, top);
+        ctx.lineTo(cut - lean / 2 + 5, bot);
+        ctx.lineTo(cut - lean / 2, bot);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else tint(game.branch);
       // 分岐のある譜面: レーンの右に今の分岐の名前
       if (this.hasBranch) {
         const name = BRANCH_NAME[fx && p < 1 ? fx.to : game.branch];
         ctx.save();
-        ctx.globalAlpha = 0.2 + 0.5 * (fx && p < 1 ? 1 - p : 0);
+        ctx.globalAlpha = fx && p < 1 ? 0.45 + 0.4 * (1 - p) : 0.45;
         ctx.font = `italic 900 76px ${FONT}`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
