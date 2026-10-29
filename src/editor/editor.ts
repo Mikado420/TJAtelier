@@ -238,8 +238,8 @@ export class Editor {
   }
 
   get canUndo() { return this.undoStack.length > 0; }
-  /** 変更のたびに増える数（描き直しの目印） */
-  get undoCount() { return this.undoStack.length + this.redoStack.length * 1000 + this.version; }
+  /** 譜面が変わるたびに増える数（描き直しの目印） */
+  get undoCount() { return this.version; }
   private version = 0;
   get canRedo() { return this.redoStack.length > 0; }
 

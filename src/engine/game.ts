@@ -188,9 +188,7 @@ export class Game {
       } else {
         const i = this.brIdx++;
         const from = this.branch;
-        // #BRANCHSTART p,-2,-1 は達人譜面に決める（#LEVELHOLD があっても）
-        const force = nb.type === 'p' && nb.x === -2 && nb.y === -1;
-        const to = b.fixed ?? (force ? 2 : this.held ? this.branch : this.decide(nb));
+        const to = b.fixed ?? (this.held ? this.branch : this.decide(nb));
         this.chosen[i] = to;
         this.branch = to;
         for (const s of this.states) if (s.note.sec === i && (s.note.br ?? 0) !== to) { s.skip = true; s.done = true; }

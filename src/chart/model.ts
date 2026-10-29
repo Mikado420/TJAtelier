@@ -84,7 +84,19 @@ export type BranchNo = 0 | 1 | 2;
 /** 分岐しても全部の譜面で同じにする命令（時間の流れ） */
 export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay']);
 
-const secOf = (bs: EBranch[], tick: number) => bs.findIndex((b) => tick >= b.start && tick < b.end);
+/** その tick がどの区間か（区間は時刻の順に並んでいる。無ければ -1） */
+function secOf(bs: EBranch[], tick: number): number {
+  let lo = 0;
+  let hi = bs.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const b = bs[mid];
+    if (tick < b.start) hi = mid - 1;
+    else if (tick >= b.end) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
+}
 
 /**
  * その分岐で通したときの譜面（区間の外は共通、区間の中はその分岐の音符・命令。時間の流れは普通譜面のもの）。
@@ -94,13 +106,19 @@ export function branchPath(c: ECourse, k: BranchNo): ECourse {
   const bs = c.branches ?? [];
   if (!k || !bs.length) return c;
   const part = (b: EBranch) => (k === 1 ? b.e : b.m);
-  const path: ECourse = {
-    ...c,
-    notes: [...c.notes.filter((n) => secOf(bs, n.tick) < 0), ...bs.flatMap((b) => part(b).notes)],
-    events: [...c.events.filter((e) => secOf(bs, e.tick) < 0 || SHARED_KINDS.has(e.kind)), ...bs.flatMap((b) => part(b).events.filter((e) => !SHARED_KINDS.has(e.kind)))],
-  };
+  // 共通の所と区間の所を、時刻の順のまま 1 回でつなぐ（並べ直さない）
+  const notes: ENote[] = [];
+  let bi = 0;
+  for (const n of c.notes) {
+    while (bi < bs.length && bs[bi].end <= n.tick) notes.push(...part(bs[bi++]).notes);
+    if (bi < bs.length && n.tick >= bs[bi].start) continue;
+    notes.push(n);
+  }
+  while (bi < bs.length) notes.push(...part(bs[bi++]).notes);
+  const events = [...c.events.filter((e) => SHARED_KINDS.has(e.kind) || secOf(bs, e.tick) < 0), ...bs.flatMap((b) => part(b).events.filter((e) => !SHARED_KINDS.has(e.kind)))];
+  const path: ECourse = { ...c, notes, events };
   delete path.branches;
-  sortCourse(path);
+  path.events.sort(eventCmp);
   return path;
 }
 
@@ -109,12 +127,26 @@ export function setBranchPath(c: ECourse, k: BranchNo, path: ECourse) {
   const bs = c.branches ?? [];
   if (!k || !bs.length || path === c) return;
   const ins = (t: number) => secOf(bs, t) >= 0;
+  // 区間ごとに 1 回で分ける
+  const pn: ENote[][] = bs.map(() => []);
+  const pe: EEvent[][] = bs.map(() => []);
+  const outN: ENote[] = [];
+  for (const n of path.notes) {
+    const i = secOf(bs, n.tick);
+    if (i >= 0) pn[i].push(n);
+    else outN.push(n);
+  }
+  for (const e of path.events) {
+    if (SHARED_KINDS.has(e.kind)) continue;
+    const i = secOf(bs, e.tick);
+    if (i >= 0) pe[i].push(e);
+  }
   bs.forEach((b, i) => {
     const part = k === 1 ? b.e : b.m;
-    part.notes = path.notes.filter((n) => secOf(bs, n.tick) === i);
-    part.events = path.events.filter((e) => secOf(bs, e.tick) === i && !SHARED_KINDS.has(e.kind));
+    part.notes = pn[i];
+    part.events = pe[i];
   });
-  c.notes = [...c.notes.filter((n) => ins(n.tick)), ...path.notes.filter((n) => !ins(n.tick))];
+  c.notes = [...c.notes.filter((n) => ins(n.tick)), ...outN];
   c.events = [...c.events.filter((e) => ins(e.tick) && !SHARED_KINDS.has(e.kind)), ...path.events.filter((e) => !ins(e.tick) || SHARED_KINDS.has(e.kind))];
   c.name = path.name;
   c.level = path.level;
@@ -192,8 +224,10 @@ export function scrollText(value: number, im = 0, digits = 6): string {
   return `${f(value)}${im < 0 ? '-' : '+'}${a === 1 ? '' : f(a)}i`;
 }
 
+const eventCmp = (a: EEvent, b: EEvent) => a.tick - b.tick || EVENT_ORDER.indexOf(a.kind) - EVENT_ORDER.indexOf(b.kind);
+
 export function sortCourse(c: ECourse) {
-  const ev = (a: EEvent, b: EEvent) => a.tick - b.tick || EVENT_ORDER.indexOf(a.kind) - EVENT_ORDER.indexOf(b.kind);
+  const ev = eventCmp;
   c.notes.sort((a, b) => a.tick - b.tick);
   c.events.sort(ev);
   if (c.branches) {
@@ -455,8 +489,9 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
     return note;
   });
   const bars: BarLine[] = [];
-  for (const m of measures(course, contentEnd(course))) {
-    if (m.start > contentEnd(course)) break;
+  const cEnd = contentEnd(course);
+  for (const m of measures(course, cEnd)) {
+    if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
     const im = t.scrollImAt(m.start);
     bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}) });

@@ -244,8 +244,29 @@ export class EditorView {
    * 上下にスクロールして見る
    */
   lanesFull = true;
+  private fgCache: { src: GhostRow[]; on: boolean; out: GhostRow[] } | null = null;
   private get fullGhosts() {
-    return this.stack && this.lanesFull ? this.ghosts.filter((g) => g.chart) : [];
+    const on = this.stack && this.lanesFull;
+    const c = this.fgCache;
+    if (c && c.src === this.ghosts && c.on === on) return c.out;
+    const out = on ? this.ghosts.filter((g) => g.chart) : [];
+    this.fgCache = { src: this.ghosts, on, out };
+    return out;
+  }
+  /** 段の並びの表（譜面・ほかのレーンが変わったときだけ作り直す） */
+  private rowsCache: { fg: GhostRow[]; lanes: DelayLanes; map: [number, number][]; total: number; counts: number[] } | null = null;
+  private get rowsInfo() {
+    const fg = this.fullGhosts;
+    const lanes = this.lanes;
+    const c = this.rowsCache;
+    if (c && c.fg === fg && c.lanes === lanes) return c;
+    const map: [number, number][] = [];
+    for (let r = 0; r < lanes.rows; r++) map.push([0, r]);
+    const counts = fg.map((g) => this.geoOf(g).lanes.rows);
+    counts.forEach((n, i) => { for (let r = 0; r < n; r++) map.push([i + 1, r]); });
+    const info = { fg, lanes, map, total: map.length, counts };
+    this.rowsCache = info;
+    return info;
   }
   private geoCache = new WeakMap<EChart, GhostGeo>();
   private geoOf(g: GhostRow): GhostGeo {
@@ -272,19 +293,11 @@ export class EditorView {
   }
   /** 段の並び（譜面ごと）: [譜面の番号（0 = 自分、1〜 = ほかのレーン）, その譜面の中の段] */
   private get rowMap(): [number, number][] {
-    const out: [number, number][] = [];
-    for (let r = 0; r < this.lanes.rows; r++) out.push([0, r]);
-    this.fullGhosts.forEach((g, i) => {
-      const n = this.geoOf(g).lanes.rows;
-      for (let r = 0; r < n; r++) out.push([i + 1, r]);
-    });
-    return out;
+    return this.rowsInfo.map;
   }
   /** 段の数（自分のレーンの #DELAY の段 ＋ ほかのレーンの段） */
   get totalRows() {
-    let n = this.lanes.rows;
-    for (const g of this.fullGhosts) n += this.geoOf(g).lanes.rows;
-    return n;
+    return this.rowsInfo.total;
   }
   /** 段 r の頭の位置（段 0 の頭から。途中の値はスクロール中）。譜面が変わる所は少し間をあける */
   private rowOff(r: number) {
@@ -294,10 +307,11 @@ export class EditorView {
   /** rowOff の計算（L を使わない形。L の中からも呼ぶ）。lgap = 譜面の境目（命令の段＋名前の帯） */
   private rowOffWith(r: number, laneH: number, subGap: number, lgap: number) {
     let gap = 0;
-    let start = this.lanes.rows;
-    for (const g of this.fullGhosts) {
+    const info = this.rowsInfo;
+    let start = info.lanes.rows;
+    for (const n of info.counts) {
       gap += Math.min(1, Math.max(0, r - (start - 1))) * lgap;
-      start += this.geoOf(g).lanes.rows;
+      start += n;
     }
     return r * (laneH + subGap) + gap;
   }
@@ -539,12 +553,18 @@ export class EditorView {
   }
 
   /** 曲の長さ（秒）。音源がなければ最後のノーツ＋2 秒 */
+  private lenKey = '';
+  private lenT = 0;
   private songLength() {
-    const notes = this.ed.course.notes;
-    let last = 0;
-    for (const n of notes) last = Math.max(last, n.endTick ?? n.tick);
-    const lastT = notes.length ? this.ed.timing.tickToTime(last) + 2 : 0;
-    return Math.max(this.duration, lastT, 1);
+    const key = `${this.ed.undoCount}|${this.ed.courseIndex}|${this.ed.branch}`;
+    if (key !== this.lenKey) {
+      this.lenKey = key;
+      const notes = this.ed.course.notes;
+      let last = 0;
+      for (const n of notes) last = Math.max(last, n.endTick ?? n.tick);
+      this.lenT = notes.length ? this.ed.timing.tickToTime(last) + 2 : 0;
+    }
+    return Math.max(this.duration, this.lenT, 1);
   }
 
   private scrubTo(y: number) {
@@ -1834,6 +1854,9 @@ export class EditorView {
    * 密度推移（Malody の左の列と同じ縦向き。下が曲の始め、上が終わり）。
    * 曲を短い区間に分け、1 秒あたりのノーツ数を右端から左へ伸びる棒で描く。今の位置に横線
    */
+  private densKey = '';
+  private densD = new Float32Array(0);
+  private densK = new Float32Array(0);
   private drawDensity(L: Lay) {
     const ctx = this.ctx;
     const s = L.s;
@@ -1844,17 +1867,26 @@ export class EditorView {
     const step = Math.max(3, 7 * s);
     const n = Math.max(8, Math.floor((g.bottom - g.top) / step));
     // ドン（赤）とカッ（水色）を分けて数え、右端からドン → カッの順に積む（連打・風船はドンに数える）
-    const dons = new Float32Array(n);
-    const kas = new Float32Array(n);
-    const timing = this.ed.timing;
-    for (const note of this.ed.course.notes) {
-      const t = timing.tickToTime(note.tick);
-      const i = Math.floor((t / len) * n);
-      if (i < 0 || i >= n) continue;
-      // ドンは 1・3、カッは 2・4 だけ数える（連打・風船は数えない）
-      if (note.type === 'ka' || note.type === 'bigKa') kas[i] += 1;
-      else if (note.type === 'don' || note.type === 'bigDon') dons[i] += 1;
+    // 譜面が変わったときだけ数え直す
+    const key = `${this.ed.undoCount}|${this.ed.courseIndex}|${this.ed.branch}|${n}|${len}`;
+    if (this.densKey !== key) {
+      this.densKey = key;
+      const dn = new Float32Array(n);
+      const kn = new Float32Array(n);
+      const timing = this.ed.timing;
+      for (const note of this.ed.course.notes) {
+        const t = timing.tickToTime(note.tick);
+        const i = Math.floor((t / len) * n);
+        if (i < 0 || i >= n) continue;
+        // ドンは 1・3、カッは 2・4 だけ数える（連打・風船は数えない）
+        if (note.type === 'ka' || note.type === 'bigKa') kn[i] += 1;
+        else if (note.type === 'don' || note.type === 'bigDon') dn[i] += 1;
+      }
+      this.densD = dn;
+      this.densK = kn;
     }
+    const dons = this.densD;
+    const kas = this.densK;
     let max = 0;
     for (let i = 0; i < n; i++) max = Math.max(max, dons[i] + kas[i]);
     const bh = ((g.bottom - g.top) / n) * 0.8;
@@ -1870,7 +1902,7 @@ export class EditorView {
       ctx.fillRect(x1 - w, y, w - wd, bh);
     }
     // 今の位置
-    const now = timing.tickToTime(this.pos);
+    const now = this.ed.timing.tickToTime(this.pos);
     const y = g.bottom - Math.min(1, Math.max(0, now / len)) * (g.bottom - g.top);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(L.colLine1, y - Math.max(1, 1.5 * s), R.densW * s, Math.max(2, 3 * s));

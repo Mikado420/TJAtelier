@@ -1128,6 +1128,15 @@ function overlapsBranch() {
 }
 
 let brGhostKey = '';
+const brGhostCache: ({ fp: string; bpm: number; offset: number; chart: EChart } | undefined)[] = [];
+/** 譜面の中身の目印（音符・命令の位置と値） */
+function brPrint(c: ECourse) {
+  let h = 0;
+  const mix = (v: number) => { h = (Math.imul(h ^ v, 2654435761) + 0x9e3779b9) | 0; };
+  for (const n of c.notes) { mix(n.tick); mix(n.type.length * 7 + n.type.charCodeAt(0)); mix(n.endTick ?? -1); mix(n.hits ?? -1); }
+  for (const e of c.events) { mix(e.tick); mix(e.kind.charCodeAt(0) + e.kind.length * 31); const v = e as { value?: number; on?: boolean; num?: number; den?: number; im?: number; text?: string }; mix(Math.round((v.value ?? 0) * 1e6)); mix(v.on ? 1 : 0); mix(v.num ?? 0); mix(v.den ?? 0); mix(Math.round((v.im ?? 0) * 1e6)); mix(v.text?.length ?? 0); }
+  return `${c.notes.length}|${c.events.length}|${h}|${c.scrollMode ?? ''}`;
+}
 /** 区間・分岐の切り替え・下に並べる分岐を、譜面に合わせる */
 function syncBranches(force = false) {
   const main = ed.mainCourse;
@@ -1151,11 +1160,15 @@ function syncBranches(force = false) {
   for (const k of [0, 1, 2] as BranchNo[]) {
     if (k === ed.branch) continue;
     const path = k ? branchPath(main, k) : { ...main, branches: undefined };
-    const chart: EChart = { ...ed.chart, courses: [path] };
-    const pc = toPlayable(chart, path);
+    // 中身が前と同じなら、前の譜面をそのまま使う（描くための表を作り直さない）
+    const fp = brPrint(path);
+    const old = brGhostCache[k];
+    const chart: EChart = old && old.fp === fp && old.bpm === ed.chart.bpm && old.offset === ed.chart.offset ? old.chart : { ...ed.chart, courses: [path] };
+    brGhostCache[k] = { fp, bpm: ed.chart.bpm, offset: ed.chart.offset, chart };
+    // 並べるときは譜面（chart）から描くので、秒の表は作らない
     rows.push({
       id: `br:${k}`, name: BRANCH_NAME[k], color: BRANCH_COLOR[k], main: false,
-      notes: pc.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: pc.bars.map((b) => b.time), chart,
+      notes: [], bars: [], chart,
       focus: bs.map((b) => [b.start, b.end] as [number, number]),
     });
   }
