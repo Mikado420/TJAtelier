@@ -1612,13 +1612,12 @@ export class Renderer {
   }
 
   /**
-   * 左下の名札: アプリのボタンと同じ斜め（8°）の帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
+   * 左下の名札: 右端の丸い帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
    * 左に丸い「1P」（プレイヤーの色）。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
    */
   private drawNameplate(badge = '1P', badgeColor = Renderer.PLAYER_COLOR[1][2], title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
     const OUT = '#14141c';
-    const T = 0.1405;
     const y0 = 466;
     const th = 30;
     const nh = 44;
@@ -1628,24 +1627,20 @@ export class Renderer {
     const x = bx + 6; // 帯（丸の下から始める）
     const w = 252;
     // 平行四辺形（上の辺が右へずれる）。grow で縁の分だけ大きく
-    const para = (qx: number, qw: number, grow = 0) => {
-      const k = (H + grow * 2) * T;
+    // 角の丸い帯（右端は半円）。grow で縁の分だけ大きく
+    const band = (qx: number, qw: number, grow = 0) => {
       ctx.beginPath();
-      ctx.moveTo(qx - grow + k / 2, y0 - grow);
-      ctx.lineTo(qx + qw + grow + k / 2, y0 - grow);
-      ctx.lineTo(qx + qw + grow - k / 2, y0 + H + grow);
-      ctx.lineTo(qx - grow - k / 2, y0 + H + grow);
-      ctx.closePath();
+      roundRect(ctx, qx - grow, y0 - grow, qw + grow * 2, H + grow * 2, H / 2 + grow);
     };
     ctx.save();
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'miter';
     // 帯
-    para(x, w, 5);
+    band(x, w, 5);
     ctx.fillStyle = OUT;
     ctx.fill();
     ctx.save();
-    para(x, w);
+    band(x, w);
     ctx.clip();
     const g = ctx.createLinearGradient(0, y0, 0, y0 + th);
     g.addColorStop(0, '#bff2ff');
