@@ -1681,20 +1681,6 @@ function viewRows() {
     <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }
-function playSettingRows() {
-  return `
-    <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-    ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
-    ${stSwitch('pauseButton', 'ポーズボタンを表示', settings.pauseButton)}
-    ${stSwitch('broadcast', '動画用の画面', settings.broadcast)}
-    ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
-    ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
-    ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
-    ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}
-    <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}
-    <div class="st-row"><span>譜面分岐</span><div class="st-seg four">${BRANCH_MODES.map(([v, l]) => `<button data-brmode="${v}" class="${settings.branch === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
-}
 const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', 'N'], ['E', 'E'], ['M', 'M']];
 function onBranchModeClick(b: HTMLButtonElement) {
   settings.branch = b.dataset.brmode as typeof settings.branch;
@@ -2411,13 +2397,25 @@ play.onPauseOpen = () => {
   // オンライン対戦: 曲は止まらない。やりなおし・オートは無く、「やめる」で部屋に戻る
   $('pauseBack').textContent = play.isOnline ? 'やめる' : playFromHome ? '曲えらびへ' : 'エディタへ';
   $('pauseMenu').querySelector('h2')!.textContent = play.isOnline ? 'メニュー' : 'ポーズ';
-  $('pauseSettings').innerHTML = `
-    <h3>プレイ</h3>
-    ${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}
-    ${playSettingRows()}
-    <h3>音量</h3>
-    ${volumeRows()}`;
+  renderPauseSettings();
 };
+/** ポーズの画面の設定（左の列のタブで、プレイ・表示・音量を切り替える） */
+let pauseTab: 'play' | 'view' | 'vol' = 'play';
+function renderPauseSettings() {
+  $('pauseTabs').innerHTML = SETTINGS_TABS.filter(([k]) => k === 'play' || k === 'view' || k === 'vol')
+    .map(([k, l, d]) => `<button data-ptab="${k}" class="${k === pauseTab ? 'on' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('');
+  $('pauseSettings').innerHTML =
+    pauseTab === 'play' ? `${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}${playRows()}`
+    : pauseTab === 'view' ? viewRows()
+    : volumeRows();
+  play.refreshPauseMode();
+}
+$('pauseTabs').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-ptab]');
+  if (!b) return;
+  pauseTab = b.dataset.ptab as typeof pauseTab;
+  renderPauseSettings();
+});
 $('pauseSettings').addEventListener('click', (e) => {
   const t = e.target as HTMLElement;
   const pm = t.closest<HTMLButtonElement>('[data-pmode]');

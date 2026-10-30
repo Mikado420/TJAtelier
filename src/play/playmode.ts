@@ -484,6 +484,11 @@ export class PlayMode {
   }
 
   /** ポーズ画面の「プレイ / オート」の表示 */
+  /** ポーズの画面の「プレイ / オート」を今の設定に合わせる（設定の欄を描き直したとき） */
+  refreshPauseMode() {
+    this.paintPauseMode();
+  }
+
   private paintPauseMode() {
     this.root.querySelectorAll<HTMLButtonElement>('[data-pmode]').forEach((b) => {
       const on = (b.dataset.pmode === 'auto') === !!this.settings.auto;

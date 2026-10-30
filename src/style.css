@@ -1504,7 +1504,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   --sk: calc(44px * var(--tan)); clip-path: none; padding-left: calc(var(--sk) + 10px);
 }
 .pause-menu .pm-main button.primary { background: var(--accent); }
-.pause-menu .pm-main button:last-child { margin-top: auto; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); clip-path: none; }
+.pause-menu .pm-main #pauseBack { margin-top: auto; background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); clip-path: none; }
 .pm-set { min-height: 0; overflow-y: auto; touch-action: pan-y; padding: 10px 14px; }
 .pause-menu .pm-set .st-row { min-height: 36px; }
 .pause-menu .pm-set .st-seg button { padding: 0 4px; font-size: 12px; border-radius: 0; }
@@ -1649,7 +1649,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   width: min(900px, calc(100% - 24px));
 }
 .pm-main { position: sticky; top: 0; align-self: start; min-height: 0; overflow: visible; padding: 16px; gap: 8px; }
-.pause-menu .pm-main button:last-child { margin-top: 12px; }
+.pause-menu .pm-main #pauseBack { margin-top: 12px; }
 .pm-set { overflow: visible; padding: 8px 22px 24px; }
 .pm-set h3 { margin: 18px 0 4px; font-size: 12px; font-weight: 800; letter-spacing: 0.12em; color: var(--accent-hi); }
 .pm-set h3:first-child { margin-top: 8px; }
@@ -2670,3 +2670,18 @@ button, input, select, textarea { font-family: inherit; }
 .st-nav svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .st-pane { flex: 1; min-width: 0; }
 @media (max-width: 700px) { .sheet-body .st-nav button { padding: 0 10px; gap: 8px; font-size: 15px; } }
+
+/* ポーズの画面: 操作のボタンの下に、設定のタブ（プレイ・表示・音量） */
+.pm-tabs { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.15); }
+.pause-menu .pm-main .pm-tabs button { display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--btn); box-shadow: none; margin: 0; }
+.pause-menu .pm-main .pm-tabs button.on { background: var(--accent); }
+.pm-tabs svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+/* 縦が狭い画面（スマホの横向き）: 操作のボタンを低くし、タブは 3 つ横に並べる */
+@media (max-height: 520px) {
+  .pm-main { padding: 10px 12px; gap: 5px; }
+  .pause-menu .pm-main h2 { font-size: 16px; margin-bottom: 2px; }
+  .pause-menu .pm-main button { height: 38px; }
+  .pause-menu .pm-main #pauseBack { margin-top: 8px; }
+  .pm-tabs { flex-direction: row; margin-top: 8px; padding-top: 8px; }
+  .pause-menu .pm-main .pm-tabs button { flex: 1; min-width: 0; height: 50px; flex-direction: column; justify-content: center; gap: 2px; padding: 0 2px; font-size: 12px; }
+}
