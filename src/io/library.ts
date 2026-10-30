@@ -30,6 +30,8 @@ export interface SongEntry {
   videoOffset?: number;
   /** ジャケットの画像のファイル名（無ければ undefined） */
   jacket?: string;
+  /** 背景の画像のファイル名（無ければ undefined） */
+  bgImage?: string;
   demoStart: number;
   updatedAt: number;
 }
@@ -49,6 +51,7 @@ const kChart = (id: string) => `lib-chart-${id}`;
 const kAudio = (id: string) => `lib-audio-${id}`;
 const kVideo = (id: string) => `lib-video-${id}`;
 const kJacket = (id: string) => `lib-jacket-${id}`;
+const kBgImage = (id: string) => `lib-bgimage-${id}`;
 
 /** ジャケットの画像 */
 export interface JacketFile { name: string; data: ArrayBuffer }
@@ -104,6 +107,7 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
     folders: prev.folders ?? (prev.folder ? [prev.folder] : []),
     ...(prev.video ? { video: prev.video, videoOffset: prev.videoOffset } : {}),
     ...(prev.jacket ? { jacket: prev.jacket } : {}),
+    ...(prev.bgImage ? { bgImage: prev.bgImage } : {}),
     audioName: chart.wave,
     demoStart: chart.demoStart,
     updatedAt: Date.now(),
@@ -185,6 +189,7 @@ export async function deleteSong(id: string) {
   await dbDel(kAudio(id));
   await dbDel(kVideo(id));
   await dbDel(kJacket(id));
+  await dbDel(kBgImage(id));
   await writeIndex((list) => list.filter((x) => x.id !== id));
 }
 
@@ -214,6 +219,15 @@ export async function saveSongJacket(id: string, j: JacketFile | null) {
 }
 
 export const loadSongJacket = (id: string) => dbGet<JacketFile>(kJacket(id));
+
+/** 背景の画像を入れる・消す（null で消す） */
+export async function saveSongBgImage(id: string, j: JacketFile | null) {
+  if (j) await dbPut(kBgImage(id), j);
+  else await dbDel(kBgImage(id));
+  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, bgImage: j?.name } : x)));
+}
+
+export const loadSongBgImage = (id: string) => dbGet<JacketFile>(kBgImage(id));
 
 /** 動画のずれ（秒）を変える */
 export async function setVideoOffset(id: string, sec: number) {

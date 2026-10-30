@@ -2,7 +2,7 @@
  * バックアップ（曲・音源・背景の動画・フォルダ・遊んだ記録をまとめて 1 つの .zip に書き出す・戻す）。
  * 音源が多いと大きくなるので、だいたい 80MB ごとに分けて書き出す（戻すときは全部まとめて選べばよい）
  */
-import { addFolder, listFolders, listSongs, loadSongAudio, loadSongData, loadSongJacket, loadSongVideo, restoreSong, saveSongJacket, saveSongVideo, type SongData, type SongEntry } from './library';
+import { addFolder, listFolders, listSongs, loadSongAudio, loadSongData, loadSongBgImage, loadSongJacket, loadSongVideo, restoreSong, saveSongBgImage, saveSongJacket, saveSongVideo, type SongData, type SongEntry } from './library';
 import type { ZipEntry } from './zip';
 import { writeZip } from './zip';
 
@@ -18,7 +18,7 @@ interface Manifest {
   parts: number;
   folders: string[];
   best: Record<string, { score: number; crown: string }>;
-  songs: { entry: SongEntry; audioName: string | null; videoName?: string; videoFromAudio?: boolean; jacketName?: string }[];
+  songs: { entry: SongEntry; audioName: string | null; videoName?: string; videoFromAudio?: boolean; jacketName?: string; bgName?: string }[];
 }
 
 const stamp = (d = new Date()) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
@@ -57,7 +57,9 @@ export async function exportBackup(save: (blob: Blob, name: string) => Promise<v
       if (v && !v.fromAudio) files.push({ name: `video/${s.id}/${v.name}`, data: new Uint8Array(v.data) });
       const j = s.jacket ? await loadSongJacket(s.id) : null;
       if (j) files.push({ name: `jacket/${s.id}/${j.name}`, data: new Uint8Array(j.data) });
-      list.push({ entry: s, audioName: a?.name ?? null, ...(v ? { videoName: v.name, videoFromAudio: v.fromAudio } : {}), ...(j ? { jacketName: j.name } : {}) });
+      const bi = s.bgImage ? await loadSongBgImage(s.id) : null;
+      if (bi) files.push({ name: `bgimage/${s.id}/${bi.name}`, data: new Uint8Array(bi.data) });
+      list.push({ entry: s, audioName: a?.name ?? null, ...(v ? { videoName: v.name, videoFromAudio: v.fromAudio } : {}), ...(j ? { jacketName: j.name } : {}), ...(bi ? { bgName: bi.name } : {}) });
       progress?.(++done / Math.max(1, songs.length));
     }
     const m: Manifest = { app: 'TJAtelier', version: 1, createdAt: Date.now(), part: gi + 1, parts: groups.length, folders, best, songs: list };
@@ -79,7 +81,7 @@ export async function importBackup(entries: ZipEntry[]): Promise<number> {
   if (m.app !== 'TJAtelier') throw new Error('TJAtelier のバックアップではありません');
   const byName = new Map(entries.map((e) => [e.name, e]));
   let n = 0;
-  for (const { entry, audioName, videoName, videoFromAudio, jacketName } of m.songs) {
+  for (const { entry, audioName, videoName, videoFromAudio, jacketName, bgName } of m.songs) {
     const c = byName.get(`charts/${entry.id}.json`);
     if (!c) continue;
     const data = JSON.parse(new TextDecoder().decode(c.data)) as SongData;
@@ -93,6 +95,8 @@ export async function importBackup(entries: ZipEntry[]): Promise<number> {
     }
     const jf = jacketName ? byName.get(`jacket/${entry.id}/${jacketName}`) : undefined;
     if (jf) await saveSongJacket(entry.id, { name: jacketName!, data: jf.data.buffer.slice(jf.data.byteOffset, jf.data.byteOffset + jf.data.byteLength) as ArrayBuffer });
+    const bf = bgName ? byName.get(`bgimage/${entry.id}/${bgName}`) : undefined;
+    if (bf) await saveSongBgImage(entry.id, { name: bgName!, data: bf.data.buffer.slice(bf.data.byteOffset, bf.data.byteOffset + bf.data.byteLength) as ArrayBuffer });
     n++;
   }
   // 遊んだ記録は、良いほうを残す

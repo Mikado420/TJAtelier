@@ -596,6 +596,30 @@ export class PlayMode {
     if (this.active) this.applySettings();
   }
 
+  private bgImg: HTMLImageElement | null = null;
+  private bgDim: HTMLElement | null = null;
+  private bgImgUrl = '';
+
+  /** 背景の画像を決める（null で無し）。動画を流さないときに、全面に出す */
+  setBgImage(src: Blob | null) {
+    if (this.bgImgUrl) URL.revokeObjectURL(this.bgImgUrl);
+    this.bgImgUrl = src ? URL.createObjectURL(src) : '';
+    if (src && !this.bgImg) {
+      const im = document.createElement('img');
+      im.className = 'play-bgimg hidden';
+      im.alt = '';
+      im.setAttribute('aria-hidden', 'true');
+      const dim = document.createElement('div');
+      dim.className = 'play-vdim hidden';
+      this.root.prepend(dim);
+      this.root.prepend(im);
+      this.bgImg = im;
+      this.bgDim = dim;
+    }
+    if (this.bgImg) this.bgImg.src = this.bgImgUrl || '';
+    if (this.active) this.applySettings();
+  }
+
   setVideoOffset(sec: number) {
     this.videoOffset = sec;
   }
@@ -610,14 +634,22 @@ export class PlayMode {
 
   /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */
   private applyVideo(resize = true) {
-    const mode = this.videoMode;
+    const vmode = this.videoMode;
+    // 背景の画像（動画を流さないとき。動画と同じく全面に、同じ暗さで）
+    const img = !vmode && !!this.bgImgUrl && !this.calibrating;
+    if (this.bgImg) {
+      this.bgImg.classList.toggle('hidden', !img);
+      this.bgDim!.classList.toggle('hidden', !img);
+      this.bgDim!.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
+    }
+    const mode = vmode || (img ? 'full' : '');
     const R = this.renderer;
     const v = this.video;
     if (v) {
-      v.classList.toggle('hidden', !mode);
-      this.vdim?.classList.toggle('hidden', !mode);
+      v.classList.toggle('hidden', !vmode);
+      this.vdim?.classList.toggle('hidden', !vmode);
       if (this.vdim) this.vdim.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
-      if (!mode) v.pause();
+      if (!vmode) v.pause();
     }
     if (R.videoMode !== mode) {
       R.videoMode = mode;

@@ -29,7 +29,7 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, setCurrentId, setVideoOffset } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
@@ -1420,6 +1420,7 @@ function renderSheet() {
       <label class="field"><span>音源名</span><input type="text" data-meta="wave" value="${esc(c.wave)}" placeholder="${esc(ed.audio?.name ?? '曲名.ogg')}" autocomplete="off"></label>
       <label class="field"><span>譜面作者</span><input type="text" data-hdr="MAKER" value="${esc(hdrOf(c, 'MAKER'))}" autocomplete="off"></label>
       <div class="field"><span>ジャケット</span><div class="vid-row jk-row">${currentJacket ? `<img class="jk-thumb" src="${currentJacket.url}" alt="">` : ''}<b>${esc(currentJacket?.name ?? '')}</b><button data-act="pickJacket">${currentJacket ? '変える' : '選ぶ'}</button>${currentJacket ? '<button data-act="rmJacket" class="danger">外す</button>' : ''}</div></div>
+      <div class="field"><span>背景の画像</span><div class="vid-row jk-row">${currentBg ? `<img class="jk-thumb bg" src="${currentBg.url}" alt="">` : ''}<b>${esc(currentBg?.name ?? '')}</b><button data-act="pickBg">${currentBg ? '変える' : '選ぶ'}</button>${currentBg ? '<button data-act="rmBg" class="danger">外す</button>' : ''}</div></div>
       ${currentVideo ? `<div class="field"><span>背景の動画</span><div class="vid-row"><b>${esc(currentVideo.name)}</b><button data-act="rmVideo" class="danger">外す</button></div></div>
       <label class="field"><span>動画のずれ (秒)</span><input type="number" step="0.01" inputmode="decimal" data-voff value="${currentVideo.offset}"></label>` : ''}
 
@@ -2074,6 +2075,9 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     if (sng.jacket) {
       try { await saveSongJacket(id, { name: sng.jacket.name, data: await sng.jacket.read() }); } catch { /* 読めない */ }
     }
+    if (sng.bgImage) {
+      try { await saveSongBgImage(id, { name: sng.bgImage.name, data: await sng.bgImage.read() }); } catch { /* 読めない */ }
+    }
     addedAt[idx] = id;
     done++;
     step();
@@ -2241,6 +2245,9 @@ async function saveZipOf(chart: EChart) {
   if (currentJacket && hdrOf(chart, 'PREIMAGE') === currentJacket.name) {
     files.push({ name: `${name}/${currentJacket.name}`, data: new Uint8Array(await (await fetch(currentJacket.url)).arrayBuffer()) });
   }
+  if (currentBg && hdrOf(chart, 'BGIMAGE') === currentBg.name && currentBg.name !== currentJacket?.name) {
+    files.push({ name: `${name}/${currentBg.name}`, data: new Uint8Array(await (await fetch(currentBg.url)).arrayBuffer()) });
+  }
   const tja = encodeSJIS(tjaText(chart));
   files.unshift({ name: `${name}/${name}.tja`, data: tja, compress: true });
   download(await writeZip(files), `${name}.zip`);
@@ -2273,6 +2280,27 @@ async function fileAction(act: string) {
     const name = COURSE_NAMES.find((n) => !used.has(n)) ?? 'Edit';
     ed.addCourse(name, act === 'dupCourse' ? ed.course.level : 1, act === 'dupCourse' ? ed.course : undefined);
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
+  } else if (act === 'pickBg') {
+    if (!currentSongId) return;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.addEventListener('change', async () => {
+      const f = inp.files?.[0];
+      if (!f || !currentSongId) return;
+      const name = f.name.replace(/[\\/:*?"<>|]+/g, '_') || 'bg.png';
+      await saveSongBgImage(currentSongId, { name, data: await f.arrayBuffer() });
+      ed.mutate(() => setHdr(ed.chart, 'BGIMAGE', name));
+      await refreshJacket(currentSongId);
+      if (sheet === 'info') renderSheet();
+    });
+    inp.click();
+  } else if (act === 'rmBg') {
+    if (!currentSongId) return;
+    await saveSongBgImage(currentSongId, null);
+    ed.mutate(() => setHdr(ed.chart, 'BGIMAGE', ''));
+    await refreshJacket(currentSongId);
+    renderSheet();
   } else if (act === 'pickJacket') {
     if (!currentSongId) return;
     const inp = document.createElement('input');
@@ -2559,11 +2587,19 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
 
 /** 開いている曲のジャケット（曲の情報・動画用の画面に出す） */
 let currentJacket: { name: string; url: string } | null = null;
+/** 開いている曲の背景の画像（プレイで、動画を流さないときに全面に出す） */
+let currentBg: { name: string; url: string } | null = null;
+/** ジャケットと背景の画像を読み直す */
 async function refreshJacket(id: string | null) {
   if (currentJacket) URL.revokeObjectURL(currentJacket.url);
+  if (currentBg) URL.revokeObjectURL(currentBg.url);
   currentJacket = null;
+  currentBg = null;
   const j = id ? await loadSongJacket(id).catch(() => undefined) : undefined;
   if (j && id === currentSongId) currentJacket = { name: j.name, url: URL.createObjectURL(new Blob([j.data])) };
+  const g = id ? await loadSongBgImage(id).catch(() => undefined) : undefined;
+  if (g && id === currentSongId) currentBg = { name: g.name, url: URL.createObjectURL(new Blob([g.data])) };
+  play.setBgImage(g && id === currentSongId ? new Blob([g.data]) : null);
 }
 
 /** 開いている曲の背景の動画（プレイで流す） */

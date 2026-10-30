@@ -25,6 +25,8 @@ export interface LoadedSong {
   video?: AudioSrc & { fromAudio?: boolean };
   /** ジャケットの画像（PREIMAGE: の名前 → 同じフォルダの jacket など） */
   jacket?: AudioSrc;
+  /** 背景の画像（BGIMAGE: の名前） */
+  bgImage?: AudioSrc;
   /** 同じフォルダか上のフォルダにある genre.ini の GenreName（入れるフォルダ。上にもあれば "親/子"） */
   genre?: string;
 }
@@ -206,9 +208,12 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
       mine.find((v) => /jacket|cover|jk|preimage/i.test(base(v.name))) ??
       (mine.length === 1 ? mine[0] : undefined);
     if (jacket) used.add(jacket);
+    const bgImg = bgi ? freeI.find((v) => v !== jacket && base(v.name).toLowerCase() === bgi && dir(v.name) === dir(t.name)) ?? freeI.find((v) => v !== jacket && base(v.name).toLowerCase() === bgi) : undefined;
+    if (bgImg) used.add(bgImg);
     const named = (x: Src): AudioSrc => ({ name: base(x.name), size: x.size, read: x.read });
     const song: LoadedSong = { chart, audio: audio ? named(audio) : null, tjaName: t.name, genre: genreOf(t.name) };
     if (jacket) song.jacket = named(jacket);
+    if (bgImg) song.bgImage = named(bgImg);
     if (video) {
       // 音源が無ければ、動画の音を音源にする（変換しない。動画は音源と同じファイルを使う）
       if (!song.audio) {
