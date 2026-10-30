@@ -1643,6 +1643,8 @@ export class Renderer {
    * 左に丸い「1P」（プレイヤーの色）。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
    */
   private drawNameplate(badge = '1P', badgeColor = Renderer.PLAYER_COLOR[1][2], title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
+    const pv = (globalThis as unknown as { __plate?: string }).__plate;
+    if (pv) { this.drawPlateSq(pv, badge, badgeColor, title, name); return; }
     const ctx = this.ctx;
     const OUT = '#14141c';
     const y0 = 466;
@@ -1732,6 +1734,93 @@ export class Renderer {
     ctx.fill();
     ctx.font = `900 ${badge.length > 2 ? 30 : 36}px ${FONT}`;
     outlinedText(ctx, badge, bx, by + 2, '#fff', OUT, 7);
+    ctx.restore();
+  }
+
+  /** 試作: 四角い名札 */
+  private drawPlateSq(v: string, badge: string, badgeColor: string, title: string, name: string) {
+    const ctx = this.ctx;
+    const OUT = '#14141c';
+    const y0 = 466, th = 30, nh = 44, H = th + nh;
+    const L = 8, R = 330;
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    const titleBand = (x: number, y: number, w: number, h: number) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, '#bff2ff'); g.addColorStop(0.45, '#5fd0ea'); g.addColorStop(1, '#2a8fc4');
+      ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.fillRect(x + 6, y + 4, w - 12, 3);
+    };
+    const nameBox = (x: number, y: number, w: number, h: number) => {
+      ctx.fillStyle = '#fff'; ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.fillRect(x, y + h * 0.62, w, h * 0.38);
+    };
+    const badgeBox = (x: number, y: number, w: number, h: number, fs = 34) => {
+      const bg = ctx.createLinearGradient(0, y, 0, y + h);
+      bg.addColorStop(0, shade(badgeColor, 0.45)); bg.addColorStop(1, shade(badgeColor, -0.3));
+      ctx.fillStyle = bg; ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x, y, w, h * 0.35);
+      ctx.font = `900 ${fs}px ${FONT}`;
+      outlinedText(ctx, badge, x + w / 2, y + h / 2 + 2, '#fff', OUT, 7);
+    };
+    const texts = (left: number, right: number, ty: number, ny: number) => {
+      const mid = (left + right) / 2, room = right - left - 12;
+      ctx.font = `900 18px ${FONT}`;
+      ctx.fillStyle = '#0d3550';
+      ctx.strokeStyle = '#0d3550';
+      ctx.lineWidth = 1.6;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(title, mid, ty, room);
+      ctx.fillText(title, mid, ty, room);
+      let fs = 27;
+      ctx.font = `900 ${fs}px ${FONT}`;
+      while (fs > 14 && ctx.measureText(name).width > room) ctx.font = `900 ${--fs}px ${FONT}`;
+      outlinedText(ctx, name, mid, ny, '#1b1f23', '#fff', 6);
+    };
+    if (v === 'A') {
+      // 角帯＋角バッジ（今の形のまま角を立てる）
+      const bs = 88;
+      const bx = 10;
+      const x = bx + bs / 2;
+      ctx.fillStyle = OUT; ctx.fillRect(x - 5, y0 - 5, R - x + 10, H + 10);
+      titleBand(x, y0, R - x, th);
+      ctx.fillStyle = OUT; ctx.fillRect(x, y0 + th, R - x, 4);
+      nameBox(x, y0 + th + 4, R - x, nh - 4);
+      ctx.fillStyle = OUT; ctx.fillRect(bx - 5, y0 + H / 2 - bs / 2 - 5, bs + 10, bs + 10);
+      badgeBox(bx, y0 + H / 2 - bs / 2, bs, bs);
+      texts(bx + bs + 4, R, y0 + th / 2 + 1, y0 + th + 2 + nh / 2);
+    } else if (v === 'B') {
+      // 左のタブ（1P が帯の高さいっぱいの四角）
+      ctx.fillStyle = OUT; ctx.fillRect(L - 5, y0 - 5, R - L + 10, H + 10);
+      badgeBox(L, y0, 74, H);
+      ctx.fillStyle = OUT; ctx.fillRect(L + 74, y0, 4, H);
+      const x = L + 78;
+      titleBand(x, y0, R - x, th);
+      ctx.fillStyle = OUT; ctx.fillRect(x, y0 + th, R - x, 4);
+      nameBox(x, y0 + th + 4, R - x, nh - 4);
+      texts(x, R, y0 + th / 2 + 1, y0 + th + 2 + nh / 2);
+    } else if (v === 'C') {
+      // 段違い（称号の帯は右にずらし、1P は左上の四角）
+      const x = L + 78;
+      ctx.fillStyle = OUT; ctx.fillRect(L - 5, y0 - 5, R - L + 10, H + 10);
+      badgeBox(L, y0, 74, th, 22);
+      titleBand(L + 78, y0, R - L - 78, th);
+      ctx.fillStyle = OUT; ctx.fillRect(L, y0 + th, R - L, 4);
+      nameBox(L, y0 + th + 4, R - L, nh - 4);
+      ctx.fillStyle = badgeColor; ctx.fillRect(L, y0 + th + 4, 8, nh - 4);
+      texts(x, R, y0 + th / 2 + 1, y0 + th + 2 + nh / 2);
+      // 名前は全体の真ん中
+    } else if (v === 'D') {
+      // 枠（黒い枠の中に、1P・称号・名前をすき間をあけて並べる）
+      ctx.fillStyle = OUT; ctx.fillRect(L - 2, y0 - 6, R - L + 4, H + 12);
+      badgeBox(L + 4, y0 - 2, 66, H + 4, 30);
+      const x = L + 76;
+      titleBand(x, y0 - 2, R - x - 4, th);
+      nameBox(x, y0 + th + 2, R - x - 4, nh);
+      ctx.fillStyle = '#5fd0ea'; ctx.fillRect(x, y0 + H + 2, R - x - 4, 3);
+      texts(x, R - 4, y0 + th / 2 - 1, y0 + th + 2 + nh / 2);
+    }
     ctx.restore();
   }
 
