@@ -39,9 +39,14 @@ jobs:
 
       - name: 配信
         run: |
+          set +e
           npx wrangler deploy 2>&1 | tee deploy.log
+          st=${PIPESTATUS[0]}
+          set -e
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
           echo "::notice title=Worker URL::${URL:-見つかりません}"
+          # 失敗したら、wrangler の出力の最後を注釈に出す（ログを開かなくても理由が分かるように）
+          if [ "$st" -ne 0 ]; then echo "::error title=wrangler deploy::$(grep -v '^\s*$' deploy.log | tail -n 25 | tr '\n' ' ' | cut -c1-3000)"; exit "$st"; fi
 
       - name: 動作確認
         run: |
