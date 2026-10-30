@@ -1539,26 +1539,38 @@ export class Renderer {
       ctx.fillStyle = 'rgba(0,12,30,0.5)';
       ctx.fillRect(x0, LANE_TOP - 6, 316 - x0, 62);
 
-      // 難易度（丸いバッジ＋下に名前）
+      // 難易度（光沢のあるひし形にレベル、右に難易度名と星）
       const [label, col] = COURSE_LABEL[info.course] ?? [info.course, '#7b3fd1'];
-      const bx = 99;
-      const by = 394;
-      ctx.beginPath();
-      ctx.arc(bx, by, 40, 0, Math.PI * 2);
-      ctx.fillStyle = '#3a3a46';
+      const cx = 74;
+      const cy = 404;
+      const r = 52;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = '#0f1820';
+      roundRect(ctx, -r * 0.74, -r * 0.74, r * 1.48, r * 1.48, 8);
       ctx.fill();
-      ctx.beginPath();
-      ctx.arc(bx, by, 34, 0, Math.PI * 2);
-      ctx.fillStyle = col;
+      const dg = ctx.createLinearGradient(-r, -r, r, r);
+      dg.addColorStop(0, shade(col, 0.35));
+      dg.addColorStop(0.5, col);
+      dg.addColorStop(1, shade(col, -0.4));
+      ctx.fillStyle = dg;
+      roundRect(ctx, -r * 0.66, -r * 0.66, r * 1.32, r * 1.32, 6);
       ctx.fill();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
+      // 上の光沢
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      ctx.fillRect(-r * 0.66, -r * 0.66, r * 1.32, r * 0.4);
+      ctx.restore();
       ctx.textAlign = 'center';
-      ctx.font = `900 30px ${FONT}`;
-      outlinedText(ctx, `★${info.level}`, bx, by + 2, '#ffe25a', '#2a1640', 6);
-      ctx.font = `900 ${label.length > 3 ? 20 : 26}px ${FONT}`;
-      outlinedText(ctx, label, bx, by + 50, '#fff', '#2a1640', 6);
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${info.level >= 10 ? 38 : 44}px ${FONT}`;
+      outlinedText(ctx, String(info.level), cx, cy + 3, '#fff', shade(col, -0.55), 6);
+      ctx.textAlign = 'left';
+      ctx.font = `900 24px ${FONT}`;
+      outlinedText(ctx, label, cx + 58, cy - 12, '#fff', '#0f1820', 6);
+      ctx.font = `900 18px ${FONT}`;
+      ctx.fillStyle = '#ffe25a';
+      ctx.fillText('★'.repeat(Math.max(1, Math.min(5, Math.ceil(info.level / 2)))), cx + 58, cy + 20);
 
       // 名札（1P・称号・名前）
       this.drawNameplate();
@@ -2507,3 +2519,9 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+/** 色を明るく（k > 0）・暗く（k < 0）する */
+function shade(hex: string, k: number) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v: number) => Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k));
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
