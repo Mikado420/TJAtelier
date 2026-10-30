@@ -201,6 +201,8 @@ export interface GhostRow {
   bands?: { a: number; b: number; color: string; label: string }[];
   /** ここだけ明るく、ほかは暗くする範囲（そのレーンの tick。譜面分岐の区間） */
   focus?: [number, number][];
+  /** 見比べで鳴らしている */
+  compare?: boolean;
 }
 
 /** ほかのレーンを描くための表（譜面が変わったら作り直す） */
@@ -245,6 +247,9 @@ export class EditorView {
   branchNo = 0;
   /** 合作: ほかのレーンの名前をタップしたとき */
   onGhostTap: (id: string) => void = () => {};
+  /** ほかのレーンの名前の帯の「見比べ」ボタン */
+  onGhostCompare: ((id: string) => void) | null = null;
+  private cmpBoxes: { x1: number; x2: number; y1: number; y2: number; id: string }[] = [];
   /** 最後に描いたほかのレーンの名前の位置 */
   private ghostBoxes: { x1: number; x2: number; y1: number; y2: number; id: string }[] = [];
   onPlayToggle: () => void = () => {};
@@ -790,6 +795,10 @@ export class EditorView {
     const L = this.L;
     if (this.inBox(L.play, x, y)) return this.onPlayToggle();
     if (x <= L.colW) return;
+    {
+      const c = this.cmpBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
+      if (c && this.onGhostCompare) return this.onGhostCompare(c.id);
+    }
     if (this.stack && y >= L.tlTop && y <= L.tlBottom) {
       // ほかのレーンの名前をタップ → そのレーンへ
       const g = this.ghostBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
@@ -1606,6 +1615,7 @@ export class EditorView {
    * 横の位置は時刻でそろえる。譜面の間には名前と、その譜面の命令を出す
    */
   private drawFullGhosts(L: Lay) {
+    this.cmpBoxes = [];
     const gs = this.fullGhosts;
     if (!gs.length) return;
     const ctx = this.ctx;
@@ -1650,6 +1660,33 @@ export class EditorView {
       ctx.fillStyle = '#f4f4f4';
       const label = `${g.main ? '★' : ''}${g.name}`;
       ctx.fillText(label, x0 + 14 * s + 4, hy + hh / 2);
+      // 右の端: 見比べで鳴らすボタン（スピーカー）
+      if (this.onGhostCompare) {
+        const bh = hh - 4 * s;
+        const bw = bh * 1.5;
+        const bx = this.w - 10 * s - bw;
+        const by = hy + 2 * s;
+        const sk = bh * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(bx + sk, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw - sk, by + bh); ctx.lineTo(bx, by + bh); ctx.closePath();
+        ctx.fillStyle = g.compare ? C.play : '#2e353c';
+        ctx.fill();
+        const u = bh / 24;
+        const cx = bx + bw / 2 - 12 * u;
+        const cy = by;
+        ctx.save();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = Math.max(1.2, 2 * u);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx + 4 * u, cy + 9 * u); ctx.lineTo(cx + 8 * u, cy + 9 * u); ctx.lineTo(cx + 13 * u, cy + 5 * u); ctx.lineTo(cx + 13 * u, cy + 19 * u); ctx.lineTo(cx + 8 * u, cy + 15 * u); ctx.lineTo(cx + 4 * u, cy + 15 * u); ctx.closePath();
+        ctx.moveTo(cx + 16 * u, cy + 9 * u); ctx.quadraticCurveTo(cx + 18 * u, cy + 12 * u, cx + 16 * u, cy + 15 * u);
+        if (g.compare) { ctx.moveTo(cx + 18.5 * u, cy + 7 * u); ctx.quadraticCurveTo(cx + 22 * u, cy + 12 * u, cx + 18.5 * u, cy + 17 * u); }
+        ctx.stroke();
+        ctx.restore();
+        this.cmpBoxes.push({ x1: bx - 6 * s, x2: bx + bw + 6 * s, y1: hy - 4 * s, y2: hy + hh + 4 * s, id: g.id });
+      }
       const grads = geo.course.grads ?? [];
 
       // レーン（#DELAY で重なった所だけ下の段。ほかは暗く）

@@ -58,7 +58,17 @@ const fmtDate = (t: number) => {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
-type Panel = 'menu' | 'lanes' | 'members' | 'vers' | 'room' | 'newLane' | 'groups';
+type Panel = 'lanes' | 'members' | 'chat' | 'groups' | 'vers' | 'room' | 'newLane';
+/** 引き出しの左のタブ */
+const TABS: [Panel, string, string][] = [
+  ['lanes', 'レーン', 'M4 6h16M4 12h16M4 18h16'],
+  ['members', 'メンバー', 'M9 4.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zM2.5 20c.8-4 3.4-6 6.5-6s5.7 2 6.5 6M17 6.4a2.6 2.6 0 1 1 0 5.2M16 14.2c2.6.2 4.6 2 5.3 5'],
+  ['chat', 'チャット', 'M4 5h16v11H9l-5 4z'],
+  ['groups', '担当', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4z'],
+  ['vers', '版', 'M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16zM12 7v5l3 2'],
+  ['room', '部屋', 'M5 10h14v10H5zM8 10V7a4 4 0 0 1 8 0v3'],
+];
+const svg = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
 export class Collab {
   s: CollabSession | null = null;
@@ -86,6 +96,12 @@ export class Collab {
   private pendingShift = 0;
   private seed: { lanes: Lane[]; meta: Op; audio: AudioFile | null } | null = null;
   private chip: HTMLElement;
+  private railBtn: HTMLElement;
+  /** 引き出しを閉じる前に開いていたタブ */
+  private lastPanel: Panel = 'lanes';
+  /** 「…」を開いているレーン */
+  private laneMore = '';
+  private lastTag = '';
   private panelEl: HTMLElement;
   private chatEl: HTMLElement;
   private adoptEl: HTMLElement;
@@ -94,10 +110,18 @@ export class Collab {
 
   constructor(private h: CollabHost) {
     const stage = document.querySelector('.stage')!;
-    this.chip = document.createElement('div');
+    // 編集しているレーンの名前の札（レーンの左上）
+    this.chip = document.createElement('button');
     this.chip.id = 'collabChip';
-    this.chip.className = 'cchip hidden';
+    this.chip.className = 'ctag hidden';
     stage.appendChild(this.chip);
+    // 右のツールバーに、引き出しを開くボタン
+    this.railBtn = document.createElement('button');
+    this.railBtn.id = 'btnCollab';
+    this.railBtn.className = 'crail hidden';
+    this.railBtn.setAttribute('aria-label', 'オンライン作業');
+    (document.querySelector('.side') ?? stage).appendChild(this.railBtn);
+    this.railBtn.addEventListener('click', () => (this.panel ? this.closePanel() : this.openPanel(this.lastPanel)));
     this.adoptEl = document.createElement('div');
     this.adoptEl.className = 'cadopt hidden';
     stage.appendChild(this.adoptEl);
@@ -105,13 +129,13 @@ export class Collab {
     const root = document.getElementById('root') ?? document.body;
     this.panelEl = document.createElement('div');
     this.panelEl.id = 'cpanel';
-    this.panelEl.className = 'sheet cpanel hidden';
+    this.panelEl.className = 'cdrawer hidden';
     root.appendChild(this.panelEl);
     this.chatEl = document.createElement('div');
     this.chatEl.id = 'cchat';
-    this.chatEl.className = 'cchat hidden';
-    root.appendChild(this.chatEl);
-    this.chip.addEventListener('click', (e) => this.onChip(e));
+    this.chatEl.className = 'cchat';
+    // チャットは引き出しの「チャット」のタブの中に入れる（それまではどこにも置かない）
+    this.chip.addEventListener('click', () => this.openPanel('lanes'));
     this.panelEl.addEventListener('click', (e) => void this.onPanelClick(e));
     this.panelEl.addEventListener('change', (e) => this.onPanelChange(e));
     this.chatEl.addEventListener('click', (e) => this.onChatClick(e));
@@ -122,6 +146,7 @@ export class Collab {
       }
     });
     h.view.onGhostTap = (id) => this.openLane(id);
+    h.view.onGhostCompare = (id) => this.toggleCompare(id);
   }
 
   get active() {
@@ -248,6 +273,7 @@ export class Collab {
     void navigator.storage?.persist?.().catch(() => {});
     this.h.showEditor();
     this.chip.classList.remove('hidden');
+    this.railBtn.classList.remove('hidden');
     document.body.classList.add('collab');
     if (!createVkey && (await s.loadCache())) await this.onReset();
     this.renderChip();
@@ -261,6 +287,8 @@ export class Collab {
     this.s = null;
     this.laneId = '';
     this.chip.classList.add('hidden');
+    this.railBtn.classList.add('hidden');
+    this.lastTag = '';
     this.adoptEl.classList.add('hidden');
     this.lastAdopt = '';
     this.closePanel();
@@ -601,6 +629,7 @@ export class Collab {
         id, name: `${lane.course !== this.lane?.course && lane.name !== (COURSE_JA[lane.course] ?? lane.course) ? `${COURSE_JA[lane.course] ?? lane.course}・` : ''}${lane.name || '無題'}・${doc.members[lane.owner]?.name ?? ''}`, color: lane.color, main: lane.main,
         notes: d.course.notes.map((n) => ({ t: n.time, e: n.endTime, type: n.type })), bars: d.course.bars.map((b) => b.time), chart: d.chart,
         bands: this.provBands(lane),
+        compare: this.compare.has(id),
       });
     }
     this.h.view.ghosts = rows;
@@ -649,6 +678,7 @@ export class Collab {
       }
     }
     this.renderAdoptBar();
+    this.placeTag();
     // 送っていない変更の数が変わったら帯を描き直す
     if (s.pendingCount !== this.lastPend) {
       this.lastPend = s.pendingCount;
@@ -759,7 +789,7 @@ export class Collab {
     this.playTimer = window.setTimeout(() => void this.h.startPlayback(), wait);
   }
 
-  // ───── 帯（波形の左上） ─────
+  // ───── レーンの札・右のツールバーのボタン ─────
 
   renderChip() {
     const s = this.s;
@@ -769,37 +799,54 @@ export class Collab {
     const dot = s.status === 'online' ? 'on' : s.status === 'connecting' ? 'wait' : 'off';
     const pend = s.pendingCount;
     const lock = lane && !this.laneFree;
-    this.chip.innerHTML = `
-      <button data-cc="menu" class="cc-menu" aria-label="合作のメニュー"><i class="cc-dot ${dot}"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <button data-cc="lanes" class="cc-lane" style="--lc:${lane?.color ?? '#888'}">${lane ? `${lane.main ? '★' : ''}<b>${esc(lane.name || '無題')}</b><small>${esc(lane.course)}</small>${lock ? '<span class="cc-lock">🔒</span>' : ''}` : '<b>読み込み中…</b>'}</button>
-      <button data-cc="members" class="cc-mem"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-4 3.4-6 6.5-6s5.7 2 6.5 6"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.2c2.6.2 4.6 2 5.3 5"/></svg><b>${s.online.ids.length}</b></button>
-      <button data-cc="chat" class="cc-chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>${this.unread ? `<em>${this.unread > 99 ? '99+' : this.unread}</em>` : ''}</button>
-      ${pend ? `<span class="cc-pend" title="まだ送っていない変更">↑${pend}</span>` : ''}
-      ${doc && s.status !== 'online' ? `<span class="cc-off">${s.status === 'connecting' ? 'つないでいます' : 'オフライン'}</span>` : ''}`;
+    this.chip.style.setProperty('--lc', lane?.color ?? '#888');
+    this.chip.innerHTML = lane
+      ? `${lane.main ? '★ ' : ''}<b>${esc(lane.name || '無題')}</b>${lane.name !== COURSE_JA[lane.course] ? `<small>${esc(COURSE_JA[lane.course] ?? lane.course)}</small>` : ''}${lock ? '<span class="ct-lock">🔒</span>' : ''}${pend ? `<span class="ct-pend">↑${pend}</span>` : ''}`
+      : '';
+    void doc;
+    this.railBtn.innerHTML = `${svg(TABS[1][2])}<i class="cr-dot ${dot}"></i>${this.unread ? `<em>${this.unread > 99 ? '99+' : this.unread}</em>` : ''}`;
+    this.railBtn.classList.toggle('on', !!this.panel);
+    this.lastTag = '';
+    this.placeTag();
   }
 
-  private onChip(e: MouseEvent) {
-    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-cc]');
-    if (!b) return;
-    const k = b.dataset.cc!;
-    if (k === 'chat') this.toggleChat();
-    else this.openPanel(k as Panel);
+  /** レーンの札を、編集しているレーンの左上に置く */
+  private placeTag() {
+    if (!this.s) return;
+    const { view } = this.h;
+    const L = view.L;
+    const cv = (document.getElementById('editor') as HTMLElement).getBoundingClientRect();
+    const st = (this.chip.parentElement as HTMLElement).getBoundingClientRect();
+    const k = cv.width / Math.max(1, view.w);
+    const top = Math.round(cv.top - st.top + L.laneY * k);
+    const left = Math.round(cv.left - st.left + L.colW * k + 4);
+    const key = `${top}:${left}`;
+    if (key === this.lastTag) return;
+    this.lastTag = key;
+    this.chip.style.top = `${top}px`;
+    this.chip.style.left = `${left}px`;
   }
 
   // ───── 画面（パネル） ─────
 
   openPanel(p: Panel) {
-    this.h.stopPlayback();
     this.panel = p;
     if (p === 'vers') this.s?.cmd('vers');
+    // 右のツールバーのすぐ左に出す（左ではそのまま編集を続けられる）
+    const side = document.querySelector('.side')?.getBoundingClientRect();
+    this.panelEl.style.right = `${side ? Math.max(0, window.innerWidth - side.left) : 0}px`;
     this.panelEl.classList.remove('hidden');
     this.renderPanel();
+    this.renderChip();
   }
 
   closePanel() {
+    if (this.panel && this.panel !== 'newLane') this.lastPanel = this.panel;
     this.panel = null;
+    this.chatOpen = false;
     this.panelEl.classList.add('hidden');
     this.panelEl.innerHTML = '';
+    this.renderChip();
   }
 
   private rerenderPanel() {
@@ -814,11 +861,26 @@ export class Collab {
     const p = this.panel;
     const doc = this.doc;
     if (!p || !doc || !this.s) return;
-    const titles: Record<Panel, string> = { menu: 'オンライン作業', lanes: 'レーン', members: 'メンバーと権限', vers: '版の記録', room: '部屋', newLane: 'レーンを足す', groups: '担当' };
+    const s = this.s;
     const scroll = this.panelEl.querySelector('.sheet-body')?.scrollTop ?? 0;
-    this.panelEl.innerHTML = `<div class="sheet-panel"><div class="sheet-head"><div class="sheet-title">${p !== 'menu' ? '<button data-cp="back" class="icon cp-back" aria-label="戻る">‹</button>' : ''}<h2>${titles[p]}</h2></div><button data-cp="close" class="icon" aria-label="閉じる">×</button></div><div class="sheet-body">${this.panelBody(p, doc)}</div></div>`;
-    const body = this.panelEl.querySelector('.sheet-body');
-    if (body) body.scrollTop = scroll;
+    const tabOf = p === 'newLane' ? 'lanes' : p;
+    const tabs = TABS.map(([k, label, d]) => `<button data-cp="tab" data-p="${k}" class="${k === tabOf ? 'on' : ''}">${svg(d)}<span>${label}</span>${k === 'chat' && this.unread ? `<em>${this.unread > 99 ? '99+' : this.unread}</em>` : ''}</button>`).join('');
+    const faces = Object.values(doc.members)
+      .sort((a, b) => Number(s.online.ids.includes(b.id)) - Number(s.online.ids.includes(a.id)))
+      .slice(0, 8)
+      .map((m) => `<i class="cd-face ${s.online.ids.includes(m.id) ? 'on' : ''}" style="--mc:${m.color}" title="${esc(m.name)}">${esc([...m.name][0] ?? '?')}</i>`).join('');
+    const top = `<div class="cd-top"><div class="cd-faces">${faces}</div>
+      <button data-cp="playall" aria-label="みんなで同時に再生">${svg('M7 5v14l11-7z')}</button>
+      <button data-cp="stopall" aria-label="みんなの再生を止める">${svg('M7 7h10v10H7z')}</button>
+      <button data-cp="follow" class="${this.follow ? 'on' : ''}" aria-label="ついていく">${svg('M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z')}</button></div>`;
+    this.chatOpen = p === 'chat';
+    if (this.chatOpen) this.unread = 0;
+    this.panelEl.innerHTML = `<nav class="cd-tabs">${tabs}</nav><div class="cd-main">${top}<div class="sheet-body cd-body">${p === 'chat' ? '' : this.panelBody(p, doc)}</div></div>`;
+    const body = this.panelEl.querySelector<HTMLElement>('.cd-body');
+    if (body && p === 'chat') {
+      body.appendChild(this.chatEl);
+      this.renderChat(true);
+    } else if (body) body.scrollTop = scroll;
   }
 
   private memberName(id: string) {
@@ -828,49 +890,21 @@ export class Collab {
   private panelBody(p: Panel, doc: CollabDoc): string {
     const s = this.s!;
     const edit = s.role === 'edit';
-    if (p === 'menu') {
-      const lane = this.lane;
-      return `
-        <p class="note">${esc(doc.meta.title || '（無題）')} ・ ${Object.keys(doc.members).length} 人（つながっている ${s.online.ids.length} 人${s.online.viewers ? `・見ている ${s.online.viewers} 人` : ''}）${s.role === 'view' ? ' ・ 見るだけ' : ''}</p>
-        <div class="cp-grid">
-          <button data-cp="lanes">レーン</button>
-          <button data-cp="members">メンバー・権限</button>
-          <button data-cp="chat">チャット${this.unread ? `（${this.unread}）` : ''}</button>
-          <button data-cp="vers">版の記録</button>
-          <button data-cp="room">部屋</button>
-          <button data-cp="follow">${this.follow ? `ついていくのをやめる（${esc(this.memberName(this.follow))}）` : 'ついていく…'}</button>
-        </div>
-        <h3>再生</h3>
-        <div class="st-seg two cp-seg"><button data-cp="pmine" class="${this.playMode === 'mine' ? 'on' : ''}">このレーンだけ</button><button data-cp="pcmp" class="${this.playMode === 'compare' ? 'on' : ''}">見比べ（${this.compare.size}）</button></div>
-        <div class="btns"><button data-cp="playall">みんなで同時に再生</button><button data-cp="stopall">みんなの再生を止める</button></div>
-        <h3>書き出し</h3>
-        <div class="btns">
-          <button data-cp="expLane">このレーンを .tja</button>
-          <button data-cp="expMainTja">本譜面をまとめて .tja</button>
-          <button data-cp="expMainZip">本譜面をまとめて .zip</button>
-          ${lane && !lane.main && this.free ? '<button data-cp="adoptSel">選んだ範囲を本譜面へ</button>' : ''}
-        </div>
-        <h3>この部屋</h3>
-        <div class="btns">
-          ${edit ? '<button data-cp="rename">名前を変える</button>' : ''}
-          <button data-cp="leave">閉じる</button>
-          <button data-cp="forget" class="danger">一覧から外す</button>
-        </div>`;
-    }
     if (p === 'lanes') {
       const rows = COURSES.map((c) => {
         const ls = sortedLanes(doc, c);
         if (!ls.length) return '';
-        return `<h3>${c}（${COURSE_JA[c]}）</h3><div class="list">${ls.map((l) => this.laneRow(l, doc)).join('')}</div>`;
+        return `<h3>${COURSE_JA[c] ?? c}</h3><div class="cd-lanes">${ls.map((l) => this.laneRow(l, doc)).join('')}</div>`;
       }).join('');
       const trash = doc.trash.length
         ? `<h3>ごみ箱</h3><div class="list">${doc.trash.map((t) => `<div class="item"><div class="grow">${esc(t.name)} <small>${t.course}</small><div class="pos">${esc(this.memberName(t.by))} ・ ${fmtDate(t.at)}</div></div><button data-cp="tview" data-id="${t.id}">見る</button>${edit ? `<button data-cp="restore" data-id="${t.id}">戻す</button>` : ''}${this.isLeader ? `<button data-cp="purge" data-id="${t.id}" class="danger">消す</button>` : ''}</div>`).join('')}</div>`
         : '';
-      return `${edit ? '<div class="btns"><button data-cp="newLane">＋ レーンを足す</button></div>' : ''}${rows || '<p class="note">まだレーンがありません</p>'}${trash}`;
+      const mode = `<div class="st-seg two cp-seg"><button data-cp="pmine" class="${this.playMode === 'mine' ? 'on' : ''}">このレーンだけ</button><button data-cp="pcmp" class="${this.playMode === 'compare' ? 'on' : ''}">見比べ（${this.compare.size}）</button></div>`;
+      return `${mode}${rows || '<p class="note">まだレーンがありません</p>'}${edit ? '<div class="btns one"><button data-cp="newLane">＋ レーン</button></div>' : ''}${trash}`;
     }
     if (p === 'newLane') {
       const cur = this.lane;
-      return `
+      return `<div class="cd-sub"><button data-cp="back" aria-label="戻る">‹</button><b>レーンを足す</b></div>
         <label class="field"><span>難易度</span><select id="cpNlCourse">${COURSES.map((c) => `<option ${c === (cur?.course ?? 'Oni') ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
         <label class="field"><span>名前</span><input id="cpNlName" type="text" value="${esc(this.memberName(this.me))}の案" autocomplete="off"></label>
         <label class="field"><span>中身</span><select id="cpNlFrom"><option value="main">その難易度の本譜面をコピー</option><option value="cur">今のレーンをコピー</option><option value="empty">空</option></select></label>
@@ -943,14 +977,29 @@ export class Collab {
       const r = s.room;
       const head = `<div class="cp-roomid"><small>部屋番号</small><b>${s.link.id}</b>${edit && r.pass ? `<small>あいことば</small><b>${esc(r.pass)}</b>` : ''}</div>
         ${edit ? '<div class="btns"><button data-cp="copyRoom">部屋番号とあいことばをコピー</button></div>' : ''}`;
-      if (!this.isLeader) return `${head}<p class="note">部屋の名前: ${esc(r.name)} ・ ${r.unlisted ? '一覧に出さない' : '一覧に出す'} ・ 見学 ${r.watch ? 'できる' : 'できない'}</p>`;
+      const lane = this.lane;
+      const out = `<h3>書き出し</h3>
+        <div class="btns">
+          <button data-cp="expLane">このレーンを .tja</button>
+          <button data-cp="expMainTja">本譜面をまとめて .tja</button>
+          <button data-cp="expMainZip">本譜面をまとめて .zip</button>
+          ${lane && !lane.main && this.free ? '<button data-cp="adoptSel">選んだ範囲を本譜面へ</button>' : ''}
+        </div>
+        <h3>この部屋</h3>
+        <div class="btns">
+          ${edit ? '<button data-cp="rename">名前を変える</button>' : ''}
+          <button data-cp="leave">閉じる</button>
+          <button data-cp="forget" class="danger">一覧から外す</button>
+        </div>`;
+      if (!this.isLeader) return `${head}<p class="note">部屋の名前: ${esc(r.name)} ・ ${r.unlisted ? '一覧に出さない' : '一覧に出す'} ・ 見学 ${r.watch ? 'できる' : 'できない'}</p>${out}`;
       return `${head}
         <h3>部屋の設定</h3>
         <label class="field"><span>部屋の名前</span><input id="cpRmName" type="text" value="${esc(r.name)}" autocomplete="off"></label>
         <label class="field"><span>あいことば</span><input id="cpRmPass" type="text" value="${esc(r.pass)}" autocomplete="off"></label>
         <label class="field cp-ck2"><input id="cpRmUnl" type="checkbox" ${r.unlisted ? 'checked' : ''}><span>一覧に出さない</span></label>
         <label class="field cp-ck2"><input id="cpRmWatch" type="checkbox" ${r.watch ? 'checked' : ''}><span>見学できる</span></label>
-        <div class="btns"><button data-cp="roomSave">設定を保存</button></div>`;
+        <div class="btns"><button data-cp="roomSave">設定を保存</button></div>
+        ${out}`;
     }
     return '';
   }
@@ -959,22 +1008,22 @@ export class Collab {
     const s = this.s!;
     const mine = l.owner === this.me;
     const cur = l.id === this.laneId;
-    const notes = Object.keys(l.notes).length;
-    const btns: string[] = [];
-    if (!cur) btns.push(`<button data-cp="open" data-id="${l.id}">開く</button>`);
+    const more: string[] = [];
+    let up = '';
     if (s.role === 'edit') {
-      if (mine || this.isLeader) btns.push(`<button data-cp="renameLane" data-id="${l.id}">名前</button>`);
+      if (mine || this.isLeader) more.push(`<button data-cp="renameLane" data-id="${l.id}">${svg('M4 20h4L19 9l-4-4L4 16z')}<span>名前</span></button>`);
       if (!l.main && this.free) {
         const main = sortedLanes(doc, l.course).find((x) => x.main);
-        if (main) btns.push(`<button data-cp="adoptAll" data-id="${l.id}">本譜面と入れ替え</button>`);
-        else btns.push(`<button data-cp="makeMain" data-id="${l.id}">本譜面にする</button>`);
+        up = `<button data-cp="${main ? 'adoptAll' : 'makeMain'}" data-id="${l.id}" aria-label="本譜面へ">${svg('M12 19V5M6 11l6-6 6 6')}</button>`;
       }
-      if ((l.main && this.isLeader) || (!l.main && (mine || this.isLeader))) btns.push(`<button data-cp="del" data-id="${l.id}" class="danger">ごみ箱</button>`);
+      if ((l.main && this.isLeader) || (!l.main && (mine || this.isLeader))) more.push(`<button data-cp="del" data-id="${l.id}" class="danger">${svg('M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13')}<span>ごみ箱</span></button>`);
     }
-    return `<div class="item cp-lane ${cur ? 'current' : ''}" style="--lc:${l.color}">
-      ${cur ? '<i class="cp-cur">編集中</i>' : `<label class="cp-ck"><input type="checkbox" data-cmp="${l.id}" ${this.compare.has(l.id) ? 'checked' : ''}><small>見比べ</small></label>`}
-      <div class="grow">${l.main ? '★ ' : ''}<b>${esc(l.name || '無題')}</b><div class="pos">${esc(this.memberName(l.owner))} ・ ${notes} ノーツ ・ BPM ${Number(l.head.bpm.toFixed(3))} ・ OFFSET ${l.head.offset}</div></div>
-      ${btns.join('')}</div>`;
+    const spk = cur ? '' : `<button data-cp="cmp" data-id="${l.id}" class="${this.compare.has(l.id) ? 'on' : ''}" aria-label="見比べ">${svg('M4 9h4l5-4v14l-5-4H4zM16 9c1.2 1 1.2 5 0 6M18.5 7c2.4 2.2 2.4 7.8 0 10')}</button>`;
+    const dots = more.length ? `<button data-cp="laneMore" data-id="${l.id}" class="${this.laneMore === l.id ? 'on' : ''}" aria-label="その他">${svg('M5 12h.01M12 12h.01M19 12h.01')}</button>` : '';
+    return `<div class="cd-lane ${cur ? 'cur' : ''}" style="--lc:${l.color}">
+      <button class="cd-ln" data-cp="${cur ? 'noop' : 'open'}" data-id="${l.id}"><b>${l.main ? '★ ' : ''}${esc(l.name || '無題')}</b><small>${esc(this.memberName(l.owner))}</small></button>
+      ${spk}${up}${dots}
+      ${this.laneMore === l.id ? `<div class="cd-more">${more.join('')}</div>` : ''}</div>`;
   }
 
   private onPanelChange(e: Event) {
@@ -983,15 +1032,7 @@ export class Collab {
     const doc = this.doc;
     if (!s || !doc) return;
     if (t.dataset.cmp) {
-      if (t.checked && this.compare.size + 1 >= COMPARE_MAX) {
-        t.checked = false;
-        this.h.toast(`見比べは自分のレーンも入れて ${COMPARE_MAX} 本までです`);
-        return;
-      }
-      if (t.checked) this.compare.add(t.dataset.cmp);
-      else this.compare.delete(t.dataset.cmp);
-      if (this.compare.size && this.playMode === 'mine') this.playMode = 'compare';
-      this.refreshGhosts();
+      if (!this.toggleCompare(t.dataset.cmp, t.checked)) t.checked = false;
       return;
     }
     if (t.dataset.perm && t.dataset.mid) {
@@ -1006,9 +1047,23 @@ export class Collab {
     }
   }
 
+  /** 見比べで鳴らすレーンを足す・外す（足せなければ false） */
+  private toggleCompare(id: string, on = !this.compare.has(id)) {
+    if (on && !this.compare.has(id) && this.compare.size + 1 >= COMPARE_MAX) {
+      this.h.toast(`見比べは自分のレーンも入れて ${COMPARE_MAX} 本までです`);
+      return false;
+    }
+    if (on) this.compare.add(id);
+    else this.compare.delete(id);
+    if (this.compare.size && this.playMode === 'mine') this.playMode = 'compare';
+    if (!this.compare.size && this.playMode === 'compare') this.playMode = 'mine';
+    this.refreshGhosts();
+    this.rerenderPanel();
+    return true;
+  }
+
   private async onPanelClick(e: MouseEvent) {
     const t = e.target as HTMLElement;
-    if (t === this.panelEl) { this.closePanel(); return; }
     const b = t.closest<HTMLElement>('[data-cp]');
     if (!b) return;
     const k = b.dataset.cp!;
@@ -1017,13 +1072,15 @@ export class Collab {
     if (!s || !doc) return;
     const id = b.dataset.id ?? '';
     const mid = b.dataset.mid ?? '';
-    const go = (p: Panel) => { this.panel = p; this.renderPanel(); };
+    const go = (p: Panel) => { this.panel = p; if (p === 'vers') s.cmd('vers'); this.renderPanel(); this.renderChip(); };
     switch (k) {
       case 'close': this.closePanel(); return;
-      case 'back': go(this.panel === 'newLane' ? 'lanes' : 'menu'); return;
-      case 'lanes': case 'members': case 'room': case 'groups': go(k); return;
-      case 'vers': s.cmd('vers'); go('vers'); return;
-      case 'chat': this.closePanel(); this.toggleChat(true); return;
+      case 'tab': go(b.dataset.p as Panel); return;
+      case 'noop': return;
+      case 'cmp': this.toggleCompare(id); return;
+      case 'laneMore': this.laneMore = this.laneMore === id ? '' : id; this.renderPanel(); return;
+      case 'back': go('lanes'); return;
+      case 'lanes': case 'members': case 'room': case 'groups': case 'vers': case 'chat': go(k); return;
       case 'newLane': go('newLane'); return;
       case 'pmine': this.playMode = 'mine'; this.renderPanel(); return;
       case 'pcmp':
@@ -1362,18 +1419,13 @@ export class Collab {
   // ───── チャット ─────
 
   toggleChat(open = !this.chatOpen) {
-    this.chatOpen = open;
-    this.chatEl.classList.toggle('hidden', !open);
-    if (open) {
-      this.unread = 0;
-      this.renderChip();
-      this.renderChat(true);
-    }
+    if (open) this.openPanel('chat');
+    else this.closeChat();
   }
 
   private closeChat() {
+    if (this.panel === 'chat') this.closePanel();
     this.chatOpen = false;
-    this.chatEl.classList.add('hidden');
   }
 
   private onChat(m: ChatMsg | null) {
@@ -1401,7 +1453,6 @@ export class Collab {
       return `<div class="cm ${m.by === this.me ? 'me' : ''}" data-mid="${m.id}"><b style="color:${who?.color ?? '#ccc'}">${esc(who?.name ?? '（外れた人）')}</b><small>${fmtDate(m.ts)}</small><p>${esc(m.x)}</p>${at}<div class="cm-re">${re}<button data-ch="pick" data-id="${m.id}" class="cm-add">＋</button></div></div>`;
     }).join('');
     this.chatEl.innerHTML = `
-      <div class="cc-head"><b>チャット</b><button data-ch="close" aria-label="閉じる">×</button></div>
       <div class="cc-list">${more}${msgs || '<p class="cc-empty">まだメッセージはありません</p>'}</div>
       <div class="cc-pick hidden">${REACTIONS.map((e) => `<button data-ch="react" data-e="${e}">${e}</button>`).join('')}</div>
       ${s.role === 'edit' ? `<div class="cc-in">
