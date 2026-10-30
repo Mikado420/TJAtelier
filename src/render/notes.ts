@@ -148,7 +148,7 @@ export function drawBalloon(
   ctx.fill();
   drawNoteHead(ctx, x, y, r, 'balloon');
   if (left !== null) {
-    ctx.font = `900 ${Math.round(r * 0.9)}px 'Makinas 4 Square', sans-serif`;
+    ctx.font = `900 ${Math.round(r * 0.9)}px 'Makinas 4 Flat', sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineWidth = Math.max(2, r * 0.14);

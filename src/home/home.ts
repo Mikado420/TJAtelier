@@ -490,19 +490,9 @@ export class Home {
     }, 140);
   }
 
+  /** 一覧はまっすぐに並べる（スクロールしても奥行き・ずれを付けない） */
   private paintCurve() {
-    const L = this.list;
-    const mid = L.scrollTop + L.clientHeight / 2;
-    const h = Math.max(1, L.clientHeight / 2);
-    // 先に位置を全部読んでから書く（読む・書くを交互にすると、そのたびに配置の計算が走って重い）
-    const rows = Array.from(L.querySelectorAll<HTMLElement>('.hr'));
-    const ds: [HTMLElement, string][] = [];
-    for (const r of rows) {
-      const c = r.offsetTop + r.offsetHeight / 2;
-      if (Math.abs(c - mid) > L.clientHeight) continue;
-      ds.push([r, Math.min(1.4, Math.abs(c - mid) / h).toFixed(2)]);
-    }
-    for (const [r, d] of ds) if (r.style.getPropertyValue('--d') !== d) r.style.setProperty('--d', d);
+    for (const r of Array.from(this.list.querySelectorAll<HTMLElement>('.hr'))) if (r.style.getPropertyValue('--d') !== '0') r.style.setProperty('--d', '0');
   }
 
   /** 選んでいる曲の帯に入れる、難易度のチップと操作のボタン */

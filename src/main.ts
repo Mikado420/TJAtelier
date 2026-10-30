@@ -264,10 +264,10 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
-// プレイ画面などの文字（マキナス 4 Square。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
+// プレイ画面などの文字（マキナス 4 Flat。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
 // ページからの相対の場所で読む（GitHub Pages のサブパスでも、ローカルでも同じ）
 try {
-  const ff = new FontFace('Makinas 4 Square', 'url(fonts/Makinas-4-Square.woff)', { display: 'swap' });
+  const ff = new FontFace('Makinas 4 Flat', 'url(fonts/Makinas-4-Flat.woff)', { display: 'swap' });
   document.fonts.add(ff);
   void ff.load().catch(() => {});
 } catch { /* FontFace が使えない */ }
@@ -3731,8 +3731,8 @@ function drawTempoOverview(plan: TempoPlan, playhead = -1) {
     const x1 = xs[j].x1;
     const fmt = (b: number) => String(Number(b.toFixed(2)));
     const label = j > i ? `${fmt(xs[i].bpm)}→${fmt(xs[j].bpm)}` : fmt(xs[i].bpm);
-    ctx.font = '800 13px "Makinas 4 Square", sans-serif';
-    if (ctx.measureText(label).width + 6 > x1 - x0) ctx.font = '800 10px "Makinas 4 Square", sans-serif';
+    ctx.font = '800 13px "Makinas 4 Flat", sans-serif';
+    if (ctx.measureText(label).width + 6 > x1 - x0) ctx.font = '800 10px "Makinas 4 Flat", sans-serif';
     if (ctx.measureText(label).width + 2 < x1 - x0) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       const w = ctx.measureText(label).width + 6;
@@ -3845,7 +3845,7 @@ function drawTempoWave(plan: TempoPlan, playhead = -1) {
     ctx.fillRect(x - (b.bar ? 1 : 0.5), 0, b.bar ? 2 : 1, H);
   });
   // BPM の変わり目の旗（選んでいる区間は白）
-  ctx.font = '800 13px "Makinas 4 Square", sans-serif';
+  ctx.font = '800 13px "Makinas 4 Flat", sans-serif';
   secs.forEach((s, i) => {
     const t = planTimeAt(plan, TPB, s.s);
     const label = String(Number(s.bpm.toFixed(3)));
@@ -3878,7 +3878,7 @@ function drawTempoWave(plan: TempoPlan, playhead = -1) {
     ctx.fillRect(0, 0, xOf(0), H);
   }
   ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.font = '11px "Makinas 4 Square", sans-serif';
+  ctx.font = '11px "Makinas 4 Flat", sans-serif';
   ctx.fillText(fmtSec(Math.max(0, t0)), 4, H - 5);
   ctx.restore();
   // カーソル（止まっている間は黄色の再生位置。再生中は点線で残す）
@@ -4186,7 +4186,7 @@ function drawArrHeads(HH: number) {
     ctx.fillStyle = on ? '#ffffff' : col.solid;
     hs.forEach((v, k) => ctx.fillRect(cx - 9 + k * 2.2, cy - hm * v, 1.4, hm * v * 2));
     if (L.laneH >= 60) {
-      ctx.font = '800 11px "Makinas 4 Square", sans-serif';
+      ctx.font = '800 11px "Makinas 4 Flat", sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.45)';
       ctx.fillText(String(i + 1), cx, cy + hm + 14);
@@ -4287,7 +4287,7 @@ function drawArr(playhead = -1) {
     ctx.rect(xa, y0, Math.max(0, xb - xa), ch);
     ctx.clip();
     ctx.fillStyle = on ? '#1d2023' : '#fff';
-    ctx.font = '700 11px "Makinas 4 Square", sans-serif';
+    ctx.font = '700 11px "Makinas 4 Flat", sans-serif';
     const nm = c.srcId ? `${arrSources[c.srcId]?.name ?? ''} ` : '';
     if (nm) ctx.fillText(nm, Math.max(xa, 0) + 6, y0 + 12);
     ctx.fillStyle = col.wave;
@@ -4418,7 +4418,7 @@ function drawArr(playhead = -1) {
     ctx.stroke();
     ctx.setLineDash([]);
     const label = ready ? '✂ ここで切る' : a.cutDrag > A_RULER + 10 ? 'クリップなし' : '✂';
-    ctx.font = '800 13px "Makinas 4 Square", sans-serif';
+    ctx.font = '800 13px "Makinas 4 Flat", sans-serif';
     const lw = ctx.measureText(label).width + 16;
     const lx = Math.max(4, Math.min(W - lw - 4, mx + 10));
     const ly = Math.min(HH - 30, Math.max(A_RULER + 6, a.cutDrag - 14));
