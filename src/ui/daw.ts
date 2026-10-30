@@ -253,7 +253,7 @@ export function drawRuler(
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
   ctx.fillRect(0, H - 1, W, 1);
-  ctx.font = '700 11px "Barlow Semi Condensed", system-ui, sans-serif';
+  ctx.font = '700 11px "Makinas 4 Square", sans-serif';
   ctx.textBaseline = 'middle';
   for (const m of marks) {
     ctx.fillStyle = m.major ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.28)';

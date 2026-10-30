@@ -418,16 +418,6 @@ export class Renderer {
       c.fillStyle = g;
       c.fillRect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
     }
-    c.strokeStyle = 'rgba(255,255,255,0.035)';
-    c.lineWidth = 2;
-    c.beginPath();
-    const tan = Math.tan((8 * Math.PI) / 180);
-    const H = V.y1 - V.y0;
-    for (let x = V.x0 - 200; x < V.x1 + 200; x += 22) {
-      c.moveTo(x, V.y1);
-      c.lineTo(x + H * tan, V.y0);
-    }
-    c.stroke();
   }
 
   /** 背景の動画があるとき: 全面なら塗らない、上だけなら上を空けて下はふつうの床 */
@@ -439,21 +429,12 @@ export class Renderer {
   }
 
   private paintPlainBackground(c: CanvasRenderingContext2D, V: Rect) {
-    // 上: 濃紺に青の斜線
+    // 上: 濃紺
     const tg = c.createLinearGradient(0, V.y0, 0, LANE_TOP);
     tg.addColorStop(0, '#172a37');
     tg.addColorStop(1, '#0e1820');
     c.fillStyle = tg;
     c.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
-    c.strokeStyle = 'rgba(77,159,190,0.16)';
-    c.lineWidth = 4;
-    c.beginPath();
-    const tan = Math.tan((8 * Math.PI) / 180);
-    for (let x = V.x0 - 200; x < V.x1 + 60; x += 34) {
-      c.moveTo(x, LANE_TOP);
-      c.lineTo(x + (LANE_TOP - V.y0) * tan, V.y0);
-    }
-    c.stroke();
     // 下: 暗い夜の床に、青い光の地平線と奥へ続くグリッド
     const top = TEXT_BOTTOM;
     const bot = V.y1;
@@ -949,7 +930,7 @@ export class Renderer {
       if (this.hasBranch) {
         ctx.save();
         ctx.globalAlpha = 0.45 + (p < 1 ? 0.4 * (1 - p) : 0);
-        ctx.font = `italic 900 76px ${FONT}`;
+        ctx.font = `900 76px ${FONT}`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#fff';

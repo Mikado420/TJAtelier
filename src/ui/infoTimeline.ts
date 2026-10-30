@@ -118,7 +118,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     c.fillRect(0, gy, w, GRAPH_H);
     const yOf = (v: number) => gy + GRAPH_H - (v / top) * (GRAPH_H - 10);
     // 目盛り（打/秒）
-    c.font = '600 10px system-ui, sans-serif';
+    c.font = '600 10px "Makinas 4 Square", sans-serif';
     c.textBaseline = 'middle';
     const stepV = top > 16 ? 5 : top > 8 ? 2 : 1;
     for (let v = stepV; v < top; v += stepV) {

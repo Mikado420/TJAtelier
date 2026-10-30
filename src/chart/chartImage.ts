@@ -21,7 +21,7 @@ const LANE_H = 32;
 const NOTE_R = (BEAT_W * 54) / 367.5;
 /** 大音符の半径（プレイ画面と同じ 83 ÷ 54 倍） */
 const BIG_R = (NOTE_R * 83) / 54;
-const FONT = "system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif";
+const FONT = "'Makinas 4 Square', 'Hiragino Sans', 'Noto Sans JP', sans-serif";
 
 interface Row {
   /** この行の小節（x は行の中の左端） */

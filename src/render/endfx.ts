@@ -16,7 +16,7 @@ export interface EndBox { x0: number; x1: number; top: number; bottom: number; v
 
 const RB = ['#ff4f8b', '#ff9f1c', '#ffd60a', '#2ed573', '#1e90ff', '#8c5cff'];
 const RB_BAND = ['#ffc2e0', '#ffe7a3', '#c4f7d4', '#b5e6ff', '#ddcaff', '#ffc2e0'];
-const FONT = "'Barlow Semi Condensed', 'Makinas 4 Square', 'Arial Narrow', sans-serif";
+const FONT = "'Makinas 4 Square', sans-serif";
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const outCubic = (x: number) => 1 - (1 - x) ** 3;
@@ -52,7 +52,7 @@ export function drawEndFx(ctx: CanvasRenderingContext2D, kind: EndKind, ms: numb
   const S = h / 122;
   const WR = w / 654;
   const fontPx = Math.round(78 * S);
-  const font = `italic 900 ${fontPx}px ${FONT}`;
+  const font = `900 ${fontPx}px ${FONT}`;
 
   // 揺れ（at から 280ms）
   const shakeAt = (at: number, px: number) => {
@@ -214,7 +214,6 @@ export function drawEndFx(ctx: CanvasRenderingContext2D, kind: EndKind, ms: numb
     clipBand();
     const gx = x0 - 100 * S + (w + 200 * S) * inOut(p);
     ctx.translate(gx, cy);
-    ctx.transform(1, 0, -Math.tan((20 * Math.PI) / 180), 1, 0, 0);
     const gw = 30 * S;
     const g = ctx.createLinearGradient(-gw, 0, gw, 0);
     g.addColorStop(0, 'rgba(255,255,255,0)');
