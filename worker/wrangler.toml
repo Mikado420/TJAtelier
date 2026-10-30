@@ -11,7 +11,7 @@ name = "LOBBY"
 class_name = "Lobby"
 
 [[durable_objects.bindings]]
-name = "COLLAB"
+name = "COLLAB_ROOM"
 class_name = "CollabRoom"
 
 [[migrations]]
@@ -26,4 +26,7 @@ new_sqlite_classes = ["Collab"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["CollabRoom"]
+
+[[migrations]]
+tag = "v4"
 deleted_classes = ["Collab"]

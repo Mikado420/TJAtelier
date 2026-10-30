@@ -19,7 +19,7 @@ import { ROOM_DAYS, type RoomInfo } from '../../src/collab/protocol';
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
   LOBBY: DurableObjectNamespace<Lobby>;
-  COLLAB: DurableObjectNamespace<CollabRoom>;
+  COLLAB_ROOM: DurableObjectNamespace<CollabRoom>;
 }
 
 const CORS = {
@@ -53,11 +53,11 @@ export default {
     const cw = url.pathname.match(/^\/collab\/ws\/([A-Z0-9]{6,10})$/);
     if (cw) {
       if (req.headers.get('Upgrade') !== 'websocket') return new Response('websocket only', { status: 426 });
-      return env.COLLAB.get(env.COLLAB.idFromName(cw[1])).fetch(req);
+      return env.COLLAB_ROOM.get(env.COLLAB_ROOM.idFromName(cw[1])).fetch(req);
     }
     const ca = url.pathname.match(/^\/collab\/audio\/([A-Z0-9]{6,10})\/([0-9a-z]{4,64})$/i);
     if (ca && (req.method === 'GET' || req.method === 'PUT')) {
-      const res = await env.COLLAB.get(env.COLLAB.idFromName(ca[1])).fetch(req);
+      const res = await env.COLLAB_ROOM.get(env.COLLAB_ROOM.idFromName(ca[1])).fetch(req);
       const h = new Headers(res.headers);
       for (const [k, v] of Object.entries(CORS)) h.set(k, v);
       return new Response(res.body, { status: res.status, headers: h });
