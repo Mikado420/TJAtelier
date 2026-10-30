@@ -1609,39 +1609,85 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** 左下の名札（オリジナルの意匠: 1P の丸・紫の称号の帯・白い名前の帯） */
+  /**
+   * 左下の名札: アプリのボタンと同じ斜め（8°）の帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
+   * 左に 2 段ぶんの斜めの「1P」の札。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
+   */
   private drawNameplate(badge = '1P', badgeColor = '#3a8fc0', title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
-    const y0 = 470;
-    // 称号の帯
-    ctx.fillStyle = '#14212b';
-    roundRect(ctx, 46, y0, 290, 28, 14);
-    ctx.fill();
-    ctx.font = `800 17px ${FONT}`;
-    ctx.textAlign = 'center';
+    const OUT = '#14141c';
+    const T = 0.1405;
+    const y0 = 466;
+    const th = 30;
+    const nh = 44;
+    const H = th + nh;
+    const px = 16; // 1P の札
+    const pw = 66;
+    const x = px + pw - 12; // 帯（札の下から始める）
+    const w = 236;
+    // 平行四辺形（上の辺が右へずれる）。grow で縁の分だけ大きく
+    const para = (qx: number, qw: number, grow = 0) => {
+      const k = (H + grow * 2) * T;
+      ctx.beginPath();
+      ctx.moveTo(qx - grow + k / 2, y0 - grow);
+      ctx.lineTo(qx + qw + grow + k / 2, y0 - grow);
+      ctx.lineTo(qx + qw + grow - k / 2, y0 + H + grow);
+      ctx.lineTo(qx - grow - k / 2, y0 + H + grow);
+      ctx.closePath();
+    };
+    ctx.save();
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(title, 200, y0 + 15);
-    // 名前の帯
-    ctx.fillStyle = '#fff';
-    roundRect(ctx, 46, y0 + 32, 290, 40, 20);
+    ctx.lineJoin = 'miter';
+    // 帯
+    para(x, w, 5);
+    ctx.fillStyle = OUT;
     ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#2a2a2a';
-    ctx.stroke();
-    ctx.font = `900 24px ${FONT}`;
-    ctx.fillStyle = '#222';
-    ctx.fillText(name, 206, y0 + 53, 250);
-    // 1P の丸
-    ctx.beginPath();
-    ctx.arc(38, y0 + 36, 34, 0, Math.PI * 2);
-    ctx.fillStyle = badgeColor;
+    ctx.save();
+    para(x, w);
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, y0, 0, y0 + th);
+    g.addColorStop(0, '#bff2ff');
+    g.addColorStop(0.45, '#5fd0ea');
+    g.addColorStop(1, '#2a8fc4');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 20, y0, w + 40, th);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(x + 30, y0 + 4, w - 40, 4);
+    ctx.fillStyle = OUT;
+    ctx.fillRect(x - 20, y0 + th, w + 40, 4);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x - 20, y0 + th + 4, w + 40, nh - 4);
+    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+    ctx.fillRect(x - 20, y0 + th + 4 + (nh - 4) * 0.62, w + 40, (nh - 4) * 0.38);
+    ctx.restore();
+    const mid = x + 12 + (w - 12) / 2;
+    ctx.textAlign = 'center';
+    ctx.font = `900 16px ${FONT}`;
+    ctx.fillStyle = '#0d3550';
+    ctx.fillText(title, mid + 3, y0 + th / 2 + 1, w - 36);
+    // 長い名前は、帯に収まるまで文字を小さく
+    let fs = 27;
+    ctx.font = `900 ${fs}px ${FONT}`;
+    while (fs > 14 && ctx.measureText(name).width > w - 36) ctx.font = `900 ${--fs}px ${FONT}`;
+    outlinedText(ctx, name, mid - 2, y0 + th + 2 + nh / 2, '#1b1f23', '#fff', 6);
+    // 1P の札（帯と同じ高さ。プレイヤーの色）
+    para(px, pw, 5);
+    ctx.fillStyle = OUT;
     ctx.fill();
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#fff';
-    ctx.stroke();
-    ctx.font = `900 30px ${FONT}`;
-    outlinedText(ctx, badge, 38, y0 + 38, '#fff', '#0e1a3a', 6);
+    ctx.save();
+    para(px, pw);
+    ctx.clip();
+    const bg = ctx.createLinearGradient(0, y0, 0, y0 + H);
+    bg.addColorStop(0, shade(badgeColor, 0.45));
+    bg.addColorStop(1, shade(badgeColor, -0.3));
+    ctx.fillStyle = bg;
+    ctx.fillRect(px - 20, y0, pw + 40, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(px - 20, y0, pw + 40, H * 0.38);
+    ctx.restore();
+    ctx.font = `italic 900 ${badge.length > 2 ? 28 : 34}px ${FONT}`;
+    outlinedText(ctx, badge, px + pw / 2, y0 + H / 2 + 2, '#fff', OUT, 7);
+    ctx.restore();
   }
 
   /** 右上の曲名（ジャンルの色の丸＋曲名、下にジャンル名の帯） */
