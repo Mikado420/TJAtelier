@@ -2688,3 +2688,9 @@ button, input, select, textarea { font-family: inherit; }
 .play .play-bgimg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .play .play-bgimg.hidden { display: none; }
 .jk-row .jk-thumb.bg { width: 71px; }
+
+/* 曲えらび・リザルトの背景（方眼と走る光） */
+canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.res-bg::before, .res-bg .res-obj { display: none; }
+.res > .res-bg { z-index: 1; }
+.res > .res-top, .res > .res-main { z-index: 2; }

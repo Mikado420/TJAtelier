@@ -1,4 +1,5 @@
 import { setUiSound } from './ui/curtain';
+import { mountGridBg } from './ui/gridBg';
 import { OnlineScreen } from './online/online';
 import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
@@ -2632,6 +2633,8 @@ const online = new OnlineScreen({
   })(),
 });
 
+mountGridBg($('result'), false);
+mountGridBg($('home'));
 const home = new Home({
   audio,
   open: openSong,
