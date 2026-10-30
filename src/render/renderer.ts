@@ -1624,13 +1624,21 @@ export class Renderer {
     const H = th + nh;
     const bx = 46; // 1P の丸
     const br = 38;
-    const x = bx + 6; // 帯（丸の下から始める）
-    const w = 252;
+    const x = bx; // 帯（丸の真ん中から。左の端は丸の下に隠れる）
+    const w = 284; // 右端はコンボの太鼓の手前まで
     // 平行四辺形（上の辺が右へずれる）。grow で縁の分だけ大きく
-    // 角の丸い帯（右端は半円）。grow で縁の分だけ大きく
+    // 帯（左は四角で丸の下に隠れ、右端は半円）。grow で縁の分だけ大きく
     const band = (qx: number, qw: number, grow = 0) => {
+      const top = y0 - grow;
+      const bot = y0 + H + grow;
+      const r = H / 2 + grow;
+      const right = qx + qw + grow;
       ctx.beginPath();
-      roundRect(ctx, qx - grow, y0 - grow, qw + grow * 2, H + grow * 2, H / 2 + grow);
+      ctx.moveTo(qx, top);
+      ctx.lineTo(right - r, top);
+      ctx.arc(right - r, (top + bot) / 2, r, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(qx, bot);
+      ctx.closePath();
     };
     ctx.save();
     ctx.textBaseline = 'middle';

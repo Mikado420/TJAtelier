@@ -1889,7 +1889,7 @@ function busyEnd() {
 }
 
 /** 音源を .ogg にする（.ogg ならそのまま）。長さ（秒）も返す */
-async function convertAudio(a: AudioFile, label = a.name, quiet = false): Promise<{ file: AudioFile; length: number }> {
+async function convertAudio(a: AudioFile, label = a.name, quiet = false, videoToOgg = false): Promise<{ file: AudioFile; length: number }> {
   // .ogg は、ファイルの中の情報から長さを読む（音のデータに直さないので速い）
   if (isOgg(a.data)) {
     const len = oggDuration(a.data);
@@ -1901,7 +1901,7 @@ async function convertAudio(a: AudioFile, label = a.name, quiet = false): Promis
     const buf = await audio.ctx.decodeAudioData(a.data.slice(0));
     if (isOgg(a.data)) return { file: { name: oggName(a.name), data: a.data }, length: buf.duration };
     // 動画（mp4 など）は変換しない（背景の動画にもそのまま使う）
-    if (isVideoName(a.name)) return { file: a, length: buf.duration };
+    if (isVideoName(a.name) && !videoToOgg) return { file: a, length: buf.duration };
     const data = await pcmToOgg(bufferChannels(buf), buf.sampleRate, quiet ? undefined : (p) => busy(`「${label}」を .ogg にしています…`, p));
     return { file: { name: oggName(a.name), data }, length: buf.duration };
   });
@@ -1921,6 +1921,34 @@ const decodeLock = (() => {
 
 /** 読み込みで同時に処理する曲の数（多すぎるとメモリが足りなくなる） */
 const IMPORT_PARALLEL = 3;
+
+/**
+ * いくつかの中から 1 つ選んでもらう（選ばずに閉じたら null）。
+ * 読み込み中の表示（busy）より手前に出す
+ */
+function choose<T extends string>(title: string, options: { value: T; label: string; sub?: string }[]): Promise<T | null> {
+  return new Promise((resolve) => {
+    const el = document.createElement('div');
+    el.className = 'choice';
+    el.innerHTML = `<div class="choice-panel"><h2>${esc(title)}</h2>${options
+      .map((o) => `<button data-v="${esc(o.value)}"><b>${esc(o.label)}</b>${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`)
+      .join('')}<button class="choice-cancel" data-v="">やめる</button></div>`;
+    el.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('button');
+      if (!b && e.target !== el) return;
+      el.remove();
+      resolve(((b?.dataset.v as T) || null) as T | null);
+    });
+    document.body.appendChild(el);
+  });
+}
+
+/** mp4 だけ（音源が別に無い動画）を読み込むとき: 音だけ .ogg にするか、動画も背景に使うか */
+const askVideoOnly = () =>
+  choose('mp4 の読み込み方', [
+    { value: 'audio', label: '音だけ（.ogg）' },
+    { value: 'video', label: '動画も使う（音は .ogg）' },
+  ]);
 
 /** 読み込み: .tja・.zip・音源を何でも。譜面は新しい曲として一覧に入れ、音源はすべて .ogg にする */
 async function importFiles(files: File[], mode: 'any' | 'audio') {
@@ -1954,6 +1982,14 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   busy('譜面を読んでいます…');
   const r = await loadFiles(files);
   const folder = home.visible ? home.currentFolder : '';
+  // mp4 だけの曲があれば、音だけにするか動画も使うかを先に聞く
+  let mp4Mode: 'audio' | 'video' | null = null;
+  if (r.songs.some((x) => x.video?.fromAudio) || r.audios.some((x) => isVideoName(x.name))) {
+    busyEnd();
+    mp4Mode = await askVideoOnly();
+    if (!mp4Mode) return;
+    busy('譜面を読んでいます…');
+  }
   // 曲は何曲か同時に入れる（音源・動画は、その曲を入れるときに 1 曲分だけ読み出す）
   const addedAt: (string | undefined)[] = [];
   const folderMade = new Map<string, Promise<unknown>>();
@@ -1965,19 +2001,23 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     let a: AudioFile | null = null;
     let len = 0;
     let video: { name: string; data: ArrayBuffer | null; fromAudio: boolean } | null = null;
-    let vfromAudio = !!sng.video?.fromAudio;
+    // mp4 だけの曲: 音は .ogg にする。動画は「動画も使う」ときだけ、別に持つ
+    const mp4Only = !!sng.video?.fromAudio;
+    const vfromAudio = false;
+    let vdata: ArrayBuffer | null = null;
+    if (mp4Only && mp4Mode === 'audio') sng.video = undefined;
     if (sng.audio) {
       try {
         const raw = { name: sng.audio.name, data: await sng.audio.read() };
-        const c = await convertAudio(raw, sng.chart.title || raw.name, total > 1);
+        if (mp4Only && sng.video) vdata = raw.data;
+        const c = await convertAudio(raw, sng.chart.title || raw.name, total > 1, mp4Only);
         a = c.file;
         len = c.length;
-        // 読み込んだ TJA のテキストは元のまま（WAVE: が無いときだけ入れる）
-        if (!sng.chart.wave) sng.chart.wave = a.name;
+        // 読み込んだ TJA のテキストは元のまま（WAVE: が無いときだけ入れる。mp4 を .ogg にしたときは .ogg の名前に）
+        if (!sng.chart.wave || mp4Only) sng.chart.wave = a.name;
       } catch {
         // 動画の音が読めない（音の無い動画など）: 動画だけ使う
-        if (vfromAudio) vfromAudio = false;
-        else r.skipped.push(sng.audio.name);
+        if (!mp4Only) r.skipped.push(sng.audio.name);
       }
     }
     if (sng.video && !sng.chart.extra.some(([k]) => k.toUpperCase() === 'BGMOVIE')) setBgMovie(sng.chart, sng.video.name);
@@ -1993,7 +2033,8 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     if (sng.video) {
       if (total <= 1) busy(`「${sng.chart.title || sng.video.name}」の動画を入れています…`);
       // 音源と同じファイル（mp4 だけの曲）なら、動画は持たない
-      video = { name: sng.video.name, data: vfromAudio && len ? null : await sng.video.read(), fromAudio: vfromAudio && !!len };
+      video = { name: sng.video.name, data: vdata ?? (await sng.video.read()), fromAudio: vfromAudio };
+      vdata = null;
       await saveSongVideo(id, video);
       video = null;
     }
@@ -2016,25 +2057,30 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
   for (const src of r.audios) {
     let c: { file: AudioFile; length: number };
-    try { c = await convertAudio({ name: src.name, data: await src.read() }); } catch { r.skipped.push(src.name); continue; }
+    const isMp4 = isVideoName(src.name);
+    let data: ArrayBuffer | null = await src.read();
+    // mp4: 音は .ogg に。「動画も使う」なら、元の mp4 を背景の動画として別に持つ
+    const vdata = isMp4 && mp4Mode === 'video' ? data : null;
+    try { c = await convertAudio({ name: src.name, data }, src.name, false, isMp4); } catch { r.skipped.push(src.name); continue; }
+    data = null;
     const raw = { name: src.name };
     if (mode === 'audio' && (currentSongId || collab.active) && !home.visible) {
       busyEnd();
       await applyAudioOnly(c.file);
-      // 動画なら、背景の動画にも使う
-      if (isVideoName(c.file.name) && currentSongId) {
-        await saveSongVideo(currentSongId, { name: c.file.name, data: null, fromAudio: true });
-        ed.mutate(() => setBgMovie(ed.chart, c.file.name));
+      // 「動画も使う」なら、背景の動画にも使う
+      if (vdata && currentSongId) {
+        await saveSongVideo(currentSongId, { name: raw.name, data: vdata, fromAudio: false });
+        ed.mutate(() => setBgMovie(ed.chart, raw.name));
         await refreshVideo(currentSongId);
       }
       return;
     }
     const chart = newChart(raw.name.replace(/\.[^.]+$/, ''));
     chart.wave = c.file.name;
-    if (isVideoName(c.file.name)) setBgMovie(chart, c.file.name);
+    if (vdata) setBgMovie(chart, raw.name);
     const id = newId();
     await saveSong(id, { chart, courseIndex: 0 }, c.file, c.length, folder);
-    if (isVideoName(c.file.name)) await saveSongVideo(id, { name: c.file.name, data: null, fromAudio: true });
+    if (vdata) await saveSongVideo(id, { name: raw.name, data: vdata, fromAudio: false });
     added.push(id);
   }
   busyEnd();
