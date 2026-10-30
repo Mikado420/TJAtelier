@@ -1325,7 +1325,7 @@ export class Renderer {
     }
     // コンボ太鼓
     this.paintComboDrum(o.combo, 1);
-    // 名札（色の丸・状態の帯・名前の帯）
+    // 名札（色のタブ・状態の帯・名前の欄）
     const state = o.status === 'fin' ? '終了' : o.status === 'quit' ? 'やめた' : o.status === 'lost' ? '通信が切れた' : o.tag ?? 'オンライン対戦';
     this.drawNameplate(`${no}P`, badge, state, o.name);
     void wall;
@@ -1638,10 +1638,7 @@ export class Renderer {
     ctx.restore();
   }
 
-  /**
-   * 左下の名札: 右端の丸い帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
-   * 左に丸い「1P」（プレイヤーの色）。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
-   */
+  /** 名札（左に 1P の四角いタブ、右に水色の称号の帯と白い名前の欄。黒い縁の長方形 1 枚） */
   private drawNameplate(badge = '1P', badgeColor = Renderer.PLAYER_COLOR[1][2], title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
     const OUT = '#14141c';
@@ -1649,89 +1646,55 @@ export class Renderer {
     const th = 30;
     const nh = 44;
     const H = th + nh;
-    const bx = 46; // 1P の丸
-    const br = 38;
-    const x = bx; // 帯（丸の真ん中から。左の端は丸の下に隠れる）
-    const w = 284; // 右端はコンボの太鼓の手前まで
-    // 平行四辺形（上の辺が右へずれる）。grow で縁の分だけ大きく
-    // 帯（左は四角で丸の下に隠れ、右端は半円）。grow で縁の分だけ大きく
-    const band = (qx: number, qw: number, grow = 0) => {
-      const top = y0 - grow;
-      const bot = y0 + H + grow;
-      const r = H / 2 + grow;
-      const right = qx + qw + grow;
-      ctx.beginPath();
-      ctx.moveTo(qx, top);
-      ctx.lineTo(right - r, top);
-      ctx.arc(right - r, (top + bot) / 2, r, -Math.PI / 2, Math.PI / 2);
-      ctx.lineTo(qx, bot);
-      ctx.closePath();
-    };
+    const L = 8; // 左の端
+    const R = 330; // 右の端（コンボの太鼓の手前）
+    const tw = 74; // 1P のタブの幅
+    const x = L + tw + 4; // 帯の左の端
     ctx.save();
     ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'miter';
-    // 帯
-    band(x, w, 5);
+    ctx.textAlign = 'center';
+    // 縁
     ctx.fillStyle = OUT;
-    ctx.fill();
-    ctx.save();
-    band(x, w);
-    ctx.clip();
+    ctx.fillRect(L - 5, y0 - 5, R - L + 10, H + 10);
+    // 1P のタブ（プレイヤーの色。上につや）
+    const bg = ctx.createLinearGradient(0, y0, 0, y0 + H);
+    bg.addColorStop(0, shade(badgeColor, 0.45));
+    bg.addColorStop(1, shade(badgeColor, -0.3));
+    ctx.fillStyle = bg;
+    ctx.fillRect(L, y0, tw, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillRect(L, y0, tw, H * 0.35);
+    ctx.font = `900 ${badge.length > 2 ? 28 : 34}px ${FONT}`;
+    outlinedText(ctx, badge, L + tw / 2, y0 + H / 2 + 2, '#fff', OUT, 7);
+    // 称号の帯
     const g = ctx.createLinearGradient(0, y0, 0, y0 + th);
     g.addColorStop(0, '#bff2ff');
     g.addColorStop(0.45, '#5fd0ea');
     g.addColorStop(1, '#2a8fc4');
     ctx.fillStyle = g;
-    ctx.fillRect(x - 20, y0, w + 40, th);
+    ctx.fillRect(x, y0, R - x, th);
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.fillRect(x + 30, y0 + 4, w - 40, 4);
+    ctx.fillRect(x + 6, y0 + 4, R - x - 12, 3);
     ctx.fillStyle = OUT;
-    ctx.fillRect(x - 20, y0 + th, w + 40, 4);
+    ctx.fillRect(x, y0 + th, R - x, 4);
+    // 名前の欄
     ctx.fillStyle = '#fff';
-    ctx.fillRect(x - 20, y0 + th + 4, w + 40, nh - 4);
+    ctx.fillRect(x, y0 + th + 4, R - x, nh - 4);
     ctx.fillStyle = 'rgba(0,0,0,0.06)';
-    ctx.fillRect(x - 20, y0 + th + 4 + (nh - 4) * 0.62, w + 40, (nh - 4) * 0.38);
-    ctx.restore();
-    // 文字は、丸の右から帯の右端までの真ん中に
-    // 右端は半円なので、文字を置く幅は半円の手前まで
-    const left = bx + br + 8;
-    const right = x + w - H * 0.32;
-    const mid = (left + right) / 2;
-    const room = right - left - 8;
-    ctx.textAlign = 'center';
-    ctx.font = `900 18px ${FONT}`;
-    // 称号の文字（日本語は細く見えるので、同じ色の細い縁で太らせる）
+    ctx.fillRect(x, y0 + th + 4 + (nh - 4) * 0.62, R - x, (nh - 4) * 0.38);
+    // 文字は帯の真ん中。入らないときは横に縮めず、文字を小さくする
+    const mid = (x + R) / 2;
+    const room = R - x - 14;
+    const fit = (text: string, max: number, min: number) => {
+      let fs = max;
+      ctx.font = `900 ${fs}px ${FONT}`;
+      while (fs > min && ctx.measureText(text).width > room) ctx.font = `900 ${--fs}px ${FONT}`;
+    };
+    fit(title, 19, 11);
     ctx.fillStyle = '#0d3550';
-    ctx.strokeStyle = '#0d3550';
-    ctx.lineWidth = 1.6;
-    ctx.lineJoin = 'round';
-    ctx.strokeText(title, mid, y0 + th / 2 + 1, room);
-    ctx.fillText(title, mid, y0 + th / 2 + 1, room);
-    ctx.lineJoin = 'miter';
-    // 長い名前は、帯に収まるまで文字を小さく
-    let fs = 27;
-    ctx.font = `900 ${fs}px ${FONT}`;
-    while (fs > 14 && ctx.measureText(name).width > room) ctx.font = `900 ${--fs}px ${FONT}`;
+    ctx.fillText(title, mid, y0 + th / 2 + 1);
+    fit(name, 27, 14);
     outlinedText(ctx, name, mid, y0 + th + 2 + nh / 2, '#1b1f23', '#fff', 6);
-    // 1P の丸（プレイヤーの色。上につや）
-    const by = y0 + H / 2;
-    ctx.beginPath();
-    ctx.arc(bx, by, br + 5, 0, Math.PI * 2);
-    ctx.fillStyle = OUT;
-    ctx.fill();
-    const bg = ctx.createLinearGradient(0, by - br, 0, by + br);
-    bg.addColorStop(0, shade(badgeColor, 0.45));
-    bg.addColorStop(1, shade(badgeColor, -0.3));
-    ctx.beginPath();
-    ctx.arc(bx, by, br, 0, Math.PI * 2);
-    ctx.fillStyle = bg;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(bx, by - br * 0.45, br * 0.7, br * 0.35, 0, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.fill();
-    ctx.font = `900 ${badge.length > 2 ? 30 : 36}px ${FONT}`;
-    outlinedText(ctx, badge, bx, by + 2, '#fff', OUT, 7);
     ctx.restore();
   }
 
