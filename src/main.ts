@@ -2725,7 +2725,6 @@ function openPoint(kind: 'scroll' | 'bpm' | 'measure' | 'lyric', tick: number) {
 function renderPointSheet(body: HTMLElement) {
   const { kind, tick } = pointEdit!;
   const m = ed.measureOf(tick);
-  const beat = (tick - m.start) / ((TPB * 4) / m.den) + 1;
   const cur = ed.eventAt(kind, tick);
   const title = { scroll: '#SCROLL', bpm: '#BPMCHANGE', measure: '#MEASURE', lyric: '#LYRIC' }[kind];
   let value = '';
@@ -2734,10 +2733,8 @@ function renderPointSheet(body: HTMLElement) {
   else if (kind === 'bpm') value = String(cur && cur.kind === 'bpm' ? cur.value : ed.timing.bpmAt(tick));
   else value = `${m.num}/${m.den}`;
   $('sheetTitle').textContent = title;
-  const where = kind === 'measure' ? `小節 ${m.index + 1} から` : `小節 ${m.index + 1}・${Number(beat.toFixed(2))} 拍目から`;
   const label = { scroll: 'SCROLL', bpm: 'BPM', measure: '拍子', lyric: '歌詞' }[kind];
   body.innerHTML = `
-    <p class="note">${where}</p>
     <label class="field"><span>${label}</span><input type="text" autocapitalize="off" autocomplete="off" id="pointValue" value="${esc(value)}"></label>
     <div class="btns${cur ? ' three' : ''}">
       ${cur ? '<button data-pact="del">消す</button>' : ''}
