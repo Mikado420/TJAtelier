@@ -71,11 +71,17 @@ interface Src { name: string; size: number; read(): Promise<ArrayBuffer> }
  */
 export async function loadFiles(files: File[]): Promise<LoadResult> {
   const entries: Src[] = [];
+  const zipDirs = new Set<string>();
   for (const f of files) {
     if (await isZipBlob(f)) {
+      // zip ごとに、zip の名前のフォルダの中にあるものとして扱う（いくつかの zip を一度に読み込んだとき、
+      // いちばん上の genre.ini や同じ名前のフォルダが、ほかの zip の譜面と混ざらないように）
+      let zd = f.name.replace(/\.zip$/i, '').replace(/\//g, '／') || 'zip';
+      for (let k = 2; zipDirs.has(zd); k++) zd = `${f.name.replace(/\.zip$/i, '')} (${k})`;
+      zipDirs.add(zd);
       for (const e of await readZipIndex(f)) {
         if (/(^|\/)__MACOSX\//.test(e.name)) continue;
-        entries.push({ name: e.name, size: e.size, read: async () => toBuf(await e.read()) });
+        entries.push({ name: `${zd}/${e.name}`, size: e.size, read: async () => toBuf(await e.read()) });
       }
     } else entries.push({ name: f.name, size: f.size, read: () => f.arrayBuffer() });
   }

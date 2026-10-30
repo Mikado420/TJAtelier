@@ -48,3 +48,21 @@ test('zip の音源・動画は、使うときに 1 つずつ読み出す（WAVE
   expect(r.audios.map((x) => x.name)).toEqual(['lone.ogg']);
   expect(r.skipped).toEqual(['jacket.png']);
 });
+
+test('いくつかの zip を一度に読み込んでも、zip ごとの genre.ini が混ざらない（zip のいちばん上に genre.ini があっても）', async () => {
+  const enc = new TextEncoder();
+  const z = async (g: string, songs: string[]) =>
+    new File([await writeZip([{ name: 'genre.ini', data: enc.encode(`[Genre]\nGenreName=${g}\n`) }, ...songs.map((s) => ({ name: `${s}/${s}.tja`, data: enc.encode(TJA(s)) }))])], `${g}.zip`);
+  const r = await loadFiles([await z('A', ['a1', 'a2']), await z('B', ['b1']), await z('C', ['c1'])]);
+  const g = Object.fromEntries(r.songs.map((s) => [s.chart.title, s.genre]));
+  expect(g).toEqual({ a1: 'A', a2: 'A', b1: 'B', c1: 'C' });
+});
+
+test('genre.ini が zip のいちばん上にある zip と、フォルダの中にある zip を一緒に読んでも、親子にならない', async () => {
+  const enc = new TextEncoder();
+  const a = new File([await writeZip([{ name: 'genre.ini', data: enc.encode('GenreName=A\n') }, { name: 'a1/a1.tja', data: enc.encode(TJA('a1')) }])], 'A.zip');
+  const b = new File([await writeZip([{ name: 'B/genre.ini', data: enc.encode('GenreName=B\n') }, { name: 'B/b1/b1.tja', data: enc.encode(TJA('b1')) }])], 'B.zip');
+  const r = await loadFiles([a, b]);
+  const g = Object.fromEntries(r.songs.map((s) => [s.chart.title, s.genre]));
+  expect(g).toEqual({ a1: 'A', b1: 'B' });
+});
