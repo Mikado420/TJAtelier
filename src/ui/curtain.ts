@@ -14,12 +14,12 @@ let sound: (name: string) => void = () => {};
 export function setUiSound(f: (name: string) => void) { sound = f; }
 
 /** 幕を閉じる（閉じ終わったら解決） */
-export async function closeCurtain(info: { title: string; sub?: string; course?: string; color?: string }) {
+export async function closeCurtain(info: { title: string; sub?: string }) {
   el?.remove();
   const c = document.createElement('div');
   c.className = 'curtain';
   c.innerHTML = `<div class="cu-st">${COLORS.map((col, i) => `<i style="background:${col};transition-delay:${i * 35}ms"></i>`).join('')}</div>
-    <div class="cu-band"><b>${esc(info.title)}</b><span>${esc(info.sub ?? '')}${info.course ? ` <em style="--cc:${info.color ?? 'var(--accent)'}">${esc(info.course)}</em>` : ''}</span></div>`;
+    <div class="cu-band"><b>${esc(info.title)}</b><span>${esc(info.sub ?? '')}</span></div>`;
   (document.getElementById('root') ?? document.body).appendChild(c);
   el = c;
   void c.offsetWidth;

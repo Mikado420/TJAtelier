@@ -767,10 +767,9 @@ export class Home {
     const course = this.diffCourse;
     if (!course) return;
     rememberCourse(s.id, course);
-    const lv = s.courses.find((c) => c.name === course)?.level ?? 0;
     this.stopPreview();
     try {
-      await closeCurtain({ title: s.title, sub: s.subtitle, course: `${course === 'Edit' ? 'おに（裏）' : COURSE_SHORT[course] ?? course} ${lv}`, color: COURSE_COLOR[course] });
+      await closeCurtain({ title: s.title, sub: s.subtitle });
       this.closeDiff();
       // 曲名を 3 秒見せてから始める
       await holdCurtain(3000);
