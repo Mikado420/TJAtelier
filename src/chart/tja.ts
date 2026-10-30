@@ -78,6 +78,9 @@ export function parseTJA(text: string): EChart {
 
   let header = { name: 'Oni', level: 0, balloons: [] as number[], extra: [] as [string, string][], scrollMode: undefined as 'hb' | 'bm' | undefined };
   let inChart = false;
+  /** #END の後ろ（次の難易度・#START までに書かれた音符は、終わった後に流れる飾り） */
+  let tail = false;
+  let tailTick = 0;
   let items: Item[] = [];
   let course: ECourse = newCourse();
   let st: State = newState();
@@ -117,9 +120,25 @@ export function parseTJA(text: string): EChart {
     target = course;
   };
 
+  /** #END の後ろを読み終えた: 音符があれば #END の位置を覚えて、難易度を閉じる */
+  const closeTail = () => {
+    if (!tail) return;
+    tail = false;
+    inChart = false;
+    if (items.length) flushMeasure();
+    if (course.notes.some((n) => n.tick >= tailTick)) course.endTick = tailTick;
+    else {
+      course.events = course.events.filter((e) => e.tick < tailTick);
+    }
+    sortCourse(course);
+    chart.courses.push(course);
+  };
+
   for (const raw of text.replace(/^﻿/, '').split(/\r?\n/)) {
     const line = raw.replace(/\/\/.*$/, '').trim();
     if (!line) continue;
+    // #END の後ろ: 見出しの行（COURSE: など）か #START まで
+    if (tail && ((!line.startsWith('#') && line.includes(':')) || /^#START\b/i.test(line))) closeTail();
 
     if (line.startsWith('#')) {
       const m = line.match(/^#([A-Z0-9]+)\s*(.*)$/i);
@@ -154,11 +173,12 @@ export function parseTJA(text: string): EChart {
       }
       if (name === 'END') {
         if (!inChart) continue;
+        if (tail) { closeTail(); continue; }
         if (items.length) flushMeasure();
         closeBranch(false);
-        sortCourse(course);
-        chart.courses.push(course);
-        inChart = false;
+        // この後ろに音符があれば、同じ譜面の続き（終わった後に流れる飾り）として読む
+        tail = true;
+        tailTick = st.tick;
         continue;
       }
       // 流れ方: #START の直前（または #START の後）に置く
@@ -253,6 +273,7 @@ export function parseTJA(text: string): EChart {
 
   chart.source = text;
 
+  closeTail();
   // #END が無いファイルへの保険
   if (inChart) {
     if (items.length) flushMeasure();

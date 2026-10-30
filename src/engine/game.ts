@@ -136,12 +136,14 @@ export class Game {
     const fixed = this.br.branches?.length ? this.br.fixed : 0;
     if (fixed !== undefined) this.branch = fixed;
     if (!this.br.branches?.length) for (const st of this.states) if ((st.note.br ?? 0) !== 0) { st.skip = true; st.done = true; }
+    // #END の後ろの音符（飾り）: 判定しない。見逃した音符と同じく、そのまま流れていく
+    for (const st of this.states) if (st.note.dummy) { st.done = true; st.missed = true; }
     const count = (pick: (n: Note) => boolean) => {
       const per = new Map<number, number[]>();
       let common = 0;
       let balloon = 0;
       for (const n of notes) {
-        if (!pick(n)) continue;
+        if (!pick(n) || n.dummy) continue;
         if (n.sec === undefined) {
           if (isHitNote(n.type)) common++;
           else if (n.type === 'balloon') balloon += Math.max(1, n.hits ?? 5);

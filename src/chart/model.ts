@@ -54,6 +54,11 @@ export interface ECourse {
   branches?: EBranch[];
   /** BALLOONNOR・BALLOONEXP・BALLOONMAS で風船の打数を書く */
   balloonPaths?: boolean;
+  /**
+   * #END の位置（tick）。#END より後ろに書かれた音符があるときだけ。
+   * その音符は、曲が終わった演出の後に流れてくる飾り（判定しない）
+   */
+  endTick?: number;
 }
 
 /** 分岐の 1 つの譜面（区間の中の音符と命令） */
@@ -486,6 +491,7 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
       if (n.endTick !== undefined) note.endBeat = bt.beatOf(n.endTick);
     }
     tag?.(note, n.tick);
+    if (course.endTick !== undefined && n.tick >= course.endTick) note.dummy = true;
     return note;
   });
   const bars: BarLine[] = [];
@@ -535,6 +541,7 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
   const lyrics = course.events.filter((e) => e.kind === 'lyric').map((e) => ({ time: t.tickToTime(e.tick), text: (e as { text: string }).text }));
   return {
     name: course.name, level: course.level, notes, bars, gogo, measures: meas, params,
+    ...(course.endTick !== undefined ? { endTime: t.tickToTime(course.endTick) } : {}),
     ...(mode && bt ? { scrollMode: mode, beatPoints: bt.points } : {}),
     ...(jpos.length ? { jpos } : {}),
     ...(lyrics.length ? { lyrics } : {}),

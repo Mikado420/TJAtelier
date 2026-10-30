@@ -303,6 +303,19 @@ export class Renderer {
   private drawEnd(V: Rect, wall: number) {
     const f = this.endFx;
     if (!f) return;
+    if (f.fade) {
+      // 帯が出そろった頃（1.6 秒）に消し始める
+      const k = 1 - (wall - f.t - Math.min(1600, END_HOLD[f.kind])) / 400;
+      if (k <= 0) return;
+      if (k < 1) {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.globalAlpha *= k;
+        drawEndFx(ctx, f.kind, wall - f.t, { x0: LANE_X, x1: V.x1, top: LANE_TOP, bottom: LANE_BOTTOM, vx0: V.x0, vy0: V.y0, vx1: V.x1, vy1: V.y1 });
+        ctx.restore();
+        return;
+      }
+    }
     drawEndFx(this.ctx, f.kind, wall - f.t, { x0: LANE_X, x1: V.x1, top: LANE_TOP, bottom: LANE_BOTTOM, vx0: V.x0, vy0: V.y0, vx1: V.x1, vy1: V.y1 });
   }
 
@@ -623,7 +636,7 @@ export class Renderer {
   }
 
   /** 曲の終わりの帯（クリア成功・クリア失敗・フルコンボ・全良） */
-  private endFx: { kind: EndKind; t: number } | null = null;
+  private endFx: { kind: EndKind; t: number; fade?: boolean } | null = null;
   /** 譜面分岐が変わった */
   private branchFx: { from: number; to: number; t: number; at: number } | null = null;
   /** at = 区間の始まりの時刻 */
@@ -631,8 +644,9 @@ export class Renderer {
     if (from !== to) this.branchFx = { from, to, t: performance.now(), at };
   }
   /** 帯を出す。見せる長さ（ms）を返す */
-  showEnd(kind: EndKind) {
-    this.endFx = { kind, t: performance.now() };
+  /** fade: 帯を見せきったら消す（#END の後ろの音符が、その後に流れてくるのが見えるように） */
+  showEnd(kind: EndKind, fade = false) {
+    this.endFx = { kind, t: performance.now(), fade };
     return END_HOLD[kind];
   }
 
@@ -762,7 +776,7 @@ export class Renderer {
       this.drawLayer('own-counts', `${st.good}|${st.ok}|${st.bad}`, 150, LANE_TOP + 60, 190, 116, () => this.paintCounts(st.good, st.ok, st.bad));
     }
     if (!bc) this.drawGauge(st.gauge, wall);
-    if (!bc) this.drawRollBubble(wall);
+    this.drawRollBubble(wall, bc);
     this.drawJudgeText(wall);
     this.drawTiming(wall);
     if (!bc) {
@@ -1870,7 +1884,8 @@ export class Renderer {
    * 連打中の打数（参考動画: 判定枠の上に金色の扇が開き、白い大きな数字と「連打!!」）。
    * 風船のときは、ふくらんでいく風船と残りの打数の吹き出し
    */
-  private drawRollBubble(wall: number) {
+  /** noCount: 連打の数の吹き出しは出さない（ふくらむ風船は出す。動画用の画面） */
+  private drawRollBubble(wall: number, noCount = false) {
     const r = this.rollFx;
     if (!r) return;
     const age = wall - r.t;
@@ -1879,6 +1894,7 @@ export class Renderer {
       this.drawInflating(r.count, r.hits, age);
       return;
     }
+    if (noCount) return;
     if (age > 900) return;
     const ctx = this.ctx;
     const cx = this.jx;

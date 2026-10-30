@@ -362,7 +362,8 @@ function replaceMeasure(lines: string[], s: SrcCourse, r: { from: number; to: nu
 
 /** 譜面のテキスト（自分で書いたテキストがあれば、それを保ったまま今の譜面にしたもの） */
 export function tjaText(chart: EChart & { source?: string }): string {
-  if (!chart.source) return writeTJA(chart);
+  // #END の後ろに音符がある譜面は、元のテキストに書き込まずに全部書き直す
+  if (!chart.source || chart.courses.some((c) => c.endTick !== undefined)) return writeTJA(chart);
   const t = patchTJA(chart.source, chart);
   chart.source = t;
   return t;

@@ -18,6 +18,7 @@ const BALLOON_MAX_RATE = 50;
 export function buildAutoEvents(notes: readonly Note[], from = -Infinity): AutoEvent[] {
   const ev: AutoEvent[] = [];
   for (const n of notes) {
+    if (n.dummy) continue;
     if (n.type === 'don' || n.type === 'bigDon') {
       if (n.time >= from - 0.05) ev.push({ t: n.time, kind: 'don', note: n });
     } else if (n.type === 'ka' || n.type === 'bigKa') {

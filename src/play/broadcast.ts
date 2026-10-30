@@ -110,7 +110,7 @@ export class Broadcast {
     this.peaks = peaksOf(buf, this.dur);
     const [label, col] = COURSE[course.name] ?? [course.name, '#7b4bd0'];
     // 譜面分岐のある譜面は、達人の音符を数える
-    const notes = course.notes.filter((n) => (n.type === 'don' || n.type === 'ka' || n.type === 'bigDon' || n.type === 'bigKa') && (n.br === undefined || n.br === 2)).length;
+    const notes = course.notes.filter((n) => !n.dummy && (n.type === 'don' || n.type === 'ka' || n.type === 'bigDon' || n.type === 'bigKa') && (n.br === undefined || n.br === 2)).length;
     const sub = (info.sub ?? '').replace(/^(--|\+\+)/, '').trim();
     const genre = info.genre?.trim();
     this.el.style.setProperty('--cc', col);

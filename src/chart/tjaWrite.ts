@@ -77,7 +77,8 @@ export function writeTJA(chart: EChart): string {
     if (hb) out.push('#HBSCROLL');
     out.push('#START');
     out.push(...writeCourseBody(c));
-    out.push('#END');
+    // #END の後ろに音符がある譜面は、本体の途中に #END を書いてある
+    if (c.endTick === undefined) out.push('#END');
     out.push('');
   }
   return out.join('\n');
@@ -100,7 +101,13 @@ function balloonOrder(c: ECourse): ENote[] {
 }
 
 export function writeCourseBody(c: ECourse): string[] {
-  return writeMeasures(c).flat();
+  const ms = writeMeasures(c);
+  if (c.endTick === undefined) return ms.flat();
+  // #END の後ろの音符（終わった後に流れる飾り）: #END を、その位置の小節の前に書く
+  const all = measures(c, contentEnd(c));
+  const at = all.findIndex((m) => m.start >= c.endTick!);
+  const i = at < 0 ? ms.length : Math.min(at, ms.length);
+  return [...ms.slice(0, i).flat(), '#END', ...ms.slice(i).flat()];
 }
 
 /**

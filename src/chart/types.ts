@@ -31,6 +31,8 @@ export interface Note {
   /** 譜面分岐の区間の中の音符: 区間の番号と、どの分岐か（0 = 普通・1 = 玄人・2 = 達人） */
   sec?: number;
   br?: number;
+  /** #END の後ろの音符（曲が終わった演出の後に流れてくる飾り。判定しない） */
+  dummy?: boolean;
 }
 
 /** 譜面分岐の区間（プレイ用） */
@@ -88,6 +90,8 @@ export interface Course {
   measures?: { time: number; num: number; den: number }[];
   /** BPM・#SCROLL の変わり目（時刻の順） */
   params?: { time: number; bpm: number; scroll: number }[];
+  /** #END の時刻（#END の後ろに音符があるときだけ。その音符は、この時刻に出す終わりの演出の後に流れてくる） */
+  endTime?: number;
   /** #SECTION の時刻 */
   sections?: number[];
   /** #LEVELHOLD の時刻（br があれば、その分岐にいるときだけ） */
