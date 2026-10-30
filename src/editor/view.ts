@@ -114,6 +114,9 @@ export const EVENT_COLOR: Record<EEvent['kind'], string> = {
   levelhold: '#f0b64a',
 };
 
+/** エディタには出さず、TJA の文字でだけ書く命令（#LYRIC・#SECTION・#LEVELHOLD） */
+export const TJA_ONLY = new Set<EEvent['kind']>(['lyric', 'section', 'levelhold']);
+
 /** レーンの下に出す種類（設定で切り替える） */
 export type EventShow = Record<EEvent['kind'], boolean>;
 
@@ -1078,7 +1081,7 @@ export class EditorView {
     const evItems: EventItem[] = [];
     for (const e of course.events) {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
-      if (e.kind === 'gogo' || !this.evShow[e.kind]) continue;
+      if (e.kind === 'gogo' || TJA_ONLY.has(e.kind) || !this.evShow[e.kind]) continue;
       if (e.tick > rightTick) continue;
       const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {
@@ -1773,7 +1776,7 @@ export class EditorView {
         ctx.font = `600 ${Math.round(22 * s)}px system-ui, sans-serif`;
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
-        const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
+        const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && !TJA_ONLY.has(e.kind) && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
         const bh = 30 * s;
         const pad = 7 * s;
         const ends = new Map<number, number>();

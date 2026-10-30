@@ -19,7 +19,7 @@ import { ROOM_DAYS, type RoomInfo } from '../../src/collab/protocol';
 interface Env {
   ROOM: DurableObjectNamespace<Room>;
   LOBBY: DurableObjectNamespace<Lobby>;
-  COLLAB: DurableObjectNamespace<Collab>;
+  COLLAB: DurableObjectNamespace<CollabRoom>;
 }
 
 const CORS = {
@@ -95,6 +95,11 @@ export class Lobby extends DurableObject<Env> {
   private async loadCollab() {
     if (this.collab) return this.collab;
     const c = new CollabLobbyCore();
+    // 合作の部屋をすべて片付けた（v3）: 前の一覧も消す
+    if ((await this.ctx.storage.get<string>('collabReset')) !== 'v3') {
+      await this.ctx.storage.delete('collabRooms');
+      await this.ctx.storage.put('collabReset', 'v3');
+    }
     for (const r of (await this.ctx.storage.get<RoomInfo[]>('collabRooms')) ?? []) c.rooms.set(r.id, r);
     this.collab = c;
     return c;
@@ -295,7 +300,11 @@ function doStore(st: DurableObjectStorage): CollabStore {
  * 合作プロジェクト 1 つ。対戦の部屋と同じく WebSocket は「眠れる」受け方にし、起きたら保存から戻す。
  * 変更の保存は少し待ってまとめて書く（待っている間は眠らない）
  */
-export class Collab extends DurableObject<Env> {
+/**
+ * 合作の部屋（1 つの部屋 = 1 つの Durable Object）。
+ * 以前の部屋をすべて片付けるため、クラスの名前を Collab から CollabRoom に替えた（wrangler.toml の v3 で Collab を消す）
+ */
+export class CollabRoom extends DurableObject<Env> {
   private core: CollabCore | null = null;
   private conns = new WeakMap<WebSocket, Conn>();
 

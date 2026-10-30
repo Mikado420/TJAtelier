@@ -773,6 +773,8 @@ export class Renderer {
     ctx.save();
     ctx.translate((V.x0 + V.x1) / 2, y);
     ctx.scale(k, k);
+    // 水色の縁の外側に、黒の細い縁
+    drawCachedText(ctx, text, 0, 0, font, '#0b0d12', '#0b0d12', 17);
     drawCachedText(ctx, text, 0, 0, font, '#fff', '#4d9fbe', 11);
     ctx.restore();
   }

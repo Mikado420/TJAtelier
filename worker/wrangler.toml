@@ -12,7 +12,7 @@ class_name = "Lobby"
 
 [[durable_objects.bindings]]
 name = "COLLAB"
-class_name = "Collab"
+class_name = "CollabRoom"
 
 [[migrations]]
 tag = "v1"
@@ -21,3 +21,9 @@ new_sqlite_classes = ["Room", "Lobby"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Collab"]
+
+# 合作の部屋をすべて片付ける（Collab の中身ごと消して、新しい CollabRoom にする）
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CollabRoom"]
+deleted_classes = ["Collab"]

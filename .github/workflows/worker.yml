@@ -48,6 +48,7 @@ jobs:
           URL=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -n1)
           sleep 5
           echo "::notice title=GET /rooms::$(curl -s "$URL/rooms")"
+          echo "::notice title=GET /collab/rooms::$(curl -s "$URL/collab/rooms")"
           # 部屋を作って、もう 1 人が入り、予約できるか。'ping' に眠ったまま 'pong' が返るか。
           # 30 秒だれも送らずに（サーバーが眠ってから）チャットを送り、部屋の様子が戻っているかを確かめる
           node -e '

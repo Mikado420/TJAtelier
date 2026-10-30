@@ -2783,7 +2783,7 @@ function renderPointSheet(body: HTMLElement) {
 // ---------- レーンの下のイベント（タップしたとき） ----------
 
 const EV_NAMES: Partial<Record<keyof EventShow, string>> = {
-  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動', lyric: '歌詞', section: 'SECTION', levelhold: 'LEVELHOLD',
+  bpm: 'BPM', scroll: 'SCROLL', measure: '拍子', delay: 'DELAY', barline: '小節線の表示', jpos: '判定枠の移動',
 };
 
 /** 一覧に出しているイベント */
@@ -2804,7 +2804,7 @@ function openEvents(items: EventItem[]) {
       openSheet('grad');
       return;
     }
-    if (e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric') {
+    if (e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure') {
       openPoint(e.kind, e.tick);
       return;
     }
@@ -2824,7 +2824,7 @@ function renderEvListSheet(body: HTMLElement) {
     const e = it.events[0];
     const br = it.branch !== undefined ? ed.mainCourse.branches?.[it.branch] : undefined;
     const name = br ? `#BRANCHSTART ${br.type},${br.x},${br.y}` : it.grad ? `グラデ ${it.grad.from}→${it.grad.to}（${it.grad.mode === 'linear' ? '等差' : '等比'}）` : esc(eventText(e));
-    const editable = !!br || !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure' || e.kind === 'lyric';
+    const editable = !!br || !!it.grad || e.kind === 'scroll' || e.kind === 'bpm' || e.kind === 'measure';
     return `<div class="ev-row"><i style="background:${br ? BRANCH_COLOR[Math.max(1, ed.branch)] : EVENT_COLOR[e.kind]}"></i><div class="ev-name">${name}<small>${posText(it.tick)}</small></div>
       ${editable ? `<button data-evi="${i}" data-evact="edit">変更</button>` : ''}<button data-evi="${i}" data-evact="del">消す</button></div>`;
   }).join('')}</div>`;
