@@ -264,6 +264,8 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
+// プレイ画面の文字（canvas に描くので、先に読み込んでおく）
+void document.fonts?.load("16px 'Makinas 4 Square'").catch(() => {});
 
 let playable: Note[] = [];
 let playing = false;

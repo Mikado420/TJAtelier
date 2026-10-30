@@ -16,7 +16,7 @@ export interface EndBox { x0: number; x1: number; top: number; bottom: number; v
 
 const RB = ['#ff4f8b', '#ff9f1c', '#ffd60a', '#2ed573', '#1e90ff', '#8c5cff'];
 const RB_BAND = ['#ffc2e0', '#ffe7a3', '#c4f7d4', '#b5e6ff', '#ddcaff', '#ffc2e0'];
-const FONT = "'Barlow Semi Condensed', 'M PLUS Rounded 1c', 'Arial Narrow', sans-serif";
+const FONT = "'Barlow Semi Condensed', 'Makinas 4 Square', 'Arial Narrow', sans-serif";
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const outCubic = (x: number) => 1 - (1 - x) ** 3;

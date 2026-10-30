@@ -34,7 +34,7 @@ const DRUM = { x: 417, y: 418, r: 76 };
 /** 動画用の画面: レーン（左のパネルも）をこれだけ下へずらす（上は曲の情報、下は帯） */
 export const BC_DY = 380;
 const BALLOON_X = 690; // ふくらむ風船の吹き口（参考動画では判定枠の少し右） // 左パネルのコンボ太鼓
-const FONT = "'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'Arial Rounded MT Bold', system-ui, sans-serif";
+const FONT = "'Makinas 4 Square', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif";
 
 const JUDGE_TEXT: Record<Judge, string> = { good: '良', ok: '可', bad: '不可' };
 const COURSE_LABEL: Record<string, [string, string]> = {
