@@ -32,7 +32,7 @@ const GAUGE = { x1: 768, x2: 1812, y1: 258, y2: 291, segs: 50 };
 const FLOWER = { x: 1912, y: 258, r: 96 };
 const DRUM = { x: 417, y: 418, r: 76 };
 /** 動画用の画面: レーン（左のパネルも）をこれだけ下へずらす（上は曲の情報、下は帯） */
-export const BC_DY = 363;
+export const BC_DY = 380;
 const BALLOON_X = 690; // ふくらむ風船の吹き口（参考動画では判定枠の少し右） // 左パネルのコンボ太鼓
 const FONT = "'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'Arial Rounded MT Bold', system-ui, sans-serif";
 
@@ -781,7 +781,7 @@ export class Renderer {
       this.drawLayer('own-counts', `${st.good}|${st.ok}|${st.bad}`, 150, LANE_TOP + 60, 190, 116, () => this.paintCounts(st.good, st.ok, st.bad));
     }
     if (!bc) this.drawGauge(st.gauge, wall);
-    this.drawRollBubble(wall);
+    if (!bc) this.drawRollBubble(wall);
     this.drawJudgeText(wall);
     this.drawTiming(wall);
     if (!bc) {
@@ -789,8 +789,10 @@ export class Renderer {
       this.drawSparkles(wall);
       this.drawRainbow(wall);
     }
-    this.drawBanner(wall);
-    if (!bc) this.drawLyric(V, course, now);
+    if (!bc) {
+      this.drawBanner(wall);
+      this.drawLyric(V, course, now);
+    }
     this.drawEnd(V, wall);
     ctx.restore();
     if (this.touch && !bc) {

@@ -23,8 +23,8 @@ const COURSE: Record<string, [string, string]> = {
 };
 
 /** 2000×1125 の枠の中の位置（レーンは renderer が BC_DY だけ下へずらして描く） */
-const TL = { x: 50, y: 548, w: 1900, h: 82 };
-const BARS = 190;
+const TL = { x: 50, y: 456, w: 1347, h: 92 };
+const BARS = 300;
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const mmss = (t: number) => {
@@ -75,10 +75,10 @@ export class Broadcast {
   private base: HTMLCanvasElement;
   private on: HTMLCanvasElement;
   private onWrap: HTMLElement;
-  private head: HTMLElement;
+  private seekOn: HTMLElement | null = null;
+  private knob: HTMLElement | null = null;
   private peaks: Float32Array | null = null;
   private q = 1;
-  private bpmMarks: { t: number; bpm: number }[] = [];
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
@@ -92,7 +92,6 @@ export class Broadcast {
     this.base = document.createElement('canvas');
     this.on = document.createElement('canvas');
     this.onWrap = document.createElement('div');
-    this.head = document.createElement('i');
   }
 
   get visible() {
@@ -114,13 +113,6 @@ export class Broadcast {
     const notes = course.notes.filter((n) => (n.type === 'don' || n.type === 'ka' || n.type === 'bigDon' || n.type === 'bigKa') && (n.br === undefined || n.br === 2)).length;
     const sub = (info.sub ?? '').replace(/^(--|\+\+)/, '').trim();
     const genre = info.genre?.trim();
-    // BPM の変わり目（前と違う BPM になる所）
-    this.bpmMarks = [];
-    let prev = course.params?.[0]?.bpm;
-    for (const p of course.params ?? []) {
-      if (p.bpm !== prev && p.time > 0) this.bpmMarks.push({ t: p.time, bpm: p.bpm });
-      prev = p.bpm;
-    }
     this.el.style.setProperty('--cc', col);
     this.inner.innerHTML = `
       <div class="bc-title bc-pnl"><i class="bc-bar"></i>
@@ -136,6 +128,7 @@ export class Broadcast {
         <div class="bc-pnl bc-cell"><i>BAR</i><b><span data-k="bar"></span><small>/ ${course.measures?.length ?? course.bars.length}</small></b></div>
       </div>
       <div class="bc-tl"></div>
+      <div class="bc-seek"><i class="bc-seek-on"></i><i class="bc-knob"></i></div>
       <div class="bc-foot bc-pnl">
         <div class="bc-cell"><i>NOTES</i><b>${notes.toLocaleString('en-US')}</b></div>
         ${genre ? `<div class="bc-cell bc-genre"><i>GENRE</i><b>${esc(genre)}</b></div>` : ''}
@@ -145,8 +138,9 @@ export class Broadcast {
     const tl = this.inner.querySelector('.bc-tl')!;
     this.onWrap.className = 'bc-on';
     this.onWrap.replaceChildren(this.on);
-    this.head.className = 'bc-head';
-    tl.replaceChildren(this.base, this.onWrap, this.head);
+    tl.replaceChildren(this.base, this.onWrap);
+    this.seekOn = this.inner.querySelector('.bc-seek-on');
+    this.knob = this.inner.querySelector('.bc-knob');
     this.shown = '';
     this.el.classList.remove('hidden');
     this.paintTimeline();
@@ -162,7 +156,7 @@ export class Broadcast {
     sp.style.fontSize = '';
     const room = n.clientWidth;
     const w = sp.scrollWidth;
-    if (w > room && room > 0) sp.style.fontSize = `${Math.max(48, Math.floor(112 * (room / w)))}px`;
+    if (w > room && room > 0) sp.style.fontSize = `${Math.max(48, Math.floor(100 * (room / w)))}px`;
   }
 
   /** 16:9 の枠（画面 px）に合わせて置く */
@@ -175,7 +169,7 @@ export class Broadcast {
     }
   }
 
-  /** 曲の流れ（波形・ゴーゴーの区間・BPM の変わり目）。進んだ所の色は上の canvas を幅で切って見せる */
+  /** 曲の流れ（波形・ゴーゴーの区間）。進んだ所の色は上の canvas を幅で切って見せる */
   private paintTimeline() {
     const c = this.course;
     if (!c) return;
@@ -194,21 +188,8 @@ export class Broadcast {
       g.fillStyle = lit ? '#93cde2' : 'rgba(255,255,255,0.2)';
       for (let i = 0; i < BARS; i++) {
         const v = this.peaks ? 0.12 + 0.88 * this.peaks[i] : 0.3;
-        const h = v * (TL.h - 22);
-        g.fillRect(i * bw + 1, TL.h - h, bw - 3, h);
-      }
-      g.fillStyle = '#fbbf14';
-      g.font = `700 17px 'Barlow Semi Condensed', system-ui, sans-serif`;
-      g.textBaseline = 'top';
-      const label = this.bpmMarks.length <= 10;
-      let lastX = -Infinity;
-      for (const m of this.bpmMarks) {
-        const mx = x(m.t);
-        g.fillRect(mx - 1, 0, 3, TL.h);
-        if (label && mx - lastX > 90) {
-          g.fillText(`BPM ${Math.round(m.bpm * 100) / 100}`, mx + 6, 2);
-          lastX = mx;
-        }
+        const h = v * TL.h;
+        g.fillRect(i * bw + 0.5, TL.h - h, bw - 1.5, h);
       }
     };
     paint(this.base, false);
@@ -253,6 +234,7 @@ export class Broadcast {
     set('time', mmss(now));
     set('lyric', lyric);
     this.onWrap.style.width = `${px}px`;
-    this.head.style.transform = `translateX(${px}px)`;
+    if (this.seekOn) this.seekOn.style.width = `${px}px`;
+    if (this.knob) this.knob.style.transform = `translateX(${px}px)`;
   }
 }
