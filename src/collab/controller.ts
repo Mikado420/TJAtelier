@@ -20,7 +20,7 @@ import {
   canApply, canEditLane, COLORS, emptyHead, newCollabId, sortedLanes,
   COMPARE_MAX, type CollabDoc, type Group, type Lane, type Member, type NoteVal, type Op, type RoomSettings,
 } from './protocol';
-import { CollabSession, forgetJoined, joinedList, rememberJoined, type ChatMsg, type CollabLink, type JoinedProject, type JoinOpts } from './session';
+import { CollabSession, forgetJoined, joinedList, rememberJoined, resetOnce, type ChatMsg, type CollabLink, type JoinedProject, type JoinOpts } from './session';
 
 export interface CollabHost {
   ed: Editor;
@@ -1475,6 +1475,7 @@ export const collabProjects = (): JoinedProject[] => joinedList();
 const SHARED_KEY = 'malody-web:collabSongs';
 /** 曲の一覧の曲 → 共有したプロジェクト */
 export function sharedMap(): Record<string, string> {
+  resetOnce();
   try { return JSON.parse(localStorage.getItem(SHARED_KEY) ?? '{}'); } catch { return {}; }
 }
 function markShared(songId: string, projectId: string) {

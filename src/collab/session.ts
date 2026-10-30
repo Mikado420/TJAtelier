@@ -125,7 +125,23 @@ export async function idbDel(k: string) {
 /** 参加しているプロジェクトの一覧（ホームに出す） */
 export interface JoinedProject { id: string; title: string; role: 'edit' | 'view'; at: number }
 const LIST_KEY = 'malody-web:collabList';
+/** サーバーの合作の部屋をすべて片付けた（v3）: この端末に覚えている部屋・共有の印も一度だけ消す */
+const RESET_KEY = 'malody-web:collabReset';
+let resetChecked = false;
+export function resetOnce() {
+  if (resetChecked) return;
+  resetChecked = true;
+  try {
+    if (localStorage.getItem(RESET_KEY) === 'v3') return;
+    const old: JoinedProject[] = JSON.parse(localStorage.getItem(LIST_KEY) ?? '[]');
+    localStorage.removeItem(LIST_KEY);
+    localStorage.removeItem('malody-web:collabSongs');
+    localStorage.setItem(RESET_KEY, 'v3');
+    for (const p of old) void idbDel(`doc:${p.id}`);
+  } catch { /* 無視 */ }
+}
 export function joinedList(): JoinedProject[] {
+  resetOnce();
   try {
     return JSON.parse(localStorage.getItem(LIST_KEY) ?? '[]');
   } catch {
