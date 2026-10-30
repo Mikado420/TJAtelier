@@ -1568,9 +1568,11 @@ export class Renderer {
       ctx.textAlign = 'left';
       ctx.font = `900 24px ${FONT}`;
       outlinedText(ctx, label, cx + 58, cy - 12, '#fff', '#0f1820', 6);
-      ctx.font = `900 18px ${FONT}`;
-      ctx.fillStyle = '#ffe25a';
-      ctx.fillText('★'.repeat(Math.max(1, Math.min(5, Math.ceil(info.level / 2)))), cx + 58, cy + 20);
+      // 星はレベルの数だけ（10 まで）
+      const stars = Math.max(1, Math.min(10, Math.round(info.level)));
+      ctx.font = `900 ${stars > 8 ? 16 : 18}px ${FONT}`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText('★'.repeat(stars), cx + 58, cy + 20);
 
       // 名札（1P・称号・名前）
       this.drawNameplate();
@@ -1611,7 +1613,7 @@ export class Renderer {
 
   /**
    * 左下の名札: アプリのボタンと同じ斜め（8°）の帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
-   * 左に 2 段ぶんの斜めの「1P」の札。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
+   * 左に丸い「1P」（プレイヤーの色）。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
    */
   private drawNameplate(badge = '1P', badgeColor = Renderer.PLAYER_COLOR[1][2], title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
@@ -1621,10 +1623,10 @@ export class Renderer {
     const th = 30;
     const nh = 44;
     const H = th + nh;
-    const px = 16; // 1P の札
-    const pw = 66;
-    const x = px + pw - 12; // 帯（札の下から始める）
-    const w = 236;
+    const bx = 46; // 1P の丸
+    const br = 38;
+    const x = bx + 6; // 帯（丸の下から始める）
+    const w = 252;
     // 平行四辺形（上の辺が右へずれる）。grow で縁の分だけ大きく
     const para = (qx: number, qw: number, grow = 0) => {
       const k = (H + grow * 2) * T;
@@ -1660,33 +1662,38 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.06)';
     ctx.fillRect(x - 20, y0 + th + 4 + (nh - 4) * 0.62, w + 40, (nh - 4) * 0.38);
     ctx.restore();
-    const mid = x + 12 + (w - 12) / 2;
+    // 文字は、丸の右から帯の右端までの真ん中に
+    const left = bx + br + 8;
+    const mid = (left + x + w) / 2;
+    const room = x + w - left - 14;
     ctx.textAlign = 'center';
     ctx.font = `900 16px ${FONT}`;
     ctx.fillStyle = '#0d3550';
-    ctx.fillText(title, mid + 3, y0 + th / 2 + 1, w - 36);
+    ctx.fillText(title, mid + 3, y0 + th / 2 + 1, room);
     // 長い名前は、帯に収まるまで文字を小さく
     let fs = 27;
     ctx.font = `900 ${fs}px ${FONT}`;
-    while (fs > 14 && ctx.measureText(name).width > w - 36) ctx.font = `900 ${--fs}px ${FONT}`;
+    while (fs > 14 && ctx.measureText(name).width > room) ctx.font = `900 ${--fs}px ${FONT}`;
     outlinedText(ctx, name, mid - 2, y0 + th + 2 + nh / 2, '#1b1f23', '#fff', 6);
-    // 1P の札（帯と同じ高さ。プレイヤーの色）
-    para(px, pw, 5);
+    // 1P の丸（プレイヤーの色。上につや）
+    const by = y0 + H / 2;
+    ctx.beginPath();
+    ctx.arc(bx, by, br + 5, 0, Math.PI * 2);
     ctx.fillStyle = OUT;
     ctx.fill();
-    ctx.save();
-    para(px, pw);
-    ctx.clip();
-    const bg = ctx.createLinearGradient(0, y0, 0, y0 + H);
+    const bg = ctx.createLinearGradient(0, by - br, 0, by + br);
     bg.addColorStop(0, shade(badgeColor, 0.45));
     bg.addColorStop(1, shade(badgeColor, -0.3));
+    ctx.beginPath();
+    ctx.arc(bx, by, br, 0, Math.PI * 2);
     ctx.fillStyle = bg;
-    ctx.fillRect(px - 20, y0, pw + 40, H);
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    ctx.fillRect(px - 20, y0, pw + 40, H * 0.38);
-    ctx.restore();
-    ctx.font = `italic 900 ${badge.length > 2 ? 28 : 34}px ${FONT}`;
-    outlinedText(ctx, badge, px + pw / 2, y0 + H / 2 + 2, '#fff', OUT, 7);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(bx, by - br * 0.45, br * 0.7, br * 0.35, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fill();
+    ctx.font = `900 ${badge.length > 2 ? 30 : 36}px ${FONT}`;
+    outlinedText(ctx, badge, bx, by + 2, '#fff', OUT, 7);
     ctx.restore();
   }
 
