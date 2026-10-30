@@ -1237,12 +1237,12 @@ export class Renderer {
     return c;
   }
 
-  /** 2P・3P・4P の色（パネルの上と下、名札の丸） */
+  /** プレイヤーの色（パネルの上と下、名札の札）: 1P 赤・2P 青・3P 黄・4P 緑。自分のパネルはアプリの青のまま */
   private static readonly PLAYER_COLOR: Record<number, [string, string, string]> = {
-    1: ['#3388b8', '#1d5378', '#3a8fc0'],
-    2: ['#e9452f', '#c9301f', '#e8352b'],
-    3: ['#34b26f', '#1f8a52', '#1d9a5a'],
-    4: ['#e8a032', '#c27c18', '#d98a10'],
+    1: ['#3388b8', '#1d5378', '#e8352b'],
+    2: ['#3388b8', '#1d5378', '#2f7fd8'],
+    3: ['#d9a520', '#a87a10', '#f0b81c'],
+    4: ['#34b26f', '#1f8a52', '#22a35e'],
   };
 
   /** 相手の左のパネル（自分のパネルと同じ形。色だけ違う） */
@@ -1613,7 +1613,7 @@ export class Renderer {
    * 左下の名札: アプリのボタンと同じ斜め（8°）の帯。上に称号（水色のつやのある帯）、下に名前（白い帯）、
    * 左に 2 段ぶんの斜めの「1P」の札。全体を太い暗い縁で囲む（太鼓にくっつかない大きさ）
    */
-  private drawNameplate(badge = '1P', badgeColor = '#3a8fc0', title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
+  private drawNameplate(badge = '1P', badgeColor = Renderer.PLAYER_COLOR[1][2], title = 'TJAtelier テストプレイ', name = 'プレイヤー') {
     const ctx = this.ctx;
     const OUT = '#14141c';
     const T = 0.1405;
