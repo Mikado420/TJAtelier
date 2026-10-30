@@ -264,8 +264,13 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
-// プレイ画面の文字（canvas に描くので、先に読み込んでおく）
-void document.fonts?.load("16px 'Makinas 4 Square'").catch(() => {});
+// プレイ画面などの文字（マキナス 4 Square。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
+// ページからの相対の場所で読む（GitHub Pages のサブパスでも、ローカルでも同じ）
+try {
+  const ff = new FontFace('Makinas 4 Square', 'url(fonts/Makinas-4-Square.woff)', { display: 'swap' });
+  document.fonts.add(ff);
+  void ff.load().catch(() => {});
+} catch { /* FontFace が使えない */ }
 
 let playable: Note[] = [];
 let playing = false;

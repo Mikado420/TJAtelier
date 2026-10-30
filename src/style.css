@@ -1,10 +1,3 @@
-/* プレイ画面などの文字（マキナス 4 Square。もじワク研究） */
-@font-face {
-  font-family: 'Makinas 4 Square';
-  src: url('/fonts/Makinas-4-Square.woff') format('woff');
-  font-display: swap;
-}
-
 /* iPhone の横向きで、入力欄以外の文字だけが勝手に大きくなるのを止める（入力欄と色付きの文字がずれる原因） */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 :root {
