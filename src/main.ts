@@ -2011,8 +2011,8 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     }),
   );
   const added = addedAt.filter((x): x is string => !!x);
-  // genre.ini の GenreColor を、そのフォルダの色にする
-  if (Object.keys(r.genreColors).length) await setFolderColors(r.genreColors).catch(() => {});
+  // genre.ini の GenreColor・FontColor を、そのフォルダの色・文字の色にする
+  if (Object.keys(r.genreColors).length || Object.keys(r.genreFonts).length) await setFolderColors(r.genreColors, r.genreFonts).catch(() => {});
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
   for (const src of r.audios) {
     let c: { file: AudioFile; length: number };

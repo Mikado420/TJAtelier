@@ -70,7 +70,7 @@ test('genre.ini が zip のいちばん上にある zip と、フォルダの中
 test('genre.ini の GenreColor を、そのフォルダの色として読む（フォルダの中のフォルダも）', async () => {
   const enc = new TextEncoder();
   const blob = await writeZip([
-    { name: 'p/genre.ini', data: enc.encode('[Genre]\r\nGenreName=アニメ\r\nGenreColor=#0080FF\r\n') },
+    { name: 'p/genre.ini', data: enc.encode('[Genre]\r\nGenreName=アニメ\r\nGenreColor=#0080FF\r\nFontColor=#FFFFFF\r\n') },
     { name: 'p/s/genre.ini', data: enc.encode('GenreName=特撮\nGenreColor=f80\n') },
     { name: 'p/s/x/x.tja', data: enc.encode(TJA('X')) },
     { name: 'q/genre.ini', data: enc.encode('GenreName=色なし\nGenreColor=あお\n') },
@@ -78,4 +78,5 @@ test('genre.ini の GenreColor を、そのフォルダの色として読む（�
   ]);
   const r = await loadFiles([new File([blob], 'x.zip')]);
   expect(r.genreColors).toEqual({ 'アニメ': '#0080ff', 'アニメ/特撮': '#ff8800' });
+  expect(r.genreFonts).toEqual({ 'アニメ': '#ffffff' });
 });

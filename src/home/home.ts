@@ -7,7 +7,7 @@ import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
-  listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
+  listFolderFonts, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
@@ -144,6 +144,8 @@ export class Home {
   private folders: string[] = [];
   /** フォルダの色（genre.ini の GenreColor） */
   private colors: Record<string, string> = {};
+  /** フォルダの帯（選んだとき）の文字の色（genre.ini の FontColor） */
+  private fonts: Record<string, string> = {};
   /** 中の曲を見ているフォルダ（null は「すべて」、UNCAT は「未分類」） */
   private folder: string | null = null;
   /** folder の帯を開いて、下に曲を並べているか */
@@ -231,6 +233,7 @@ export class Home {
     this.songs = await listSongs();
     this.folders = await listFolders();
     this.colors = await listFolderColors();
+    this.fonts = await listFolderFonts();
     // 曲が入っているのに一覧に無いフォルダも出す
     for (const s of this.songs) for (const f of s.folders) if (!this.folders.includes(f)) this.folders.push(f);
     // フォルダの中のフォルダ: 親のフォルダも出す
@@ -336,8 +339,8 @@ export class Home {
         const bar = (k: string, dp: number) => {
           const n = this.folderSongs(k).length;
           const col = folderColor(k, this.colors);
-          // 明るい色の帯（選んだとき）は、文字を黒に
-          const ft = isLight(col) ? '#1b1f23' : '#fff';
+          // 選んだときの帯の上の文字: genre.ini の FontColor。無ければ、明るい色の帯は黒・それ以外は白
+          const ft = this.fonts[k] ?? (isLight(col) ? '#1b1f23' : '#fff');
           const isOpen = chain.has(k);
           const on = this.focus === 'folder' && k === this.fbar && !pk;
           const user = k !== ALL && k !== UNCAT;

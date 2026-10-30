@@ -36,6 +36,8 @@ export interface LoadResult {
   skipped: string[];
   /** genre.ini の GenreColor（入れるフォルダの道のり → '#rrggbb'） */
   genreColors: Record<string, string>;
+  /** genre.ini の FontColor（同じく。色のついた帯の上の文字の色） */
+  genreFonts: Record<string, string>;
 }
 
 /** GenreColor の値を '#rrggbb' にする（読めなければ null） */
@@ -98,18 +100,23 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
   // genre.ini（GenreName= がジャンル名）。置いてあるフォルダとその下の譜面に使う
   const genres = new Map<string, string>();
   const colors = new Map<string, string>();
+  const fonts = new Map<string, string>();
   for (const e of entries) {
     if (base(e.name).toLowerCase() !== 'genre.ini') continue;
     // 1 行ずつ見る（値が空の行から次の行へはみ出さないように）
     let name = '';
     let color: string | null = null;
+    let font: string | null = null;
     for (const line of decodeText(await e.read()).replace(/^﻿/, '').split(/\r\n|\r|\n/)) {
       const m = /^[ \t]*GenreName[ \t]*=(.*)$/i.exec(line);
       if (m && !name) name = m[1].trim().replace(/^["']|["']$/g, '').trim();
       const c = /^[ \t]*GenreColor[ \t]*=(.*)$/i.exec(line);
       if (c && !color) color = parseColor(c[1]);
+      const fc = /^[ \t]*FontColor[ \t]*=(.*)$/i.exec(line);
+      if (fc && !font) font = parseColor(fc[1]);
     }
     if (color) colors.set(dir(e.name), color);
+    if (font) fonts.set(dir(e.name), font);
     // GenreName が空なら、genre.ini が置いてあるフォルダの名前
     if (!name) name = dir(e.name).split('/').filter(Boolean).pop() ?? '';
     // フォルダの道のりの区切り（/）は名前に使えないので全角に
@@ -117,6 +124,7 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
   }
   // 上のフォルダにも genre.ini があれば、フォルダの中のフォルダにする（"親ジャンル/子ジャンル"）
   const genreColors: Record<string, string> = {};
+  const genreFonts: Record<string, string> = {};
   const genreOf = (path: string) => {
     const chain: { g: string; d: string }[] = [];
     let d = dir(path);
@@ -129,8 +137,11 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
     if (!chain.length) return undefined;
     // フォルダの色: そのフォルダ（道のり。入れるときと同じく名前は 40 文字まで）に、その genre.ini の GenreColor
     chain.forEach((c, i) => {
+      const key = chain.slice(0, i + 1).map((x) => x.g.slice(0, 40)).join('/');
       const col = colors.get(c.d);
-      if (col) genreColors[chain.slice(0, i + 1).map((x) => x.g.slice(0, 40)).join('/')] = col;
+      if (col) genreColors[key] = col;
+      const ft = fonts.get(c.d);
+      if (ft) genreFonts[key] = ft;
     });
     return chain.map((c) => c.g).join('/');
   };
@@ -196,5 +207,6 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
     audios: audios.filter((a) => !used.has(a)).map((a) => ({ name: base(a.name), size: a.size, read: a.read })),
     skipped,
     genreColors,
+    genreFonts,
   };
 }
