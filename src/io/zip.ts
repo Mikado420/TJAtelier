@@ -70,6 +70,75 @@ export async function readZip(buf: ArrayBuffer): Promise<ZipEntry[]> {
   return out;
 }
 
+/** 中身を後から 1 つずつ取り出せる zip の項目（目次だけ先に読む） */
+export interface LazyZipEntry {
+  name: string;
+  /** 展開したあとの大きさ（バイト） */
+  size: number;
+  read(): Promise<Uint8Array>;
+}
+
+const blobBytes = async (b: Blob, start: number, end: number) => new Uint8Array(await b.slice(start, end).arrayBuffer());
+
+/** Blob（File）の先頭が zip か */
+export async function isZipBlob(b: Blob) {
+  if (b.size < 4) return false;
+  const h = await blobBytes(b, 0, 4);
+  return h[0] === 0x50 && h[1] === 0x4b && h[2] === 0x03 && h[3] === 0x04;
+}
+
+/**
+ * zip の目次（最後にある中央ディレクトリ）だけを読む。中身は read() したときに、その項目の分だけ読み出して展開する。
+ * zip 全体をメモリに読み込まないので、大きな zip（曲がたくさん入ったもの）でも落ちにくい
+ */
+export async function readZipIndex(blob: Blob): Promise<LazyZipEntry[]> {
+  const tailStart = Math.max(0, blob.size - 22 - 0xffff);
+  const tail = await blobBytes(blob, tailStart, blob.size);
+  const tdv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  let eocd = -1;
+  for (let i = tail.byteLength - 22; i >= 0; i--) {
+    if (tdv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('zip ファイルとして読めませんでした');
+  const count = tdv.getUint16(eocd + 10, true);
+  const cdSize = tdv.getUint32(eocd + 12, true);
+  const cdOff = tdv.getUint32(eocd + 16, true);
+  const cd = await blobBytes(blob, cdOff, cdOff + cdSize);
+  const dv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const out: LazyZipEntry[] = [];
+  let p = 0;
+  for (let i = 0; i < count && p + 46 <= cd.byteLength; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const flags = dv.getUint16(p + 8, true);
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const usize = dv.getUint32(p + 24, true);
+    const nlen = dv.getUint16(p + 28, true);
+    const elen = dv.getUint16(p + 30, true);
+    const clen = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true);
+    const nameBytes = cd.slice(p + 46, p + 46 + nlen);
+    p += 46 + nlen + elen + clen;
+    const name = flags & 0x800 ? new TextDecoder().decode(nameBytes) : decodeText(nameBytes.buffer);
+    if (name.endsWith('/') || name.startsWith('__MACOSX/')) continue;
+    if (flags & 0x1) continue; // 暗号化は非対応
+    if (method !== 0 && method !== 8) continue;
+    out.push({
+      name,
+      size: usize,
+      read: async () => {
+        // ローカルヘッダの名前・拡張の長さは中央ディレクトリと違うことがあるので、読んで確かめる
+        const lh = await blobBytes(blob, lho, lho + 30);
+        const ldv = new DataView(lh.buffer, lh.byteOffset, lh.byteLength);
+        const start = lho + 30 + ldv.getUint16(26, true) + ldv.getUint16(28, true);
+        const comp = await blobBytes(blob, start, start + csize);
+        return method === 0 ? comp : inflateRaw(comp);
+      },
+    });
+  }
+  return out;
+}
+
 // ---------- 書き出し ----------
 
 const CRC_TABLE = (() => {

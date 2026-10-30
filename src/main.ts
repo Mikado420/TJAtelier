@@ -26,12 +26,13 @@ import { analyzeCourse, simulateRolls } from './chart/analyze';
 import { drawChartImage } from './chart/chartImage';
 import { mountTimeline } from './ui/infoTimeline';
 import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
+import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
 import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, saveSong, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
-import { isZip, readZip, writeZip } from './io/zip';
-import { exportBackup, importBackup, isBackup } from './io/backup';
+import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
+import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
 import { fitRoot, localPoint, pixelRatio, typing } from './orient';
 import { BUILD_ID, startAutoUpdate } from './update';
@@ -1888,15 +1889,38 @@ function busyEnd() {
 }
 
 /** 音源を .ogg にする（.ogg ならそのまま）。長さ（秒）も返す */
-async function convertAudio(a: AudioFile, label = a.name): Promise<{ file: AudioFile; length: number }> {
-  busy(`「${label}」を読み込んでいます…`);
-  const buf = await audio.ctx.decodeAudioData(a.data.slice(0));
-  if (isOgg(a.data)) return { file: { name: oggName(a.name), data: a.data }, length: buf.duration };
-  // 動画（mp4 など）は変換しない（背景の動画にもそのまま使う）
-  if (isVideoName(a.name)) return { file: a, length: buf.duration };
-  const data = await pcmToOgg(bufferChannels(buf), buf.sampleRate, (p) => busy(`「${label}」を .ogg にしています…`, p));
-  return { file: { name: oggName(a.name), data }, length: buf.duration };
+async function convertAudio(a: AudioFile, label = a.name, quiet = false): Promise<{ file: AudioFile; length: number }> {
+  // .ogg は、ファイルの中の情報から長さを読む（音のデータに直さないので速い）
+  if (isOgg(a.data)) {
+    const len = oggDuration(a.data);
+    if (len !== null) return { file: { name: oggName(a.name), data: a.data }, length: len };
+  }
+  // 音のデータに直す・.ogg にする所は、メモリを多く使うので 1 曲ずつ
+  return decodeLock.run(async () => {
+    if (!quiet) busy(`「${label}」を読み込んでいます…`);
+    const buf = await audio.ctx.decodeAudioData(a.data.slice(0));
+    if (isOgg(a.data)) return { file: { name: oggName(a.name), data: a.data }, length: buf.duration };
+    // 動画（mp4 など）は変換しない（背景の動画にもそのまま使う）
+    if (isVideoName(a.name)) return { file: a, length: buf.duration };
+    const data = await pcmToOgg(bufferChannels(buf), buf.sampleRate, quiet ? undefined : (p) => busy(`「${label}」を .ogg にしています…`, p));
+    return { file: { name: oggName(a.name), data }, length: buf.duration };
+  });
 }
+
+/** 1 つずつしか動かさない処理（音のデータに直す・.ogg にする） */
+const decodeLock = (() => {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    run<T>(fn: () => Promise<T>): Promise<T> {
+      const p = tail.then(fn, fn);
+      tail = p.catch(() => {});
+      return p;
+    },
+  };
+})();
+
+/** 読み込みで同時に処理する曲の数（多すぎるとメモリが足りなくなる） */
+const IMPORT_PARALLEL = 3;
 
 /** 読み込み: .tja・.zip・音源を何でも。譜面は新しい曲として一覧に入れ、音源はすべて .ogg にする */
 async function importFiles(files: File[], mode: 'any' | 'audio') {
@@ -1905,12 +1929,12 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   const rest: File[] = [];
   let restored = 0;
   for (const f of files) {
-    const buf = await f.arrayBuffer();
-    if (isZip(buf)) {
-      const entries = await readZip(buf);
-      if (isBackup(entries)) {
+    // バックアップかどうかは zip の目次だけで見分ける（曲の zip をここで全部展開しない）
+    if (await isZipBlob(f)) {
+      const index = await readZipIndex(f);
+      if (index.some((e) => e.name === BACKUP_MANIFEST)) {
         busy('バックアップから戻しています…');
-        restored += await importBackup(entries);
+        restored += await importBackup(await readZip(await f.arrayBuffer()));
         continue;
       }
     }
@@ -1927,23 +1951,32 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     toast(`バックアップから ${restored} 曲を戻しました`);
   }
   files = rest;
+  busy('譜面を読んでいます…');
   const r = await loadFiles(files);
   const folder = home.visible ? home.currentFolder : '';
-  const added: string[] = [];
-  const genresMade = new Set<string>();
-  for (const sng of r.songs) {
+  // 曲は何曲か同時に入れる（音源・動画は、その曲を入れるときに 1 曲分だけ読み出す）
+  const addedAt: (string | undefined)[] = [];
+  const folderMade = new Map<string, Promise<unknown>>();
+  let done = 0;
+  const total = r.songs.length;
+  const step = () => { if (total > 1) busy(`曲を入れています… ${done} / ${total}`, done / total); };
+  step();
+  const addSong = async (sng: (typeof r.songs)[number], idx: number) => {
     let a: AudioFile | null = null;
     let len = 0;
+    let video: { name: string; data: ArrayBuffer | null; fromAudio: boolean } | null = null;
+    let vfromAudio = !!sng.video?.fromAudio;
     if (sng.audio) {
       try {
-        const c = await convertAudio(sng.audio, sng.chart.title || sng.audio.name);
+        const raw = { name: sng.audio.name, data: await sng.audio.read() };
+        const c = await convertAudio(raw, sng.chart.title || raw.name, total > 1);
         a = c.file;
         len = c.length;
         // 読み込んだ TJA のテキストは元のまま（WAVE: が無いときだけ入れる）
         if (!sng.chart.wave) sng.chart.wave = a.name;
       } catch {
         // 動画の音が読めない（音の無い動画など）: 動画だけ使う
-        if (sng.video?.fromAudio) sng.video = { name: sng.video.name, data: sng.video.data };
+        if (vfromAudio) vfromAudio = false;
         else r.skipped.push(sng.audio.name);
       }
     }
@@ -1951,18 +1984,38 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     const id = newId();
     // genre.ini があれば、そのジャンル名のフォルダに入れる
     const f = sng.genre ? sng.genre.split('/').map((x) => x.slice(0, 40)).join('/') : folder;
-    if (sng.genre && !genresMade.has(f)) { genresMade.add(f); await addFolder(f).catch(() => {}); }
-    await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, f);
-    if (sng.video) {
-      busy(`「${sng.chart.title || sng.video.name}」の動画を入れています…`);
-      await saveSongVideo(id, { name: sng.video.name, data: sng.video.fromAudio && a ? null : sng.video.data, fromAudio: !!(sng.video.fromAudio && a) });
+    if (sng.genre) {
+      if (!folderMade.has(f)) folderMade.set(f, addFolder(f).catch(() => {}));
+      await folderMade.get(f);
     }
-    added.push(id);
-  }
+    await saveSong(id, { chart: sng.chart, courseIndex: 0 }, a, len, f);
+    a = null;
+    if (sng.video) {
+      if (total <= 1) busy(`「${sng.chart.title || sng.video.name}」の動画を入れています…`);
+      // 音源と同じファイル（mp4 だけの曲）なら、動画は持たない
+      video = { name: sng.video.name, data: vfromAudio && len ? null : await sng.video.read(), fromAudio: vfromAudio && !!len };
+      await saveSongVideo(id, video);
+      video = null;
+    }
+    addedAt[idx] = id;
+    done++;
+    step();
+  };
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(IMPORT_PARALLEL, total) }, async () => {
+      while (next < total) {
+        const idx = next++;
+        await addSong(r.songs[idx], idx);
+      }
+    }),
+  );
+  const added = addedAt.filter((x): x is string => !!x);
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
-  for (const raw of r.audios) {
+  for (const src of r.audios) {
     let c: { file: AudioFile; length: number };
-    try { c = await convertAudio(raw); } catch { r.skipped.push(raw.name); continue; }
+    try { c = await convertAudio({ name: src.name, data: await src.read() }); } catch { r.skipped.push(src.name); continue; }
+    const raw = { name: src.name };
     if (mode === 'audio' && (currentSongId || collab.active) && !home.visible) {
       busyEnd();
       await applyAudioOnly(c.file);
