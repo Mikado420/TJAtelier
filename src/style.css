@@ -1940,9 +1940,9 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home .hr.hfb.open .hfb-ar { transform: translateY(2px) rotate(-135deg); }
 .home .hr.hfb.open { box-shadow: inset 0 -3px 0 var(--fc), 0 0 0 0; }
 /* 選んでいるフォルダの帯: その色で大きく */
-.home .hr.hfb.on { min-height: 70px; background: var(--stripes), var(--fc); color: #fff; padding-left: 30px; }
-.home .hr.hfb.on::before { background: #fff; }
-.home .hr.hfb.on .hfb-ic { stroke: #fff; width: 26px; height: 26px; }
+.home .hr.hfb.on { min-height: 70px; background: var(--stripes), var(--fc); color: var(--ft, #fff); padding-left: 30px; }
+.home .hr.hfb.on::before { background: var(--ft, #fff); }
+.home .hr.hfb.on .hfb-ic { stroke: var(--ft, #fff); width: 26px; height: 26px; }
 .home .hr.hfb.on .hfb-n { font-size: 22px; }
 .home .hr.hfb.on small { opacity: 1; font-size: 18px; }
 .home .hr.hfb-add { background: transparent; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18); color: var(--accent-hi); min-height: 40px; }

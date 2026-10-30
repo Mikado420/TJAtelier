@@ -39,6 +39,8 @@ export interface SongData {
 
 const kIndex = 'lib-index';
 const kFolders = 'lib-folders';
+/** フォルダの色（genre.ini の GenreColor。道のり → '#rrggbb'） */
+const kFolderColors = 'lib-folder-colors';
 const kChart = (id: string) => `lib-chart-${id}`;
 const kAudio = (id: string) => `lib-audio-${id}`;
 const kVideo = (id: string) => `lib-video-${id}`;
@@ -54,6 +56,19 @@ const norm = (x: SongEntry): SongEntry => {
 };
 export const listSongs = async () => ((await dbGet<SongEntry[]>(kIndex)) ?? []).map(norm);
 export const listFolders = async () => (await dbGet<string[]>(kFolders)) ?? [];
+export const listFolderColors = async () => (await dbGet<Record<string, string>>(kFolderColors)) ?? {};
+
+/** フォルダの色を決める（いくつでも。null なら決めた色を外す） */
+export function setFolderColors(colors: Record<string, string | null>) {
+  return serial(async () => {
+    const cur = await listFolderColors();
+    for (const [k, v] of Object.entries(colors)) {
+      if (v) cur[k] = v;
+      else delete cur[k];
+    }
+    await dbPut(kFolderColors, cur);
+  });
+}
 export const loadSongData = (id: string) => dbGet<SongData>(kChart(id));
 export const loadSongAudio = (id: string) => dbGet<AudioFile>(kAudio(id));
 export const getCurrentId = () => dbGet<string>('lib-current');
@@ -216,6 +231,9 @@ export async function renameFolder(from: string, to: string) {
   await serial(async () => {
     const fs = await listFolders();
     await dbPut(kFolders, [...fs.map(mv), ...folderParents(to)].filter((f, i, a) => a.indexOf(f) === i));
+    // 色もいっしょに移す
+    const cs = await listFolderColors();
+    if (Object.keys(cs).some((f) => inFolderTree(f, from))) await dbPut(kFolderColors, Object.fromEntries(Object.entries(cs).map(([f, c]) => [mv(f), c])));
   });
   await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, from)) ? { ...x, folders: [...new Set(x.folders.map(mv))] } : x)));
 }
@@ -225,6 +243,8 @@ export async function deleteFolder(name: string) {
   await serial(async () => {
     const fs = await listFolders();
     await dbPut(kFolders, fs.filter((f) => !inFolderTree(f, name)));
+    const cs = await listFolderColors();
+    if (Object.keys(cs).some((f) => inFolderTree(f, name))) await dbPut(kFolderColors, Object.fromEntries(Object.entries(cs).filter(([f]) => !inFolderTree(f, name))));
   });
   await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, name)) ? { ...x, folders: x.folders.filter((f) => !inFolderTree(f, name)) } : x)));
 }

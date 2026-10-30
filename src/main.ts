@@ -29,7 +29,7 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
@@ -2011,6 +2011,8 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
     }),
   );
   const added = addedAt.filter((x): x is string => !!x);
+  // genre.ini の GenreColor を、そのフォルダの色にする
+  if (Object.keys(r.genreColors).length) await setFolderColors(r.genreColors).catch(() => {});
   // 譜面の無い音源: 編集中で「音源を読み込む」なら今の曲に、ほかは音源ごとに新しい曲
   for (const src of r.audios) {
     let c: { file: AudioFile; length: number };

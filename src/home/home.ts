@@ -6,7 +6,8 @@ import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import {
-  addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
+  addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
+  listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
@@ -85,12 +86,23 @@ const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文�
 const ALL = '\uE000all';
 const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
 /** フォルダごとの色（すべては青、未分類は灰色、ほかは名前から決まる） */
-function folderColor(key: string) {
+function folderColor(key: string, custom?: Record<string, string>) {
   if (key === ALL) return '#4d9fbe';
   if (key === UNCAT) return '#5a6670';
+  // genre.ini の GenreColor で決まった色
+  if (custom?.[key]) return custom[key];
   let h = 0;
   for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return FOLDER_COLORS[h % FOLDER_COLORS.length];
+}
+/** 明るい色か（その上の文字を黒にする） */
+function isLight(hex: string) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const lin = (v: number) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return L > 0.45;
 }
 /** 曲の行に出す王冠: 王冠のある難易度のうち、いちばん難しいもの（かんたん→ふつう→むずかしい→おに→裏おに） */
 function topCrown(m: Record<string, { crown: Crown }>, s: SongEntry): Crown | null {
@@ -130,6 +142,8 @@ export class Home {
   private readonly foldersEl: HTMLElement;
   private songs: SongEntry[] = [];
   private folders: string[] = [];
+  /** フォルダの色（genre.ini の GenreColor） */
+  private colors: Record<string, string> = {};
   /** 中の曲を見ているフォルダ（null は「すべて」、UNCAT は「未分類」） */
   private folder: string | null = null;
   /** folder の帯を開いて、下に曲を並べているか */
@@ -216,6 +230,7 @@ export class Home {
   async reload() {
     this.songs = await listSongs();
     this.folders = await listFolders();
+    this.colors = await listFolderColors();
     // 曲が入っているのに一覧に無いフォルダも出す
     for (const s of this.songs) for (const f of s.folders) if (!this.folders.includes(f)) this.folders.push(f);
     // フォルダの中のフォルダ: 親のフォルダも出す
@@ -320,14 +335,16 @@ export class Home {
         const ic = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
         const bar = (k: string, dp: number) => {
           const n = this.folderSongs(k).length;
-          const col = folderColor(k);
+          const col = folderColor(k, this.colors);
+          // 明るい色の帯（選んだとき）は、文字を黒に
+          const ft = isLight(col) ? '#1b1f23' : '#fff';
           const isOpen = chain.has(k);
           const on = this.focus === 'folder' && k === this.fbar && !pk;
           const user = k !== ALL && k !== UNCAT;
           const acts = pk ? '' : `<span class="hfb-acts">${user
             ? `<button data-fsub="${esc(k)}" aria-label="中にフォルダを作る">${ic('M3 6.5h6l2 2h10v10H3zM12 11v6M9 14h6')}<small>フォルダ</small></button><button data-frename="${esc(k)}" aria-label="名前を変える">${ic('M4 20h4L19 9l-4-4L4 16z')}<small>名前</small></button><button data-fdel="${esc(k)}" aria-label="フォルダを消す">${ic('M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13')}<small>消す</small></button>`
             : ''}</span>`;
-          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col};--dp:${dp}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${acts}<i class="hfb-ar" aria-hidden="true"></i></div>`);
+          rows.push(`<div class="hr hfb ${on ? 'on' : ''} ${isOpen ? 'open' : ''} ${k === UNCAT ? 'hf-uncat' : ''}" data-fbar="${esc(k)}" style="--fc:${col};--ft:${ft};--dp:${dp}"><svg class="hfb-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5h6l2 2h10v10H3z"/></svg><span class="hfb-n">${esc(this.folderName(k))}</span><small>${n}<span> 曲</span></small>${acts}<i class="hfb-ar" aria-hidden="true"></i></div>`);
           if (!isOpen) return;
           const kids = user ? this.childFolders(k) : [];
           for (const c of kids) bar(c, dp + 1);

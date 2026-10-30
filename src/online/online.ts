@@ -13,7 +13,7 @@ import { parseTJA } from '../chart/tja';
 import { writeTJA } from '../chart/tjaWrite';
 import { Game } from '../engine/game';
 import { saveBest, type Crown } from '../home/home';
-import { listFolders, listSongs, loadSongAudio, loadSongData, loadSongVideo, type SongEntry } from '../io/library';
+import { listFolderColors, listFolders, listSongs, loadSongAudio, loadSongData, loadSongVideo, type SongEntry } from '../io/library';
 import type { PlayMode } from '../play/playmode';
 import type { Opponent } from '../render/renderer';
 import { getCachedAudio, getCachedVideo, putCachedAudio, putCachedVideo } from './cache';
@@ -52,9 +52,12 @@ const NAME_KEY = 'malody-web:onlineName';
 const ALL = 'all';
 const UNCAT = 'uncat';
 const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
+/** genre.ini の GenreColor で決まったフォルダの色 */
+let customColors: Record<string, string> = {};
 function folderColor(key: string) {
   if (key === ALL) return '#4d9fbe';
   if (key === UNCAT) return '#5a6670';
+  if (customColors[key]) return customColors[key];
   let h = 0;
   for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return FOLDER_COLORS[h % FOLDER_COLORS.length];
@@ -522,6 +525,7 @@ export class OnlineScreen {
     if (a === 'pick') {
       this.picking = (await listSongs()).filter((s) => s.courses.length);
       const fs = new Set(await listFolders().catch(() => [] as string[]));
+      customColors = await listFolderColors().catch(() => ({}));
       for (const x of this.picking) for (const f of x.folders) fs.add(f);
       this.pickFolders = [...fs];
       this.modal = 'pick';
