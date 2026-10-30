@@ -1442,36 +1442,28 @@ function renderSheet() {
       </div>`}`;
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
-    body.innerHTML = `
-      <div class="st-grid">
-        <section class="an-card st-card">
-          <h3>プレイ</h3>
-          ${stSwitch('auto', 'オート', settings.auto)}
-          ${playSettingRows()}
+    const t = settingsTab;
+    const pane =
+      t === 'play' ? `${stSwitch('auto', 'オート', settings.auto)}${playRows()}
           <div class="st-btns">
             <button data-act="calibrate">タイミング調整</button>
             ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
+          </div>`
+      : t === 'view' ? viewRows()
+      : t === 'vol' ? volumeRows()
+      : t === 'ed' ? `<div class="st-sub">レーンの下に出すイベント</div>
+          <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>`
+      : `<div class="st-btns">
+            <button data-act="backup">バックアップを書き出す</button>
+            <button data-act="restore">バックアップから戻す</button>
           </div>
           ${isNativeHost() ? `<p class="st-ver">アプリ v${nativeAppVersion() || '2 以前'}</p>` : ''}
-        </section>
-        <section class="an-card st-card">
-          <h3>音量</h3>
-          ${volumeRows()}
-        </section>
-        <section class="an-card st-card">
-          <h3>エディタ</h3>
-          <div class="st-sub">レーンの下に出すイベント</div>
-          <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>
-        </section>
-      </div>
-      <section class="an-card st-card st-data">
-        <h3>データ</h3>
-        <div class="st-btns">
-          <button data-act="backup">バックアップを書き出す</button>
-          <button data-act="restore">バックアップから戻す</button>
-        </div>
-      </section>
-      <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
+          <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
+    body.innerHTML = `
+      <div class="st-wrap">
+        <nav class="st-nav">${SETTINGS_TABS.map(([k, l, d]) => `<button data-sttab="${k}" class="${k === t ? 'on' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('')}</nav>
+        <section class="an-card st-card st-pane">${pane}</section>
+      </div>`;
   } else if (sheet === 'cut') {
     renderCutSheet(body);
   } else if (sheet === 'tempo') {
@@ -1670,6 +1662,25 @@ const stRange = (key: string, label: string, min: number, max: number, step: num
   `<div class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}">` +
   `<label class="st-num"><input type="number" inputmode="decimal" step="any" data-set="${key}" data-scale="${scale}" value="${Number((v * scale).toFixed(3))}"><i>${unit}</i></label></div>`;
 const HIT_MODES = [['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const;
+/** プレイの設定（叩き方に関わるもの） */
+function playRows() {
+  return `
+    <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
+    ${stRange('offset', '判定調整', -300, 300, 1, settings.offset, 1, 'ms')}
+    <div class="st-row"><span>譜面分岐</span><div class="st-seg four">${BRANCH_MODES.map(([v, l]) => `<button data-brmode="${v}" class="${settings.branch === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
+}
+/** 表示の設定（プレイ画面の見た目） */
+function viewRows() {
+  return `
+    ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
+    ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
+    ${stSwitch('pauseButton', 'ポーズボタンを表示', settings.pauseButton)}
+    ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
+    ${stSwitch('broadcast', '動画用の画面', settings.broadcast)}
+    <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
+}
 function playSettingRows() {
   return `
     <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
@@ -1746,7 +1757,24 @@ function onVideoModeClick(b: HTMLButtonElement) {
   play.applySettings();
 }
 
+/** 設定の画面のタブ */
+type SettingsTab = 'play' | 'view' | 'vol' | 'ed' | 'data';
+let settingsTab: SettingsTab = 'play';
+const SETTINGS_TABS: [SettingsTab, string, string][] = [
+  ['play', 'プレイ', 'M7 4v16l13-8z'],
+  ['view', '表示', 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
+  ['vol', '音量', 'M4 9v6h4l5 4V5L8 9zM17 8a5 5 0 0 1 0 8M19.5 5.5a8.5 8.5 0 0 1 0 13'],
+  ['ed', 'エディタ', 'M4 20h4L19 9l-4-4L4 16z'],
+  ['data', 'データ', 'M12 3c5 0 8 1.5 8 3v12c0 1.5-3 3-8 3s-8-1.5-8-3V6c0-1.5 3-3 8-3zM4 6c0 1.5 3 3 8 3s8-1.5 8-3M4 12c0 1.5 3 3 8 3s8-1.5 8-3'],
+];
+
 $('sheetBody').addEventListener('click', (e) => {
+  const tb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-sttab]');
+  if (tb) {
+    settingsTab = tb.dataset.sttab as SettingsTab;
+    renderSheet();
+    return;
+  }
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
   if (b) onHitModeClick(b);
   const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');

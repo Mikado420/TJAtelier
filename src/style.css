@@ -2661,3 +2661,12 @@ body.playing .br-ctl { display: none; }
 
 /* 文字はすべてマキナス 4 Flat（ボタン・入力欄も） */
 button, input, select, textarea { font-family: inherit; }
+
+/* 設定の画面: 左に縦のタブ、右にそのタブの項目 */
+.st-wrap { display: flex; gap: 14px; align-items: flex-start; }
+.st-nav { flex: none; width: clamp(120px, 20%, 190px); display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
+.sheet-body .st-nav button { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 16px; font-size: 17px; font-weight: 800; text-align: left; background: var(--deep); color: #fff; }
+.sheet-body .st-nav button.on { background: var(--accent); }
+.st-nav svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+.st-pane { flex: 1; min-width: 0; }
+@media (max-width: 700px) { .sheet-body .st-nav button { padding: 0 10px; gap: 8px; font-size: 15px; } }
