@@ -29,7 +29,7 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, saveSong, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
@@ -2352,6 +2352,9 @@ async function boot() {
     const f = await siteHitSound(k);
     if (f) await applyHitSound(k, f);
   }
+  // 一覧から消えてしまった曲・フォルダを戻す（以前の読み込みで、同時に書いて消えたもの）
+  const back = await repairLibrary().catch(() => 0);
+  if (back) toast(`一覧から消えていた ${back} 曲を「未分類」に戻しました`);
   // 前の版で 1 曲だけ保存していた譜面は、曲の一覧に移す。一覧が空ならサンプル譜面を入れておく
   if (!(await listSongs()).length) {
     const saved = await loadChart();

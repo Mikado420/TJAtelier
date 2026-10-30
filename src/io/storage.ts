@@ -49,6 +49,22 @@ export async function dbGet<T>(key: string): Promise<T | null> {
   }
 }
 
+/** prefix で始まるキーの一覧 */
+export async function dbKeys(prefix: string): Promise<string[]> {
+  try {
+    const db = await open();
+    const v = await new Promise<string[]>((resolve, reject) => {
+      const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+      req.onsuccess = () => resolve(req.result.map(String));
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return v;
+  } catch {
+    return [];
+  }
+}
+
 export async function dbDel(key: string) {
   try {
     const db = await open();

@@ -1,6 +1,7 @@
 import type { EChart } from '../chart/model';
 import type { AudioFile } from './load';
-import { dbGet, dbPut, dbDel } from './storage';
+import { oggDuration } from '../audio/duration';
+import { dbDel, dbGet, dbKeys, dbPut } from './storage';
 
 /**
  * 曲の一覧（ライブラリ）。曲ごとに譜面と音源をブラウザ内（IndexedDB）に保存し、フォルダで分ける。
@@ -81,10 +82,59 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
   };
 }
 
-async function writeIndex(f: (list: SongEntry[]) => SongEntry[]) {
+/**
+ * 曲の一覧・フォルダの一覧の「読んで → 変えて → 書く」は 1 つずつ順に行う。
+ * 同時に行うと（何曲か同時に読み込むときなど）、後から書いたほうが先の変更を消してしまうため
+ */
+let libTail: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const p = libTail.then(fn, fn);
+  libTail = p.catch(() => {});
+  return p;
+}
+
+function writeIndex(f: (list: SongEntry[]) => SongEntry[]) {
+  return serial(async () => {
+    const list = await listSongs();
+    // 前の版の folder は持たない（folders に移してある）
+    await dbPut(kIndex, f(list).map(({ folder: _old, ...x }) => x));
+  });
+}
+
+/**
+ * 一覧を直す（同時に書いて消えてしまったものを戻す）:
+ * - 譜面は保存してあるのに一覧から消えた曲を、一覧に戻す（入っていたフォルダは分からないので未分類）
+ * - 曲が入っているのにフォルダの一覧に無いフォルダ（と、その上のフォルダ）を足す
+ * 戻した曲の数を返す
+ */
+export async function repairLibrary(): Promise<number> {
+  const keys = await dbKeys('lib-chart-');
+  let back = 0;
+  // ほかの書き込みが終わってから見る
+  await serial(async () => {});
   const list = await listSongs();
-  // 前の版の folder は持たない（folders に移してある）
-  await dbPut(kIndex, f(list).map(({ folder: _old, ...x }) => x));
+  const have = new Set(list.map((x) => x.id));
+  const lost = keys.map((k) => k.slice('lib-chart-'.length)).filter((id) => id && !have.has(id));
+  const add: SongEntry[] = [];
+  for (const id of lost) {
+    const data = await dbGet<SongData>(kChart(id));
+    if (!data?.chart) continue;
+    // 曲の長さは .ogg ならファイルの情報から読む（読めなければ空のまま）
+    const au = await dbGet<AudioFile>(kAudio(id));
+    const len = au?.data ? oggDuration(au.data) ?? 0 : 0;
+    add.push(entryOf(id, data.chart, { folders: [] }, len));
+  }
+  if (add.length) {
+    await writeIndex((l) => [...l.filter((x) => !add.some((a) => a.id === x.id)), ...add]);
+    back = add.length;
+  }
+  const used = [...new Set(list.flatMap((x) => x.folders))];
+  await serial(async () => {
+    const fs = await listFolders();
+    const miss = used.flatMap((f) => [...folderParents(f), f]).filter((f, i, a) => !fs.includes(f) && a.indexOf(f) === i);
+    if (miss.length) await dbPut(kFolders, [...fs, ...miss]);
+  });
+  return back;
 }
 
 /** 曲を保存する（audio は undefined なら音源はそのまま、null なら消す。folder は新しい曲を入れるフォルダ） */
@@ -152,24 +202,30 @@ export const inFolderTree = (f: string, root: string) => f === root || f.startsW
 export const folderParents = (f: string) => f.split('/').slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join('/'));
 
 /** フォルダを作る（親のフォルダも無ければ作る） */
-export async function addFolder(name: string) {
-  const fs = await listFolders();
-  const add = [...folderParents(name), name].filter((f) => !fs.includes(f));
-  if (add.length) await dbPut(kFolders, [...fs, ...add]);
+export function addFolder(name: string) {
+  return serial(async () => {
+    const fs = await listFolders();
+    const add = [...folderParents(name), name].filter((f) => !fs.includes(f));
+    if (add.length) await dbPut(kFolders, [...fs, ...add]);
+  });
 }
 
 /** フォルダの名前（道のり）を変える。中のフォルダもいっしょに移る */
 export async function renameFolder(from: string, to: string) {
   const mv = (f: string) => (inFolderTree(f, from) ? to + f.slice(from.length) : f);
-  const fs = await listFolders();
-  await dbPut(kFolders, [...fs.map(mv), ...folderParents(to)].filter((f, i, a) => a.indexOf(f) === i));
+  await serial(async () => {
+    const fs = await listFolders();
+    await dbPut(kFolders, [...fs.map(mv), ...folderParents(to)].filter((f, i, a) => a.indexOf(f) === i));
+  });
   await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, from)) ? { ...x, folders: [...new Set(x.folders.map(mv))] } : x)));
 }
 
 /** フォルダを消す（中のフォルダも。曲は消さず、そのフォルダから外すだけ） */
 export async function deleteFolder(name: string) {
-  const fs = await listFolders();
-  await dbPut(kFolders, fs.filter((f) => !inFolderTree(f, name)));
+  await serial(async () => {
+    const fs = await listFolders();
+    await dbPut(kFolders, fs.filter((f) => !inFolderTree(f, name)));
+  });
   await writeIndex((list) => list.map((x) => (x.folders.some((f) => inFolderTree(f, name)) ? { ...x, folders: x.folders.filter((f) => !inFolderTree(f, name)) } : x)));
 }
 
