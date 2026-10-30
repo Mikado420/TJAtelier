@@ -791,17 +791,14 @@ export class Renderer {
     }
   }
 
-  /** 舞う塵（奥・中・手前の 3 層。位置は 0〜1、z で層を決める） */
+  /** 舞う塵（いちばん奥・奥・中の 3 層。位置は 0〜1、z で層を決める） */
   private dust: { x: number; y: number; z: number; r: number; ph: number }[] = [];
   /** 塵の流れた量（BPM 120 で 1 秒に 1 進む。BPM が変わっても位置は飛ばずに速さだけ変わる） */
   private dustPhase = 0;
   private dustWall = 0;
-  /** 手前の層のぼやけた粒（毎回グラデーションを作らないよう、一度だけ描いておく） */
-  private dustSprite: HTMLCanvasElement | null = null;
 
-  /** 下の背景は前もって描いてあるので、ここでは舞う塵（パソコンのみ）だけ描く。流れる速さは今の BPM に合わせる */
+  /** 下の背景は前もって描いてあるので、ここでは舞う塵だけ描く（タッチ用の太鼓の上には描かない）。流れる速さは今の BPM に合わせる */
   private drawBottom(V: Rect, wall: number, now: number, bars: Course['bars']) {
-    if (this.touch) return;
     const ctx = this.ctx;
     const top = TEXT_BOTTOM;
     const W = V.x1 - V.x0;
@@ -811,17 +808,6 @@ export class Renderer {
       let seed = 7;
       const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
       for (let i = 0; i < 140; i++) this.dust.push({ x: rnd(), y: rnd(), z: rnd(), r: rnd(), ph: rnd() * Math.PI * 2 });
-    }
-    if (!this.dustSprite) {
-      const c = document.createElement('canvas');
-      c.width = c.height = 64;
-      const g = c.getContext('2d')!;
-      const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      grd.addColorStop(0, 'rgba(200,230,255,1)');
-      grd.addColorStop(1, 'rgba(200,230,255,0)');
-      g.fillStyle = grd;
-      g.fillRect(0, 0, 64, 64);
-      this.dustSprite = c;
     }
     // 今の BPM（小節線の BPM。曲の前は最初の小節の BPM）
     let bpm = bars[0]?.bpm ?? 120;
@@ -835,31 +821,29 @@ export class Renderer {
     this.dustPhase += dt * Math.min(4, bpm / 120);
     const P = this.dustPhase;
     const wrap = (v: number) => ((v % 1) + 1) % 1;
-    const SPEED = [0.025, 0.06, 0.13];
-    const SIZE = [2.2, 4.6, 10];
-    const ALPHA = [0.35, 0.5, 0.28];
+    const SPEED = [0.012, 0.025, 0.06];
+    const SIZE = [1.2, 2.2, 4.6];
+    const ALPHA = [0.3, 0.35, 0.5];
     ctx.save();
     ctx.beginPath();
     ctx.rect(V.x0, top, W, H);
-    ctx.clip();
+    // タッチ用の太鼓（面と縁）の上には描かない（太鼓は画面 px なので、この座標に直してくり抜く）
+    if (this.touch && this.padVisible) {
+      const D = this.drum();
+      ctx.ellipse((D.cx - this.ox) / this.s, (D.cy - this.oy) / this.s, (D.rx + D.rim * 2) / this.s, (D.ry + D.rim * 2) / this.s, 0, 0, Math.PI * 2);
+    }
+    ctx.clip('evenodd');
     for (const d of this.dust) {
-      const layer = d.z < 0.55 ? 0 : d.z < 0.85 ? 1 : 2;
+      const layer = d.z < 0.4 ? 0 : d.z < 0.75 ? 1 : 2;
       const x = V.x0 + wrap(d.x - P * SPEED[layer]) * W;
       const y = top + wrap(d.y + Math.sin(P * 0.4 + d.ph) * 0.015) * H;
       const r = SIZE[layer] * (0.7 + d.r * 0.6);
       const a = ALPHA[layer] * (0.6 + 0.4 * Math.sin(wall / 700 + d.ph));
       if (a <= 0) continue;
-      if (layer === 2) {
-        ctx.globalAlpha = a;
-        const rr = r * 2.2;
-        ctx.drawImage(this.dustSprite, x - rr, y - rr, rr * 2, rr * 2);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillStyle = `rgba(220,236,250,${a.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.fillStyle = `rgba(220,236,250,${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
     ctx.restore();
   }
