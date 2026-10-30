@@ -384,7 +384,7 @@ export class Renderer {
     c.beginPath();
     c.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
     c.clip();
-    if (this.broadcast) this.paintBroadcastBackground(c, V);
+    if (this.broadcast) { if (vm !== 'full') this.paintBroadcastBackground(c, V); }
     else if (vm) this.paintVideoBackground(c, V, vm);
     else this.paintPlainBackground(c, V);
     if (!this.spectate) {
@@ -1712,18 +1712,26 @@ export class Renderer {
     ctx.fillRect(x - 20, y0 + th + 4 + (nh - 4) * 0.62, w + 40, (nh - 4) * 0.38);
     ctx.restore();
     // 文字は、丸の右から帯の右端までの真ん中に
+    // 右端は半円なので、文字を置く幅は半円の手前まで
     const left = bx + br + 8;
-    const mid = (left + x + w) / 2;
-    const room = x + w - left - 14;
+    const right = x + w - H * 0.32;
+    const mid = (left + right) / 2;
+    const room = right - left - 8;
     ctx.textAlign = 'center';
-    ctx.font = `900 16px ${FONT}`;
+    ctx.font = `900 18px ${FONT}`;
+    // 称号の文字（日本語は細く見えるので、同じ色の細い縁で太らせる）
     ctx.fillStyle = '#0d3550';
-    ctx.fillText(title, mid + 3, y0 + th / 2 + 1, room);
+    ctx.strokeStyle = '#0d3550';
+    ctx.lineWidth = 1.6;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(title, mid, y0 + th / 2 + 1, room);
+    ctx.fillText(title, mid, y0 + th / 2 + 1, room);
+    ctx.lineJoin = 'miter';
     // 長い名前は、帯に収まるまで文字を小さく
     let fs = 27;
     ctx.font = `900 ${fs}px ${FONT}`;
     while (fs > 14 && ctx.measureText(name).width > room) ctx.font = `900 ${--fs}px ${FONT}`;
-    outlinedText(ctx, name, mid - 2, y0 + th + 2 + nh / 2, '#1b1f23', '#fff', 6);
+    outlinedText(ctx, name, mid, y0 + th + 2 + nh / 2, '#1b1f23', '#fff', 6);
     // 1P の丸（プレイヤーの色。上につや）
     const by = y0 + H / 2;
     ctx.beginPath();

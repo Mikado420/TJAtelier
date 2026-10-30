@@ -117,7 +117,7 @@ export class Broadcast {
     this.inner.innerHTML = `
       <div class="bc-title bc-pnl"><i class="bc-bar"></i>
         <div class="bc-meta"><span class="bc-chip">${esc(label)}</span><b class="bc-lv">★${course.level}</b>${info.maker ? `<span class="bc-maker">${esc(info.maker)}</span>` : ''}</div>
-        <div class="bc-name"><span>${esc(info.title)}</span></div>
+        <div class="bc-name">${esc(info.title)}</div>
         ${sub ? `<div class="bc-sub">${esc(sub)}</div>` : ''}
       </div>
       <div class="bc-jk">${info.jacket ? `<img src="${info.jacket}" alt="">` : '<img class="bc-logo" src="logo.png" alt="">'}</div>
@@ -144,19 +144,43 @@ export class Broadcast {
     this.shown = '';
     this.el.classList.remove('hidden');
     this.paintTimeline();
-    void document.fonts?.ready.then(() => this.paintTimeline());
+    void document.fonts?.ready.then(() => { this.paintTimeline(); this.fitTitle(); });
     requestAnimationFrame(() => this.fitTitle());
   }
 
-  /** 曲名が長いときは、帯に収まるように縮める */
+  /**
+   * 曲名・サブタイトルが長いときは、板に収まるように文字を小さくする。
+   * 2 行に分けられる大きさまで小さくなったら、2 行にする（それでも入らなければ、入るまでさらに小さく）
+   */
   private fitTitle() {
-    const n = this.inner.querySelector<HTMLElement>('.bc-name');
-    const sp = n?.firstElementChild as HTMLElement | null;
-    if (!n || !sp) return;
-    sp.style.fontSize = '';
-    const room = n.clientWidth;
-    const w = sp.scrollWidth;
-    if (w > room && room > 0) sp.style.fontSize = `${Math.max(48, Math.floor(100 * (room / w)))}px`;
+    const name = this.inner.querySelector<HTMLElement>('.bc-name');
+    const sub = this.inner.querySelector<HTMLElement>('.bc-sub');
+    if (!name) return;
+    const AREA = 154;
+    const subH = sub ? this.fitBox(sub, 32, 58, 1.2) + 6 : 0;
+    this.fitBox(name, 100, AREA - subH, 1.12);
+  }
+
+  /** el の文字を、幅と高さ（availH）に収まる大きさにする。使った高さを返す */
+  private fitBox(el: HTMLElement, max: number, availH: number, lh: number) {
+    el.style.whiteSpace = 'nowrap';
+    el.style.fontSize = `${max}px`;
+    const cw = el.clientWidth;
+    const sw = el.scrollWidth;
+    let size = Math.min(sw > cw && cw > 0 ? Math.floor((max * cw) / sw) : max, Math.floor(availH / lh));
+    const two = Math.floor(availH / (2 * lh));
+    if (size >= two) {
+      el.style.fontSize = `${size}px`;
+      return Math.ceil(size * lh);
+    }
+    el.style.whiteSpace = 'normal';
+    size = two;
+    for (;;) {
+      el.style.fontSize = `${size}px`;
+      if (el.scrollHeight <= availH + 1 || size <= 12) break;
+      size--;
+    }
+    return el.scrollHeight;
   }
 
   /** 16:9 の枠（画面 px）に合わせて置く */

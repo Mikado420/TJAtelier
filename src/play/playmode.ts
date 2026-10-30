@@ -598,7 +598,9 @@ export class PlayMode {
   /** 今の動画の出し方（'' = 出さない） */
   private get videoMode(): '' | 'full' | 'bottom' {
     const m = (this.settings.videoMode as string) === 'top' ? 'bottom' : this.settings.videoMode ?? 'full';
-    return this.videoUrl && m !== 'off' && !this.calibrating && !this.renderer.broadcast ? m : '';
+    if (!this.videoUrl || m === 'off' || this.calibrating) return '';
+    // 動画用の画面では、いつも全面の背景に
+    return this.renderer.broadcast ? 'full' : m;
   }
 
   /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */
