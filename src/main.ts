@@ -29,7 +29,7 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongVideo, setCurrentId, setVideoOffset } from './io/library';
+import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
@@ -79,6 +79,8 @@ const settings = {
   restZone: IS_IOS,
   passiveTouch: false,
   pauseButton: true,
+  /** 動画用の画面 */
+  broadcast: false,
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
   /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
@@ -163,6 +165,7 @@ const collab = new Collab({
     playFromHome = false;
     currentVideo = null;
     play.setVideo(null, 0);
+    void refreshJacket(null);
     home.hide();
     updateHeader();
   },
@@ -1408,6 +1411,8 @@ function renderSheet() {
       </div>
       <label class="field"><span>DEMOSTART</span><input type="number" step="0.01" inputmode="decimal" data-meta="demoStart" value="${c.demoStart}"></label>
       <label class="field"><span>音源名</span><input type="text" data-meta="wave" value="${esc(c.wave)}" placeholder="${esc(ed.audio?.name ?? '曲名.ogg')}" autocomplete="off"></label>
+      <label class="field"><span>譜面作者</span><input type="text" data-hdr="MAKER" value="${esc(hdrOf(c, 'MAKER'))}" autocomplete="off"></label>
+      <div class="field"><span>ジャケット</span><div class="vid-row jk-row">${currentJacket ? `<img class="jk-thumb" src="${currentJacket.url}" alt="">` : ''}<b>${esc(currentJacket?.name ?? '')}</b><button data-act="pickJacket">${currentJacket ? '変える' : '選ぶ'}</button>${currentJacket ? '<button data-act="rmJacket" class="danger">外す</button>' : ''}</div></div>
       ${currentVideo ? `<div class="field"><span>背景の動画</span><div class="vid-row"><b>${esc(currentVideo.name)}</b><button data-act="rmVideo" class="danger">外す</button></div></div>
       <label class="field"><span>動画のずれ (秒)</span><input type="number" step="0.01" inputmode="decimal" data-voff value="${currentVideo.offset}"></label>` : ''}
 
@@ -1663,6 +1668,7 @@ function playSettingRows() {
     <div class="st-row"><span>打音</span><div class="st-seg">${HIT_MODES.map(([v, l]) => `<button data-hitmode="${v}" class="${settings.hitMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stSwitch('padVisible', '太鼓を表示', settings.padVisible)}
     ${stSwitch('pauseButton', 'ポーズボタンを表示', settings.pauseButton)}
+    ${stSwitch('broadcast', '動画用の画面', settings.broadcast)}
     ${!isNativeHost() && IS_IOS ? stSwitch('restZone', '上を指置きに', settings.restZone) : ''}
     ${stRange('speed', 'ハイスピード', 0.5, 4, 0.1, settings.speed)}
     ${stRange('drumSize', '太鼓の大きさ', 75, 125, 1, settings.drumSize, 1, '%')}
@@ -1787,6 +1793,12 @@ $('sheetBody').addEventListener('change', (e) => {
     currentVideo.offset = Math.max(-60, Math.min(60, v));
     play.setVideoOffset(currentVideo.offset);
     void setVideoOffset(currentSongId, currentVideo.offset);
+    return;
+  }
+  if (d.hdr) {
+    const k = d.hdr;
+    const v = el.value.trim();
+    ed.mutate(() => setHdr(ed.chart, k, v));
     return;
   }
   if (d.meta) {
@@ -2038,6 +2050,9 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
       await saveSongVideo(id, video);
       video = null;
     }
+    if (sng.jacket) {
+      try { await saveSongJacket(id, { name: sng.jacket.name, data: await sng.jacket.read() }); } catch { /* 読めない */ }
+    }
     addedAt[idx] = id;
     done++;
     step();
@@ -2091,6 +2106,18 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   if (home.visible) await home.added(added[0]);
   else if (added.length === 1) await openSong(added[0], 'edit');
   else await home.show();
+}
+
+/** 譜面のヘッダ（extra）の値 */
+function hdrOf(chart: { extra: [string, string][] }, key: string) {
+  return chart.extra.find(([k]) => k.toUpperCase() === key)?.[1] ?? '';
+}
+/** 譜面のヘッダ（extra）を書き換える（空なら消す） */
+function setHdr(chart: { extra: [string, string][] }, key: string, v: string) {
+  const i = chart.extra.findIndex(([k]) => k.toUpperCase() === key);
+  if (!v) { if (i >= 0) chart.extra.splice(i, 1); return; }
+  if (i >= 0) chart.extra[i] = [chart.extra[i][0], v];
+  else chart.extra.push([key, v]);
 }
 
 /** 譜面のヘッダの BGMOVIE: を、背景の動画の名前にする（TJAPlayer などでもその動画が流れるように） */
@@ -2190,6 +2217,9 @@ async function saveZipOf(chart: EChart) {
     chart.wave = ed.audio.name;
     files.push({ name: `${name}/${ed.audio.name}`, data: new Uint8Array(await exportAudioData(ed.audio)) });
   }
+  if (currentJacket && hdrOf(chart, 'PREIMAGE') === currentJacket.name) {
+    files.push({ name: `${name}/${currentJacket.name}`, data: new Uint8Array(await (await fetch(currentJacket.url)).arrayBuffer()) });
+  }
   const tja = encodeSJIS(tjaText(chart));
   files.unshift({ name: `${name}/${name}.tja`, data: tja, compress: true });
   download(await writeZip(files), `${name}.zip`);
@@ -2222,6 +2252,27 @@ async function fileAction(act: string) {
     const name = COURSE_NAMES.find((n) => !used.has(n)) ?? 'Edit';
     ed.addCourse(name, act === 'dupCourse' ? ed.course.level : 1, act === 'dupCourse' ? ed.course : undefined);
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
+  } else if (act === 'pickJacket') {
+    if (!currentSongId) return;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.addEventListener('change', async () => {
+      const f = inp.files?.[0];
+      if (!f || !currentSongId) return;
+      const name = f.name.replace(/[\\/:*?"<>|]+/g, '_') || 'jacket.png';
+      await saveSongJacket(currentSongId, { name, data: await f.arrayBuffer() });
+      ed.mutate(() => setHdr(ed.chart, 'PREIMAGE', name));
+      await refreshJacket(currentSongId);
+      if (sheet === 'info') renderSheet();
+    });
+    inp.click();
+  } else if (act === 'rmJacket') {
+    if (!currentSongId) return;
+    await saveSongJacket(currentSongId, null);
+    ed.mutate(() => setHdr(ed.chart, 'PREIMAGE', ''));
+    await refreshJacket(currentSongId);
+    renderSheet();
   } else if (act === 'rmVideo') {
     if (!currentSongId || !confirm('背景の動画を外しますか？')) return;
     await saveSongVideo(currentSongId, null);
@@ -2289,6 +2340,9 @@ async function startTest(fromStart = lastTestFromStart) {
     course: ed.course.name,
     level: ed.course.level,
     genre: ed.chart.extra.find(([k]) => k.toUpperCase() === 'GENRE')?.[1],
+    sub: ed.chart.subtitle,
+    maker: hdrOf(ed.chart, 'MAKER') || hdrOf(ed.chart, `NOTESDESIGNER${Math.max(0, (COURSE_NAMES as readonly string[]).indexOf(ed.course.name))}`) || undefined,
+    jacket: currentJacket?.url,
   });
 }
 
@@ -2462,11 +2516,21 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   }
   await setAudio(a, false);
   await refreshVideo(id);
+  await refreshJacket(id);
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
   home.hide();
   updateHeader();
   if (mode === 'play') void startTest(true);
+}
+
+/** 開いている曲のジャケット（曲の情報・動画用の画面に出す） */
+let currentJacket: { name: string; url: string } | null = null;
+async function refreshJacket(id: string | null) {
+  if (currentJacket) URL.revokeObjectURL(currentJacket.url);
+  currentJacket = null;
+  const j = id ? await loadSongJacket(id).catch(() => undefined) : undefined;
+  if (j && id === currentSongId) currentJacket = { name: j.name, url: URL.createObjectURL(new Blob([j.data])) };
 }
 
 /** 開いている曲の背景の動画（プレイで流す） */

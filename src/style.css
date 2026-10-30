@@ -2618,3 +2618,38 @@ body.playing .br-ctl { display: none; }
 .cd-more { flex-basis: 100%; display: flex; gap: 4px; padding: 2px 0 2px 14px; }
 .cd-more button { display: flex; align-items: center; gap: 4px; height: 30px; padding: 0 12px; border: 0; border-radius: 0; background: #353d45; color: #fff; font-size: 12px; font-weight: 700; }
 .cd-more button.danger { color: #ff8a80; text-decoration: none; }
+
+/* ---------- 動画用の画面（2000×1125 の枠で作って縮める） ---------- */
+.play .bc { position: absolute; left: 0; top: 0; width: 2000px; height: 1125px; transform-origin: 0 0; pointer-events: none; color: #fff; font-family: var(--fd); --pn: rgba(16, 18, 21, 0.9); --sl: 16px; }
+.play .bc.hidden { display: none; }
+.bc-in > * { position: absolute; }
+.bc-pnl { background: var(--pn); clip-path: polygon(var(--sl) 0, 100% 0, calc(100% - var(--sl)) 100%, 0 100%); }
+.bc-cell i { display: block; font-style: normal; font-weight: 700; font-size: 21px; letter-spacing: 0.14em; color: #93cde2; }
+.bc-cell b { display: block; font-style: italic; font-weight: 800; font-size: 46px; line-height: 1.05; white-space: nowrap; }
+.bc-cell small { font-size: 24px; opacity: 0.55; margin-left: 6px; }
+.bc-title { left: 50px; top: 50px; width: 1408px; height: 344px; --sl: 0px; clip-path: polygon(0 0, 100% 0, calc(100% - 48px) 100%, 0 100%); padding: 44px 110px 0 64px; box-sizing: border-box; }
+.bc-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--cc); }
+.bc-meta { display: flex; align-items: center; gap: 18px; height: 46px; }
+.bc-chip { background: var(--cc); padding: 4px 22px; font-style: italic; font-weight: 800; font-size: 30px; line-height: 38px; transform: skewX(-8deg); font-family: var(--fd); }
+.bc-lv { font-style: italic; font-weight: 800; font-size: 40px; }
+.bc-maker { font-size: 26px; font-weight: 600; opacity: 0.75; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-name { margin-top: 26px; white-space: nowrap; overflow: hidden; }
+.bc-name span { font-style: italic; font-weight: 900; font-size: 112px; line-height: 1.12; }
+.bc-sub { margin-top: 10px; font-size: 34px; font-weight: 600; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-jk { left: 1492px; top: 50px; width: 458px; height: 458px; background: var(--pn); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.bc-jk img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bc-jk img.bc-logo { width: 78%; height: auto; object-fit: contain; opacity: 0.85; }
+.bc-stats { left: 50px; top: 412px; width: 1408px; height: 118px; display: flex; gap: 14px; }
+.bc-stats .bc-cell { flex: 1; padding: 20px 0 0 40px; }
+.bc-tl { left: 50px; top: 548px; width: 1900px; height: 82px; }
+.play .bc-tl canvas { left: 0; top: 0; right: auto; bottom: auto; width: 1900px; height: 82px; pointer-events: none; }
+.bc-on { position: absolute; left: 0; top: 0; height: 82px; overflow: hidden; }
+.bc-head { position: absolute; left: -2px; top: -4px; width: 4px; height: 90px; background: #fff; }
+.bc-foot { left: 50px; top: 946px; width: 1900px; height: 130px; --sl: 0px; display: flex; align-items: center; gap: 70px; padding: 0 56px; box-sizing: border-box; }
+.bc-foot .bc-cell { flex: none; }
+.bc-genre b { font-family: var(--fd); font-style: normal; font-weight: 700; font-size: 36px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.bc-lyric { flex: 1; min-width: 0; text-align: center; font-family: 'M PLUS Rounded 1c', var(--fd); font-weight: 900; font-size: 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-text-stroke: 9px #0b0d12; paint-order: stroke; }
+.bc-time { flex: none; white-space: nowrap; }
+.bc-time b { font-style: italic; font-weight: 800; font-size: 56px; }
+.bc-time small { font-size: 28px; font-weight: 700; opacity: 0.55; margin-left: 6px; }
+.jk-row .jk-thumb { width: 40px; height: 40px; object-fit: cover; flex: none; }

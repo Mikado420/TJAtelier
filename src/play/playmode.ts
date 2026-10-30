@@ -6,6 +6,7 @@ import { Renderer, type Opponent } from '../render/renderer';
 import { BUILD_ID } from '../update';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
+import { Broadcast, type PlayInfo } from './broadcast';
 
 /** Expo Go のアプリ（expo/App.js）の中で動いているか */
 export function isNativeHost() {
@@ -46,6 +47,8 @@ export interface PlaySettings {
   videoMode?: 'full' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
+  /** 動画用の画面（レーンを下に、上に曲の情報・ジャケット） */
+  broadcast?: boolean;
   /** 譜面分岐: 自動・普通・玄人・達人に固定 */
   branch?: 'auto' | 'N' | 'E' | 'M';
 }
@@ -71,6 +74,7 @@ export interface OnlineHooks {
  */
 export class PlayMode {
   private readonly renderer: Renderer;
+  private readonly bc: Broadcast;
   private readonly input: { refresh: () => void; dispose: () => void };
   private game: Game | null = null;
   private raf = 0;
@@ -94,15 +98,16 @@ export class PlayMode {
     private readonly settings: PlaySettings,
   ) {
     this.renderer = new Renderer(canvas);
+    this.bc = new Broadcast(root);
     // 画面の大きさ・向きが変わったら動画を置き直す（レーンの位置が決まってから）
-    new ResizeObserver(() => requestAnimationFrame(() => this.placeVideo())).observe(root);
+    new ResizeObserver(() => requestAnimationFrame(() => { this.placeVideo(); this.bc.place(this.renderer.frame); })).observe(root);
     this.input = bindInput(
       root,
       canvas,
       () => {
         const L = this.renderer.layout;
         // ポーズボタンを出さないときは、上の真ん中（レーンより上・横幅の 4 割）に触れるとポーズ
-        const pause = this.settings.pauseButton === false ? { bottom: L.laneY, half: L.w * 0.2, go: () => this.pause() } : undefined;
+        const pause = this.settings.pauseButton === false || this.renderer.broadcast ? { bottom: L.laneY, half: L.w * 0.2, go: () => this.pause() } : undefined;
         return { x: L.drumX, half: L.drumHalf, y: L.drumY, ry: L.drumRY, restBottom: L.restBottom, pause };
       },
       (kind, side, at, pt) => {
@@ -171,7 +176,7 @@ export class PlayMode {
    * オンライン対戦: 曲の 0 秒が performance.now() の zeroPerf（ms）になるように始める（全員が同じ時刻に始まる）。
    * 途中から入っても、その時刻の位置から流れる
    */
-  async startOnline(course: Course, info: { title: string; course: string; level: number; genre?: string }, zeroPerf: number, hooks: OnlineHooks) {
+  async startOnline(course: Course, info: PlayInfo, zeroPerf: number, hooks: OnlineHooks) {
     this.online = hooks;
     this.outbox = [];
     this.tapbox = [];
@@ -203,6 +208,8 @@ export class PlayMode {
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
     this.stopVideo();
+    this.renderer.broadcast = false;
+    this.bc.hide();
     this.applyVideo(false);
     this.renderer.resize();
     this.placeVideo();
@@ -273,6 +280,7 @@ export class PlayMode {
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
     this.stopVideo();
+    this.bc.hide();
     this.root.classList.add('hidden');
     this.root.classList.remove('online');
     document.body.classList.remove('playing');
@@ -315,7 +323,7 @@ export class PlayMode {
   }
 
   /** fromTime 秒の位置から（2秒前から助走して）開始。clicks を渡すとその時刻にクリック音を鳴らす */
-  async start(course: Course, fromTime: number, info: { title: string; course: string; level: number; genre?: string }, clicks?: number[]) {
+  async start(course: Course, fromTime: number, info: PlayInfo, clicks?: number[]) {
     this.lastArgs = [course, fromTime, info, clicks];
     if (!clicks) this.calibrating = false;
     this.hidePause();
@@ -355,9 +363,11 @@ export class PlayMode {
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
     this.stopVideo();
+    this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
     this.renderer.resize();
     this.placeVideo();
+    this.showBroadcast(course, info);
     this.renderer.speed = this.settings.speed;
     this.active = true;
     postNative({ type: 'play', active: true });
@@ -381,7 +391,7 @@ export class PlayMode {
   }
 
   /** 今のプレイの内容（ポーズから続けるときに使う） */
-  private cur: { course: Course; info: { title: string; course: string; level: number; genre?: string }; endAt: number; clicks: number[]; /** 音源と譜面の、遅いほうの終わり（秒） */ lastNote?: number } | null = null;
+  private cur: { course: Course; info: PlayInfo; endAt: number; clicks: number[]; /** 音源と譜面の、遅いほうの終わり（秒） */ lastNote?: number } | null = null;
   /** 曲の終わりの帯を出した時刻（performance.now()。0 = まだ） */
   private endWall = 0;
   private endHold = 3000;
@@ -433,6 +443,7 @@ export class PlayMode {
       if (this.compare.length && !this.online && !this.calibrating) this.stepCompare(now);
       if (this.online && !this.spectating) this.sendOnline(game);
       this.renderer.draw(game, course, now, info);
+      if (this.renderer.broadcast) this.bc.update(now);
       const w = performance.now() - t0;
       P.frames++;
       P.work += w;
@@ -462,7 +473,8 @@ export class PlayMode {
     // オートのときは叩かないので、タッチ用の太鼓も出さない
     const touch = coarse && !this.auto && !this.spectating;
     const padVisible = this.settings.padVisible !== false;
-    this.root.classList.toggle('no-pause-btn', this.settings.pauseButton === false);
+    // 動画用の画面ではポーズボタンを出さない（上の真ん中に触れるか Esc でポーズ）
+    this.root.classList.toggle('no-pause-btn', this.settings.pauseButton === false || this.broadcastOn);
     const R = this.renderer;
     const changed = R.restZone !== restZone || R.touch !== touch || R.padVisible !== padVisible;
     R.restZone = restZone;
@@ -503,9 +515,26 @@ export class PlayMode {
     R.speed = this.settings.speed;
     R.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
+    const bc = this.online ? false : this.broadcastOn;
+    const bcChanged = R.broadcast !== bc;
+    R.broadcast = bc;
     this.applyVideo(false);
     R.resize();
     this.placeVideo();
+    if (bcChanged && this.cur) this.showBroadcast(this.cur.course, this.cur.info);
+    else this.bc.place(R.frame);
+  }
+
+  /** 動画用の画面にするか（タイミング調整のときはしない） */
+  private get broadcastOn() {
+    return !!this.settings.broadcast && !this.calibrating;
+  }
+
+  /** 動画用の画面の、レーン以外の部分を出す・消す */
+  private showBroadcast(course: Course, info: PlayInfo) {
+    if (!this.renderer.broadcast) { this.bc.hide(); return; }
+    this.bc.show(course, info, this.audio.buffer, this.audio.musicDuration);
+    this.bc.place(this.renderer.frame);
   }
 
   // ---------- 背景の動画 ----------
@@ -569,7 +598,7 @@ export class PlayMode {
   /** 今の動画の出し方（'' = 出さない） */
   private get videoMode(): '' | 'full' | 'bottom' {
     const m = (this.settings.videoMode as string) === 'top' ? 'bottom' : this.settings.videoMode ?? 'full';
-    return this.videoUrl && m !== 'off' && !this.calibrating ? m : '';
+    return this.videoUrl && m !== 'off' && !this.calibrating && !this.renderer.broadcast ? m : '';
   }
 
   /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */

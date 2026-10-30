@@ -31,6 +31,8 @@ const JPOS_SCALE = REF_W / 1280;
 const GAUGE = { x1: 768, x2: 1812, y1: 258, y2: 291, segs: 50 };
 const FLOWER = { x: 1912, y: 258, r: 96 };
 const DRUM = { x: 417, y: 418, r: 76 };
+/** 動画用の画面: レーン（左のパネルも）をこれだけ下へずらす（上は曲の情報、下は帯） */
+export const BC_DY = 363;
 const BALLOON_X = 690; // ふくらむ風船の吹き口（参考動画では判定枠の少し右） // 左パネルのコンボ太鼓
 const FONT = "'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'Arial Rounded MT Bold', system-ui, sans-serif";
 
@@ -226,6 +228,12 @@ export class Renderer {
     this.oy = (h - REF_H * this.s) / 2;
     const s = this.s;
     this.vis = { x0: 0, y0: 0, x1: REF_W, y1: REF_H };
+    this.frame = { x: this.ox, y: this.oy, s };
+    if (this.broadcast) {
+      // 動画用の画面: 描く座標はそのままで、全体を下へずらす（レーンより上は -BC_DY まで使える）
+      this.oy += BC_DY * s;
+      this.vis = { x0: 0, y0: -BC_DY, x1: REF_W, y1: REF_H - BC_DY };
+    }
 
     // タッチ用の叩き分け（画面 px）: 画面の横の位置だけで決める。中央の帯＝ドン、左右の端＝カッ。
     // 帯の幅は donWidth（画面の幅に対する割合）。上下の位置は関係ない（レーンの上を叩いても同じ）
@@ -261,6 +269,11 @@ export class Renderer {
 
   /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
   spectate = false;
+
+  /** 動画用の画面（レーンを下に寄せ、上の曲の情報などは別に重ねる）。変えたら resize() */
+  broadcast = false;
+  /** 16:9 の枠（画面 px。左上と倍率） */
+  frame = { x: 0, y: 0, s: 1 };
 
   /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
   videoMode: '' | 'full' | 'bottom' = '';
@@ -367,11 +380,12 @@ export class Renderer {
     }
     c.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
     c.save();
-    c.beginPath();
-    c.rect(0, 0, REF_W, REF_H);
-    c.clip();
     const V = this.vis;
-    if (vm) this.paintVideoBackground(c, V, vm);
+    c.beginPath();
+    c.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+    c.clip();
+    if (this.broadcast) this.paintBroadcastBackground(c, V);
+    else if (vm) this.paintVideoBackground(c, V, vm);
     else this.paintPlainBackground(c, V);
     if (!this.spectate) {
       // 動画の上では、レーンを少し透かす
@@ -391,6 +405,29 @@ export class Renderer {
       c.restore();
     }
     this.finishBackground(c, bg);
+  }
+
+  /** 動画用の画面の背景（暗い地に、斜めの細い線と、ぼんやりした色） */
+  private paintBroadcastBackground(c: CanvasRenderingContext2D, V: Rect) {
+    c.fillStyle = '#16191c';
+    c.fillRect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+    for (const [x, y, r, col] of [[V.x1 * 0.78, V.y0 + 180, 900, 'rgba(60,110,140,0.28)'], [V.x0 + 140, V.y1 - 80, 700, 'rgba(120,50,90,0.22)']] as const) {
+      const g = c.createRadialGradient(x, y, 10, x, y, r);
+      g.addColorStop(0, col);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.fillRect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+    }
+    c.strokeStyle = 'rgba(255,255,255,0.035)';
+    c.lineWidth = 2;
+    c.beginPath();
+    const tan = Math.tan((8 * Math.PI) / 180);
+    const H = V.y1 - V.y0;
+    for (let x = V.x0 - 200; x < V.x1 + 200; x += 22) {
+      c.moveTo(x, V.y1);
+      c.lineTo(x + H * tan, V.y0);
+    }
+    c.stroke();
   }
 
   /** 背景の動画があるとき: 全面なら塗らない、上だけなら上を空けて下はふつうの床 */
@@ -461,7 +498,7 @@ export class Renderer {
   private finishBackground(c: CanvasRenderingContext2D, bg: HTMLCanvasElement) {
     c.restore(); // 16:9 の枠の切り抜きを外す（太鼓は黒帯の上まで描く）
     // タッチ用の太鼓（画面 px の座標系）
-    if (this.touch && this.padVisible) {
+    if (this.touch && this.padVisible && !this.broadcast) {
       c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawPadShape(c);
     }
@@ -707,13 +744,16 @@ export class Renderer {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, REF_W, REF_H);
-    ctx.clip();
     const V = this.vis;
+    ctx.beginPath();
+    ctx.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+    ctx.clip();
+    const bc = this.broadcast;
 
-    this.drawTop(V, gogo, wall);
-    this.drawTitle(info);
+    if (!bc) {
+      this.drawTop(V, gogo, wall);
+      this.drawTitle(info);
+    }
     if (this.spectate) {
       // 観戦: 自分のレーンは無く、参加している人のレーンを上から並べる
       this.drawOpponents(V, game, course, now, wall);
@@ -726,7 +766,7 @@ export class Renderer {
       return;
     }
     // オンライン対戦では下は相手のレーンなので、花びら・花火は描かない
-    if (!this.opponents.length) {
+    if (!this.opponents.length && !bc) {
       this.drawBottom(V, wall, now, bars);
       this.drawFireworks(wall);
     }
@@ -740,18 +780,20 @@ export class Renderer {
     if (this.opponents.length) {
       this.drawLayer('own-counts', `${st.good}|${st.ok}|${st.bad}`, 150, LANE_TOP + 60, 190, 116, () => this.paintCounts(st.good, st.ok, st.bad));
     }
-    this.drawGauge(st.gauge, wall);
+    if (!bc) this.drawGauge(st.gauge, wall);
     this.drawRollBubble(wall);
     this.drawJudgeText(wall);
     this.drawTiming(wall);
-    this.drawFlyers(wall);
-    this.drawSparkles(wall);
-    this.drawRainbow(wall);
+    if (!bc) {
+      this.drawFlyers(wall);
+      this.drawSparkles(wall);
+      this.drawRainbow(wall);
+    }
     this.drawBanner(wall);
-    this.drawLyric(V, course, now);
+    if (!bc) this.drawLyric(V, course, now);
     this.drawEnd(V, wall);
     ctx.restore();
-    if (this.touch) {
+    if (this.touch && !bc) {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawPad(wall);
     }

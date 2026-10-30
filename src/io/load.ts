@@ -23,6 +23,8 @@ export interface LoadedSong {
   tjaName: string;
   /** 背景の動画（mp4 など）。fromAudio = 音源も同じファイル（mp4 だけの曲） */
   video?: AudioSrc & { fromAudio?: boolean };
+  /** ジャケットの画像（PREIMAGE: の名前 → 同じフォルダの jacket など） */
+  jacket?: AudioSrc;
   /** 同じフォルダか上のフォルダにある genre.ini の GenreName（入れるフォルダ。上にもあれば "親/子"） */
   genre?: string;
 }
@@ -70,6 +72,8 @@ function isTja(name: string, data: ArrayBuffer): boolean {
   return /#START/i.test(decodeText(data.slice(0, 200_000)));
 }
 
+/** 画像（ジャケットに使えるもの） */
+export const IMAGE_EXT = /\.(png|jpe?g|gif|bmp|webp)$/i;
 const AUDIO_EXT = /\.(ogg|oga|mp3|wav|m4a|aac|opus|flac|webm|aif|aiff)$/i;
 /** 中身を見なくても譜面・音源ではないと分かるもの（画像・文書など） */
 const OTHER_EXT = /\.(png|jpe?g|gif|bmp|webp|svg|txt|md|json|html?|ini|lua|ttf|otf|psd|pdf|db|dat|bak|csv|xml|log|exe|dll|zip)$/i;
@@ -149,12 +153,14 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
   const audios: Src[] = [];
   const skipped: string[] = [];
   const videos: Src[] = [];
+  const images: Src[] = [];
   for (const e of entries) {
     const bn = base(e.name);
     if (bn.toLowerCase() === 'genre.ini') continue;
     if (isVideoName(e.name)) videos.push(e);
     else if (AUDIO_EXT.test(e.name)) audios.push(e);
     else if (/\.tja$/i.test(e.name)) tjas.push({ name: e.name, data: await e.read() });
+    else if (IMAGE_EXT.test(e.name) && !/(^|\/)\./.test(e.name)) images.push(e);
     else if (/(^|\/)\./.test(e.name)) continue;
     else if (OTHER_EXT.test(e.name)) skipped.push(bn);
     else {
@@ -189,8 +195,20 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
       (sameDir && dir(t.name) !== '' ? freeV.find((v) => dir(v.name) === dir(t.name)) : undefined) ??
       (parsed.length === 1 && freeV.length === 1 ? freeV[0] : undefined);
     if (video) used.add(video);
+    // ジャケット: PREIMAGE: の名前 → 同じフォルダ（譜面が 1 つだけ）の jacket・cover などの名前 → 背景の画像（BGIMAGE:）でない画像が 1 つだけ
+    const freeI = images.filter((v) => !used.has(v));
+    const hdr = (k: string) => base(chart.extra.find(([x]) => x.toUpperCase() === k)?.[1] ?? '').toLowerCase();
+    const pre = hdr('PREIMAGE');
+    const bgi = hdr('BGIMAGE');
+    const mine = sameDir && dir(t.name) !== '' ? freeI.filter((v) => dir(v.name) === dir(t.name) && base(v.name).toLowerCase() !== bgi) : [];
+    const jacket =
+      (pre ? freeI.find((v) => base(v.name).toLowerCase() === pre && dir(v.name) === dir(t.name)) ?? freeI.find((v) => base(v.name).toLowerCase() === pre) : undefined) ??
+      mine.find((v) => /jacket|cover|jk|preimage/i.test(base(v.name))) ??
+      (mine.length === 1 ? mine[0] : undefined);
+    if (jacket) used.add(jacket);
     const named = (x: Src): AudioSrc => ({ name: base(x.name), size: x.size, read: x.read });
     const song: LoadedSong = { chart, audio: audio ? named(audio) : null, tjaName: t.name, genre: genreOf(t.name) };
+    if (jacket) song.jacket = named(jacket);
     if (video) {
       // 音源が無ければ、動画の音を音源にする（変換しない。動画は音源と同じファイルを使う）
       if (!song.audio) {
@@ -202,6 +220,7 @@ export async function loadFiles(files: File[]): Promise<LoadResult> {
   }
   // どの譜面にも組み合わなかった動画は、音源として扱う（その動画の音で新しい曲）
   for (const v of videos) if (!used.has(v)) audios.push(v);
+  for (const v of images) if (!used.has(v)) skipped.push(base(v.name));
   return {
     songs,
     audios: audios.filter((a) => !used.has(a)).map((a) => ({ name: base(a.name), size: a.size, read: a.read })),

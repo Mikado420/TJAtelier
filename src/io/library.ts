@@ -28,6 +28,8 @@ export interface SongEntry {
   video?: string;
   /** 背景の動画のずれ（秒。+ で動画を先へ進める） */
   videoOffset?: number;
+  /** ジャケットの画像のファイル名（無ければ undefined） */
+  jacket?: string;
   demoStart: number;
   updatedAt: number;
 }
@@ -46,6 +48,10 @@ const kFolderFonts = 'lib-folder-fonts';
 const kChart = (id: string) => `lib-chart-${id}`;
 const kAudio = (id: string) => `lib-audio-${id}`;
 const kVideo = (id: string) => `lib-video-${id}`;
+const kJacket = (id: string) => `lib-jacket-${id}`;
+
+/** ジャケットの画像 */
+export interface JacketFile { name: string; data: ArrayBuffer }
 
 /** 背景の動画。fromAudio = 音源と同じファイル（mp4 だけの曲。二重に持たない） */
 export interface VideoFile { name: string; data: ArrayBuffer | null; fromAudio?: boolean }
@@ -97,6 +103,7 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
     courses: chart.courses.map((c) => ({ name: c.name, level: c.level })),
     folders: prev.folders ?? (prev.folder ? [prev.folder] : []),
     ...(prev.video ? { video: prev.video, videoOffset: prev.videoOffset } : {}),
+    ...(prev.jacket ? { jacket: prev.jacket } : {}),
     audioName: chart.wave,
     demoStart: chart.demoStart,
     updatedAt: Date.now(),
@@ -177,6 +184,7 @@ export async function deleteSong(id: string) {
   await dbDel(kChart(id));
   await dbDel(kAudio(id));
   await dbDel(kVideo(id));
+  await dbDel(kJacket(id));
   await writeIndex((list) => list.filter((x) => x.id !== id));
 }
 
@@ -197,6 +205,15 @@ export async function loadSongVideo(id: string): Promise<{ name: string; data: A
   }
   return v.data ? { name: v.name, data: v.data, fromAudio: false } : null;
 }
+
+/** ジャケットを入れる・消す（null で消す） */
+export async function saveSongJacket(id: string, j: JacketFile | null) {
+  if (j) await dbPut(kJacket(id), j);
+  else await dbDel(kJacket(id));
+  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, jacket: j?.name } : x)));
+}
+
+export const loadSongJacket = (id: string) => dbGet<JacketFile>(kJacket(id));
 
 /** 動画のずれ（秒）を変える */
 export async function setVideoOffset(id: string, sec: number) {

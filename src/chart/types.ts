@@ -84,6 +84,10 @@ export interface Course {
   lyrics?: { time: number; text: string }[];
   /** 譜面分岐 */
   branches?: PlayBranch[];
+  /** 小節の始まりの時刻と拍子（線を出さない小節も） */
+  measures?: { time: number; num: number; den: number }[];
+  /** BPM・#SCROLL の変わり目（時刻の順） */
+  params?: { time: number; bpm: number; scroll: number }[];
   /** #SECTION の時刻 */
   sections?: number[];
   /** #LEVELHOLD の時刻（br があれば、その分岐にいるときだけ） */

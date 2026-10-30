@@ -490,6 +490,21 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
   });
   const bars: BarLine[] = [];
   const cEnd = contentEnd(course);
+  // 小節の始まり（線を出さない小節も。動画用の画面の小節の番号・拍子）
+  const meas: { time: number; num: number; den: number }[] = [];
+  for (const m of measures(course, cEnd)) {
+    if (m.start > cEnd) break;
+    meas.push({ time: t.tickToTime(m.start), num: m.num, den: m.den });
+  }
+  // BPM・SCROLL の変わり目（動画用の画面）
+  const params = [{ time: t.tickToTime(0), bpm: t.bpmAt(0), scroll: t.scrollAt(0) }];
+  for (const e of [...course.events].sort((a, b) => a.tick - b.tick)) {
+    if (e.kind !== 'bpm' && e.kind !== 'scroll') continue;
+    const p = { time: t.tickToTime(e.tick), bpm: t.bpmAt(e.tick), scroll: t.scrollAt(e.tick) };
+    const last = params[params.length - 1];
+    if (last.time === p.time) params[params.length - 1] = p;
+    else params.push(p);
+  }
   for (const m of measures(course, cEnd)) {
     if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
@@ -519,7 +534,7 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
   // 歌詞（#LYRIC）
   const lyrics = course.events.filter((e) => e.kind === 'lyric').map((e) => ({ time: t.tickToTime(e.tick), text: (e as { text: string }).text }));
   return {
-    name: course.name, level: course.level, notes, bars, gogo,
+    name: course.name, level: course.level, notes, bars, gogo, measures: meas, params,
     ...(mode && bt ? { scrollMode: mode, beatPoints: bt.points } : {}),
     ...(jpos.length ? { jpos } : {}),
     ...(lyrics.length ? { lyrics } : {}),

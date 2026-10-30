@@ -46,7 +46,8 @@ test('zip の音源・動画は、使うときに 1 つずつ読み出す（WAVE
   expect(b.video?.name).toBe('b.mp4');
   expect(new Uint8Array(await b.video!.read())).toEqual(new Uint8Array([9, 9, 9]));
   expect(r.audios.map((x) => x.name)).toEqual(['lone.ogg']);
-  expect(r.skipped).toEqual(['jacket.png']);
+  expect(b.jacket?.name).toBe('jacket.png');
+  expect(r.skipped).toEqual([]);
 });
 
 test('いくつかの zip を一度に読み込んでも、zip ごとの genre.ini が混ざらない（zip のいちばん上に genre.ini があっても）', async () => {
