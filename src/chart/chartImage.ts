@@ -4,6 +4,7 @@
  * ゴーゴータイムはレーンの上の桃色の帯、#SCROLL は赤（HS）、#BPMCHANGE は青（BPM）の文字で書く。
  */
 import { measures, contentEnd, sortCourse, Timing, TPB, type EChart, type ECourse } from './model';
+import { starSlots } from './stars';
 import { COLOR, drawBalloon, drawNoteHead, isBig } from '../render/notes';
 import type { NoteType } from './types';
 
@@ -77,9 +78,12 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
   c.fillText(chart.title || '（無題）', 12, 30);
   c.font = `700 15px ${FONT}`;
   c.fillText(chart.subtitle.replace(/^--/, ''), 12, 52);
-  const stars = '★'.repeat(Math.max(0, Math.min(10, course.level)));
   c.font = `800 17px ${FONT}`;
-  c.fillText(`${COURSE_JA[course.name] ?? course.name} ${stars} Lv.${course.level}`, 12, 78);
+  let sx = 12;
+  const put = (t: string, col: string) => { c.fillStyle = col; c.fillText(t, sx, 78); sx += c.measureText(t).width; };
+  put(`${COURSE_JA[course.name] ?? course.name} `, '#111');
+  for (const k of starSlots(course.level)) if (k !== 'off') put('★', k === 'red' ? '#d81e1e' : '#111');
+  put(` Lv.${course.level}`, '#111');
 
   const t = new Timing(chart, course);
   const rowOf = (tick: number) => {

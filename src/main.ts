@@ -2233,7 +2233,7 @@ async function exportAudioData(a: AudioFile): Promise<ArrayBuffer> {
 
 /** 譜面を .tja で保存する */
 function saveTjaOf(chart: EChart, name = chart.title) {
-  download(new Blob([encodeSJIS(tjaText(chart)).buffer as ArrayBuffer], { type: 'text/plain' }), `${safeName(name)}.tja`);
+  download(new Blob([encodeSJIS(tjaText(chart)).buffer as ArrayBuffer], { type: 'application/octet-stream' }), `${safeName(name)}.tja`);
 }
 /** 譜面と音源を .zip で保存する */
 async function saveZipOf(chart: EChart) {

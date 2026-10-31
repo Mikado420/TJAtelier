@@ -1903,6 +1903,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hdf-meter { display: flex; gap: 2px; padding: 2px 0 0 !important; }
 .hdf-meter i { width: 5px; height: 8px; background: rgba(255, 255, 255, 0.25); }
 .hdf-meter i.on { background: #fff; }
+.hdf-meter i.red { background: #ff3b3b; }
 .home .hdf-card.on { opacity: 1; background: linear-gradient(var(--cc), var(--cd)) !important; color: #fff !important; transform: translateY(-8px); box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent), 0 0 24px rgba(147, 205, 226, 0.8); }
 .home .hdf-card.on.ura { box-shadow: 0 0 0 3px #fff, 0 0 0 6px #7b4bd0, 0 0 28px rgba(160, 120, 255, 0.9); }
 .home .hdf-card u { top: -30px; }

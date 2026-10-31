@@ -1,5 +1,6 @@
 import { beatAt, jposAt, lyricAt, scrollAhead, scrollBase, type Course, type Note } from '../chart/types';
 import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type NoteState } from '../engine/game';
+import { starSlots, STAR_RED } from '../chart/stars';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { pixelRatio } from '../orient';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
@@ -1609,11 +1610,14 @@ export class Renderer {
       ctx.textAlign = 'left';
       ctx.font = `900 24px ${FONT}`;
       outlinedText(ctx, label, cx + 58, cy - 12, '#fff', '#0f1820', 6);
-      // 星はレベルの数だけ（10 まで）
-      const stars = Math.max(1, Math.min(10, Math.round(info.level)));
-      ctx.font = `900 ${stars > 8 ? 16 : 18}px ${FONT}`;
-      ctx.fillStyle = '#fff';
-      ctx.fillText('★'.repeat(stars), cx + 58, cy + 20);
+      // 星はレベルの数だけ（11〜20 は 1〜10 の位置を赤い星に）
+      const slots = starSlots(Math.max(1, info.level)).filter((k) => k !== 'off');
+      ctx.font = `900 ${slots.length > 8 ? 16 : 18}px ${FONT}`;
+      const sw = ctx.measureText('★').width;
+      slots.forEach((k, i) => {
+        ctx.fillStyle = k === 'red' ? STAR_RED : '#fff';
+        ctx.fillText('★', cx + 58 + i * sw, cy + 20);
+      });
 
       // 名札（1P・称号・名前）
       this.drawNameplate();

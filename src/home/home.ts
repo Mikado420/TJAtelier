@@ -3,6 +3,7 @@
  * 選んだフォルダの帯には名前の変更・削除、選んだ曲の帯には試聴・エディタ・譜面情報・「この曲にする」。
  */
 import type { AudioEngine } from '../audio/audio';
+import { starSlots } from '../chart/stars';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import {
@@ -654,7 +655,7 @@ export class Home {
     const cards = slots.map((c) => {
       const none = c.level < 0;
       const on = !none && c.name === this.diffCourse;
-      const meter = Array.from({ length: 10 }, (_, k) => `<i class="${k < c.level ? 'on' : ''}"></i>`).join('');
+      const meter = starSlots(c.level).map((k) => `<i class="${k === 'off' ? '' : k}"></i>`).join('');
       const label = c.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[c.name] ?? c.name;
       const cb = none ? null : loadBest(s.id, c.name);
       return `<button class="hdf-card ${on ? 'on' : ''} ${none ? 'none' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
