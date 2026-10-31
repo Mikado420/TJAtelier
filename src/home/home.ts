@@ -178,6 +178,9 @@ export class Home {
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.list.addEventListener('scroll', () => this.onListScroll(), { passive: true });
+    // 指・ホイール・キーで動かしたときだけ、止まった所の曲を選ぶ（こちらで動かしたスクロールでは選ばない）
+    const byUser = () => { this.userScrollAt = performance.now(); this.autoScroll = false; };
+    for (const ev of ['wheel', 'touchstart', 'touchmove', 'pointerdown']) this.list.addEventListener(ev, byUser, { passive: true });
     // 触れた瞬間に音を鳴らせる状態にする（iPhone はタップの中でないと音を出し始められない）
     this.el.addEventListener('pointerdown', () => {
       const ctx = this.host.audio.ctx;
@@ -324,9 +327,8 @@ export class Home {
         const cr = topCrown(bm, s);
         // 詳しいところ（難易度・操作のボタン）は、選んでいる曲の帯にだけ入れる（曲が多くても軽いように）
         const on = s.id === this.sel && this.focus === 'song' && !pk;
-        const d = on ? this.rowDetail(s, bm) : { x: '', acts: '', jk: '' };
-        if (on) this.fillJacket(s);
-        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}${d.jk}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="オンライン作業の部屋あり">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
+        const d = on ? this.rowDetail(s, bm) : { x: '', acts: '' };
+        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="オンライン作業の部屋あり">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -464,10 +466,15 @@ export class Home {
     if (!row) return;
     const top = row.offsetTop - (this.list.clientHeight - row.offsetHeight) / 2;
     this.ignoreScroll = performance.now() + (smooth ? 500 : 120);
+    this.autoScroll = true;
     this.list.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
   }
 
   private ignoreScroll = 0;
+  /** こちらで動かしているスクロールの途中（止まるまで、止まった所の曲を選ばない） */
+  private autoScroll = false;
+  /** 最後に指・ホイールで一覧を動かした時刻 */
+  private userScrollAt = -Infinity;
   private scrollTimer = 0;
   private curveRaf = 0;
 
@@ -477,7 +484,11 @@ export class Home {
     clearTimeout(this.scrollTimer);
     if (this.picking) return;
     this.scrollTimer = window.setTimeout(() => {
+      // こちらで動かしたスクロールが止まった: 選び直さない（選び直すと、広がった札の分だけずれて、次々と下の曲へ進んでしまう）
+      if (this.autoScroll) { this.autoScroll = false; return; }
       if (performance.now() < this.ignoreScroll) return;
+      // 指・ホイールで動かしてから時間がたっている（慣性で動いた分も含めて 3 秒まで）
+      if (performance.now() - this.userScrollAt > 3000) return;
       const mid = this.list.scrollTop + this.list.clientHeight / 2;
       let best: HTMLElement | null = null;
       let bd = Infinity;
@@ -519,24 +530,11 @@ export class Home {
     }
   }
 
-  /** 選んでいる曲の札に、ジャケットの画像を入れる（まだ読んでいなければ読んでから） */
-  private fillJacket(s: SongEntry) {
-    void this.jacketUrl(s).then((url) => {
-      if (!url) return;
-      requestAnimationFrame(() => {
-        const el = this.list.querySelector<HTMLElement>(`.hr-jk[data-jk="${s.id}"]`);
-        if (el && !el.querySelector('img')) el.innerHTML = `<img src="${url}" alt="">`;
-      });
-    });
-  }
-
   /** 選んでいる曲の帯に入れる、難易度のチップと操作のボタン */
   private rowDetail(s: SongEntry, bm: Record<string, { crown: Crown }>) {
     const cs = sortCourses(s.courses);
     const chips = cs.map((c, i) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--i:${i}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
-    const url = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}`) : undefined;
     return {
-      jk: `<span class="hr-jk" data-jk="${s.id}">${url ? `<img src="${url}" alt="">` : ''}</span>`,
       x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span>`,
       acts: `<span class="hr-acts">
           <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
@@ -549,15 +547,13 @@ export class Home {
     this.sel = id;
     this.focus = 'song';
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
-    this.list.querySelectorAll('.hr-x, .hr-acts, .hr-jk').forEach((x) => x.remove());
+    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
     const row = this.list.querySelector<HTMLElement>(`[data-song="${id}"]`);
     const s0 = this.songs.find((q) => q.id === id);
     if (row && s0 && !this.picking) {
       const d = this.rowDetail(s0, bestMap());
       row.querySelector('.hr-t')?.insertAdjacentHTML('beforeend', d.x);
-      row.querySelector('.hr-t')?.insertAdjacentHTML('beforebegin', d.jk);
       row.insertAdjacentHTML('beforeend', d.acts);
-      this.fillJacket(s0);
     }
     row?.classList.add('on');
     this.render(false, false);
@@ -575,7 +571,7 @@ export class Home {
     // フォルダを選んでいるあいだは曲を鳴らさない
     this.stopPreview();
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
-    this.list.querySelectorAll('.hr-x, .hr-acts, .hr-jk').forEach((x) => x.remove());
+    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
     this.list.querySelector(`[data-fbar="${CSS.escape(key)}"]`)?.classList.add('on');
     this.render(false, false);
     if (scroll) this.centerSel(true);
@@ -719,7 +715,15 @@ export class Home {
       : '';
     const el = document.getElementById('homeDiff')!;
     el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));
+    const jk = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}`) : undefined;
+    if (s.jacket && !jk) {
+      void this.jacketUrl(s).then((url) => {
+        const box = el.querySelector('.hdf-jk');
+        if (url && box && this.diffSong === s && !box.querySelector('img')) box.innerHTML = `<img src="${url}" alt="">`;
+      });
+    }
     el.innerHTML = `
+      <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : ''}</div>
       <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
         <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}　${fmtLen(s.length)}</small></div>

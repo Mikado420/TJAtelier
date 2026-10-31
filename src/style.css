@@ -2738,9 +2738,9 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .res > .res-bg { z-index: 1; }
 .res > .res-top, .res > .res-main { z-index: 2; }
 
-/* ---------- 選曲（案1）: 選んだ曲は大きな白い札。ジャケット・光る縁・光沢 ---------- */
+/* ---------- 選曲（案1）: 選んだ曲は大きな白い札。光る縁・光沢 ---------- */
+.home .hr { transition: margin-left 0.12s linear, background 0.2s; }
 .home .hr.on {
-  min-height: 128px; padding-left: 22px; gap: 16px;
   background: linear-gradient(100deg, transparent 40%, rgba(147, 205, 226, 0.45) 50%, transparent 60%) no-repeat, #f4f7f9;
   background-size: 300% 100%, auto;
   animation: hr-card 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, hr-sheen 4s ease-in-out 0.4s infinite;
@@ -2749,15 +2749,6 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 @keyframes hr-sheen { 0%, 20% { background-position: 130% 0, 0 0; } 50%, 100% { background-position: -30% 0, 0 0; } }
 .home .hr.on::after { content: ''; position: absolute; inset: -3px; border: 3px solid var(--accent-hi); pointer-events: none; animation: hr-edge 1.6s ease-in-out infinite; }
 @keyframes hr-edge { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-.hr-jk { display: none; }
-.home .hr.on .hr-jk {
-  position: relative; z-index: 1; display: block; flex: none; width: 104px; height: 104px; overflow: hidden;
-  background: #2d6f88; animation: hr-jk 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-.home .hr.on .hr-jk::before { content: ''; position: absolute; width: 132px; height: 132px; border-radius: 50%; border: 14px solid var(--accent); left: -36px; top: 18px; box-sizing: border-box; }
-.home .hr.on .hr-jk::after { content: ''; position: absolute; width: 44px; height: 44px; border-radius: 50%; background: var(--don); right: 10px; top: 10px; }
-.home .hr.on .hr-jk img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block; }
-@keyframes hr-jk { from { transform: translateX(-14px); opacity: 0; } to { transform: none; opacity: 1; } }
 .home .hr.on .hc { animation: hc-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both; animation-delay: calc(0.12s + var(--i, 0) * 0.07s); }
 @keyframes hc-pop { from { transform: scale(0); } to { transform: none; } }
 /* 一覧を出し直したときは、上から順に横からすべり込む */
@@ -2772,7 +2763,7 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 @keyframes hr-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 .home-list > .hr.on { animation: hr-card 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, hr-sheen 4s ease-in-out 0.4s infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .home .hr.on, .home .hr.on::after, .home .hr.on .hc, .home-list > .hr, .home .hr.on .hr-jk { animation: none !important; }
+  .home .hr.on, .home .hr.on::after, .home .hr.on .hc, .home-list > .hr { animation: none !important; }
 }
 
 /* ---------- 難易度えらび（案1）: 札がせり上がる・選んだ札が光る・星が順に点く ---------- */
@@ -2887,3 +2878,19 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .st-h:first-child { margin-top: 2px; }
 .st-pane .st-row { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 @media (prefers-reduced-motion: reduce) { .st-ind.go, .st-pane.swap { animation: none !important; } }
+
+/* 難易度えらび: 左の欄の上にジャケット（無い曲は図柄） */
+.hdf-jk {
+  position: absolute; left: calc(12px + var(--safe-l)); top: calc(10px + var(--safe-t));
+  width: clamp(120px, 17vw, 160px); aspect-ratio: 1; overflow: hidden; background: #2d6f88;
+  box-shadow: 0 0 0 3px var(--accent); transform: translateX(-20px); opacity: 0;
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) 0.05s, opacity 0.3s 0.05s;
+}
+.home-diff.on .hdf-jk { transform: none; opacity: 1; }
+.hdf-jk::before { content: ''; position: absolute; width: 128%; height: 128%; border-radius: 50%; border: clamp(16px, 2.2vw, 21px) solid var(--accent); left: -32%; top: 27%; box-sizing: border-box; }
+.hdf-jk::after { content: ''; position: absolute; width: 44%; height: 44%; border-radius: 50%; background: var(--don); right: 9%; top: 9%; }
+.hdf-jk img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block; }
+.home-diff .hdf-info { top: calc(10px + var(--safe-t) + clamp(120px, 17vw, 160px) + 12px); }
+@media (max-width: 640px) { .hdf-jk { display: none; } }
+.home-diff .hdf-head { min-width: 0; }
+.home-diff .hdf-head b, .home-diff .hdf-head small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
