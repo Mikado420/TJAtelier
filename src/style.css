@@ -2841,9 +2841,9 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .res-score small { padding-bottom: 6px; }
 .res-score b { flex: 1; font-size: 34px; -webkit-text-stroke: 0; }
 .res-crowns { position: relative; gap: 14px; }
-.res-crown { transform: scale(3); transition: opacity 0.2s, transform 0.45s cubic-bezier(0.2, 1.8, 0.4, 1); }
+.res-crown { transform: scale(1.3); transition: opacity 0.35s, transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .res-crowns::before { content: ''; position: absolute; left: 28px; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; border: 3px solid #ffd84a; opacity: 0; pointer-events: none; }
-.res.go:not(.r-fail):not(.res-calib) .res-crowns::before { animation: res-shock 0.7s ease-out 0.15s both; }
+
 .res.r-clear .res-crowns::before { border-color: #fff; }
 @keyframes res-shock { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
 .res-rk { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -2894,3 +2894,20 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 @media (max-width: 640px) { .hdf-jk { display: none; } }
 .home-diff .hdf-head { min-width: 0; }
 .home-diff .hdf-head b, .home-diff .hdf-head small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- リザルト（案C）: 花火などの演出はなし。上の帯のワイプ・札が出る・光沢が 1 回だけ ---------- */
+.res-fw { display: none !important; }
+.res, .res.go:not(.r-fail), .res.go.r-fail { background: #15191d; }
+.res-card { position: relative; animation: res-card 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both; }
+@keyframes res-card { from { transform: translateY(16px); opacity: 0; } }
+.res-card::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 40%, rgba(255, 255, 255, 0.16) 50%, transparent 60%) no-repeat; background-size: 300% 100%; background-position: 130% 0; }
+.res.go:not(.res-calib) .res-card::after { animation: res-sweep 1s ease-in-out 0.1s both; }
+@keyframes res-sweep { from { background-position: 130% 0; } to { background-position: -30% 0; } }
+@media (prefers-reduced-motion: reduce) { .res-card, .res-card::after { animation: none !important; } }
+
+/* ---------- ジャケットが無いとき（案A）: 斜線の空き枠と音符 ---------- */
+.hdf-jk, .cu-jk { background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 6px, transparent 6px 14px), #24282c; display: flex; align-items: center; justify-content: center; }
+.hdf-jk { box-shadow: 0 0 0 3px var(--accent), inset 0 0 0 2px rgba(255, 255, 255, 0.14); }
+.cu-jk { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14); }
+.hdf-jk::before, .hdf-jk::after, .cu-jk::before, .cu-jk::after { display: none; }
+.jk-none { width: 34%; height: 34%; fill: none; stroke: rgba(255, 255, 255, 0.32); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }

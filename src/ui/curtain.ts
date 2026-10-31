@@ -2,6 +2,9 @@
  * 曲を始めるときの幕（案3）: 画面が暗くなり、ジャケットが中央へ寄って、右に曲の情報。
  * プレイが始まるときは上下からシャッターが閉じて、開くとプレイ画面が見える
  */
+/** ジャケットが無いときの印（音符） */
+const JACKET_NONE = '<svg class="jk-none" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,7 +34,7 @@ export async function closeCurtain(info: CurtainInfo) {
   c.className = 'curtain';
   const cs = info.course;
   c.innerHTML = `<i class="cu-dim"></i><i class="cu-line t"></i><i class="cu-line b"></i>
-    <div class="cu-jk">${info.jacket ? `<img src="${esc(info.jacket)}" alt="">` : ''}</div>
+    <div class="cu-jk">${info.jacket ? `<img src="${esc(info.jacket)}" alt="">` : JACKET_NONE}</div>
     <div class="cu-info">
       ${cs ? `<span class="cu-course" style="--cc:${esc(cs.color)}">${esc(cs.label)} ★${cs.level}</span>` : ''}
       <b class="cu-title">${esc(info.title)}</b>

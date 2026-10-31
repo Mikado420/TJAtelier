@@ -46,6 +46,8 @@ type Sort = 'updated' | 'title' | 'bpm';
 const SORT_LABEL: Record<Sort, string> = { updated: '更新順', title: '名前順', bpm: 'BPM 順' };
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+/** ジャケットが無いときの印（音符） */
+export const JACKET_NONE = '<svg class="jk-none" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
 const fmtLen = (s: number) => (s > 0 ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--');
 const fmtBpm = (e: SongEntry) => {
   const r = (x: number) => String(Number(x.toFixed(2)));
@@ -723,7 +725,7 @@ export class Home {
       });
     }
     el.innerHTML = `
-      <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : ''}</div>
+      <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
       <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
         <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}　${fmtLen(s.length)}</small></div>
