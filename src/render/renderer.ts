@@ -118,6 +118,30 @@ export interface Opponent {
   lane?: { game: Game; course: Course; vis: number[]; bars: number[] };
 }
 
+/**
+ * 左のパネルの背景: 上から下へ明るい色 → 深い色。上に柔らかい光の帯、細い横線、下の端に明るい線
+ * （ネームプレート・太鼓などはこの上に描く）
+ */
+function paintPanelBg(ctx: CanvasRenderingContext2D, x: number, w: number, top: string, mid: string, bottom: string) {
+  const y = LANE_TOP - 6;
+  const h = TEXT_BOTTOM - LANE_TOP + 12;
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, top);
+  g.addColorStop(0.45, mid);
+  g.addColorStop(1, bottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  const band = ctx.createLinearGradient(0, y, 0, y + 95);
+  band.addColorStop(0, 'rgba(255,255,255,0.16)');
+  band.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = band;
+  ctx.fillRect(x, y, w, 95);
+  ctx.fillStyle = 'rgba(255,255,255,0.035)';
+  for (let ly = y; ly < y + h; ly += 6) ctx.fillRect(x, ly, w, 1.5);
+  ctx.fillStyle = '#93cde2';
+  ctx.fillRect(x, y + h - 5, w, 5);
+}
+
 /** ゲージが満タンのときの虹色（毎フレーム色の文字列を作らないよう前もって作っておく） */
 const RAINBOW = Array.from({ length: 360 }, (_, h) => `hsl(${h},90%,58%)`);
 
@@ -1291,19 +1315,7 @@ export class Renderer {
   private paintOppPanel(o: Opponent, no: number, wall: number) {
     const ctx = this.ctx;
     const [c1, c2, badge] = Renderer.PLAYER_COLOR[no] ?? Renderer.PLAYER_COLOR[2];
-    const g = ctx.createLinearGradient(0, LANE_TOP - 6, 0, TEXT_BOTTOM);
-    g.addColorStop(0, c1);
-    g.addColorStop(1, c2);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, LANE_TOP - 6, LANE_X, TEXT_BOTTOM - LANE_TOP + 12);
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
-    for (let x = 30; x < LANE_X; x += 70) {
-      for (let y = LANE_TOP + 30; y < TEXT_BOTTOM; y += 70) {
-        ctx.beginPath();
-        ctx.arc(x + ((y / 70) % 2) * 35, y, 18, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
+    paintPanelBg(ctx, 0, LANE_X, c1, c2, shade(c2, -0.4));
     // スコア欄と点数
     ctx.fillStyle = 'rgba(0,0,30,0.45)';
     ctx.fillRect(0, LANE_TOP - 6, 316, 62);
@@ -1563,20 +1575,8 @@ export class Renderer {
     this.drawSprite(`panel:${info.course}:${info.level}`, x0, LANE_TOP - 6, LANE_X - x0, TEXT_BOTTOM - LANE_TOP + 12, () => {
       const ctx = this.ctx;
       const x0 = Math.min(0, this.vis.x0);
-      // 赤いパネル
-      const g = ctx.createLinearGradient(0, LANE_TOP - 6, 0, TEXT_BOTTOM);
-      g.addColorStop(0, '#3388b8');
-      g.addColorStop(1, '#1d5378');
-      ctx.fillStyle = g;
-      ctx.fillRect(x0, LANE_TOP - 6, LANE_X - x0, TEXT_BOTTOM - LANE_TOP + 12);
-      ctx.fillStyle = 'rgba(255,255,255,0.07)';
-      for (let x = 30; x < LANE_X; x += 70) {
-        for (let y = LANE_TOP + 30; y < TEXT_BOTTOM; y += 70) {
-          ctx.beginPath();
-          ctx.arc(x + ((y / 70) % 2) * 35, y, 18, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
+      // パネルの背景（深い青と光の帯）
+      paintPanelBg(ctx, x0, LANE_X - x0, '#2f80a6', '#1c5371', '#10304a');
       // スコア欄（左上の暗い帯）
       ctx.fillStyle = 'rgba(0,12,30,0.5)';
       ctx.fillRect(x0, LANE_TOP - 6, 316 - x0, 62);
