@@ -146,6 +146,7 @@ button.icon { min-width: 40px; height: 40px; padding: 0 10px; font-size: 18px; }
 .sel-bar .sel-info { color: #7cc4ff; font-weight: 700; font-size: 13px; white-space: nowrap; margin-right: 2px; }
 .sel-bar button { padding: 7px 9px; font-size: 13px; white-space: nowrap; }
 .sel-bar button:disabled { opacity: 0.35; }
+.sel-bar button.on { background: var(--accent); color: var(--accent-ink); }
 .tool.measure svg text { fill: #ffd21f; stroke: none; font: 900 17px var(--ff); }
 
 .tool {

@@ -29,6 +29,15 @@ export interface TapResult {
   point?: { kind: 'scroll' | 'bpm' | 'measure'; tick: number };
 }
 
+/** 状態を持つ命令（範囲の頭と後ろで状態を合わせる） */
+const STATE_KINDS = ['bpm', 'scroll', 'measure', 'gogo', 'barline'] as const;
+type StateKind = (typeof STATE_KINDS)[number];
+function sameState(a: EEvent, b: EEvent): boolean {
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  return a.kind === b.kind && x.value === y.value && (x.im ?? 0) === (y.im ?? 0) && x.num === y.num && x.den === y.den && x.on === y.on;
+}
+
 /**
  * エディタの状態と編集操作。描画・DOM からは独立。
  * 変更はすべて mutate() を通すので Undo/Redo と自動保存が効く。
@@ -46,7 +55,9 @@ export class Editor {
   /** 選んでいる範囲（選択ツール。両端を含む） */
   sel: { start: number; end: number } | null = null;
   /** コピーしたノーツ（範囲の始まりからの位置）と範囲の長さ。曲を替えても残る */
-  clip: { notes: ENote[]; span: number } | null = null;
+  clip: { notes: ENote[]; span: number; events?: EEvent[] } | null = null;
+  /** コピー・切り取りで命令（#MEASURE・#GOGOSTART など）も一緒に写すか */
+  clipEvents = false;
 
   private undoStack: string[] = [];
   private redoStack: string[] = [];
@@ -433,6 +444,64 @@ export class Editor {
     this.emit();
   }
 
+  /** 範囲 [a, b) の命令（a === b のときはその位置の命令） */
+  private eventsIn(a: number, b: number): EEvent[] {
+    return this.course.events.filter((e) => (a === b ? e.tick === a : e.tick >= a && e.tick < b));
+  }
+
+  /** tick の時点（before = true なら tick の直前）の状態を表す命令（tick は 0） */
+  private stateAt(kind: StateKind, tick: number, before = false): EEvent {
+    if (before && tick <= 0) {
+      const d: Record<StateKind, EEvent> = {
+        bpm: { tick: 0, kind: 'bpm', value: this.chart.bpm },
+        scroll: { tick: 0, kind: 'scroll', value: 1 },
+        measure: { tick: 0, kind: 'measure', num: 4, den: 4 },
+        gogo: { tick: 0, kind: 'gogo', on: false },
+        barline: { tick: 0, kind: 'barline', on: true },
+      };
+      return d[kind];
+    }
+    const t = before ? tick - 1 : tick;
+    if (kind === 'bpm') return { tick: 0, kind: 'bpm', value: this.timing.bpmAt(t) };
+    if (kind === 'measure') {
+      const m = this.measureOf(t);
+      return { tick: 0, kind: 'measure', num: m.num, den: m.den };
+    }
+    let last: EEvent | undefined;
+    for (const e of this.course.events) if (e.kind === kind && e.tick <= t) last = e;
+    if (kind === 'scroll') {
+      const v = last as Extract<EEvent, { kind: 'scroll' }> | undefined;
+      return { tick: 0, kind: 'scroll', value: v?.value ?? 1, ...(v?.im ? { im: v.im } : {}) };
+    }
+    const on = (last as { on?: boolean } | undefined)?.on;
+    return kind === 'gogo' ? { tick: 0, kind: 'gogo', on: on ?? false } : { tick: 0, kind: 'barline', on: on ?? true };
+  }
+
+  /**
+   * 範囲 [a, b) の命令を消して、代わりに list（tick は a からの位置）を置く。
+   * 範囲の後ろ（b から先）の状態（BPM・ゴーゴーなど）は元のままになるように、b に戻す命令を足す
+   */
+  private replaceEvents(a: number, b: number, list: EEvent[]) {
+    const after = STATE_KINDS.map((k) => this.stateAt(k, b));
+    const atB = new Set(this.course.events.filter((e) => e.tick === b).map((e) => e.kind));
+    const before = STATE_KINDS.map((k) => this.stateAt(k, a, true));
+    const c = this.course;
+    c.events = c.events.filter((e) => !(a === b ? e.tick === a : e.tick >= a && e.tick < b));
+    // 範囲の頭の状態の命令は、すぐ前と同じなら置かない
+    const add = list.filter((e) => !(e.tick === 0 && (e as { head?: boolean }).head && sameState(e, before[STATE_KINDS.indexOf(e.kind as StateKind)])))
+      .map((e) => { const x = { ...e, tick: e.tick + a } as EEvent & { head?: boolean }; delete x.head; return x as EEvent; });
+    c.events.push(...add);
+    // 範囲の終わりの状態（置いた命令のあと）と、元の b の状態が違えば戻す
+    if (b > a) {
+      STATE_KINDS.forEach((k, i) => {
+        if (atB.has(k)) return;
+        const last = [...add].reverse().find((e) => e.kind === k);
+        const now = last ?? before[i];
+        if (!sameState(now, after[i])) c.events.push({ ...after[i], tick: b });
+      });
+    }
+  }
+
   /** 選んでいる範囲をコピーする（コピーした数を返す） */
   copySelection(): number {
     const s = this.sel;
@@ -443,6 +512,15 @@ export class Editor {
       return c;
     });
     this.clip = { notes, span: s.end - s.start };
+    if (this.clipEvents) {
+      const inRange = this.eventsIn(s.start, s.end);
+      const events: EEvent[] = inRange.map((e) => { const c = { ...e, tick: e.tick - s.start } as EEvent & { pin?: boolean }; delete c.pin; return c; });
+      // 範囲の頭の状態（ゴーゴーの途中から選んだときなど）も写す
+      for (const k of STATE_KINDS) {
+        if (!inRange.some((e) => e.kind === k && e.tick === s.start)) events.unshift({ ...this.stateAt(k, s.start), head: true } as unknown as EEvent);
+      }
+      this.clip.events = events;
+    }
     return notes.length;
   }
 
@@ -456,6 +534,15 @@ export class Editor {
 
   cutSelection(): number {
     const n = this.copySelection();
+    const s = this.sel;
+    if (this.clipEvents && s) {
+      const list = this.selectedNotes();
+      this.mutate(() => {
+        this.course.notes = this.course.notes.filter((x) => !list.includes(x));
+        this.replaceEvents(s.start, s.end, []);
+      });
+      return n;
+    }
     this.deleteSelection();
     return n;
   }
@@ -479,6 +566,7 @@ export class Editor {
         return nEnd < start || n.tick > lastEnd;
       });
       this.course.notes.push(...added);
+      if (clip.events) this.replaceEvents(start, end, clip.events);
     });
     this.sel = { start, end };
     this.emit();

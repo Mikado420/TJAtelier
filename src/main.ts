@@ -819,6 +819,10 @@ view.onTap = (tick, tol) => {
 
 // ---------- 選択（コピー・切り取り・貼り付け） ----------
 
+/** 「命令」（命令もコピーする）の ON / OFF を覚えておく */
+const CLIP_EV_KEY = 'malody-web:clipEvents';
+try { ed.clipEvents = localStorage.getItem(CLIP_EV_KEY) === '1'; } catch { /* 読めない */ }
+
 /** 選択ツールのときだけ、ツールの上に操作のボタンを出す */
 function updateSelBar() {
   const bar = $('selBar');
@@ -830,7 +834,8 @@ function updateSelBar() {
   bar.querySelector<HTMLElement>('.sel-info')!.textContent = has ? `${n} 個` : ed.pendingLong !== null ? '終点をタップ' : '始点をタップ';
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
-    b.disabled = k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : !has || !n;
+    b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
+    if (k === 'ev') b.classList.toggle('on', ed.clipEvents);
     if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
     if (k === 'branch') b.classList.toggle('hidden', collab.active);
   });
@@ -844,6 +849,12 @@ function selAction(k: string) {
     if (!b) return;
     ed.clearSelection();
     ed.setBranch(ed.branch);
+    updateSelBar();
+    return;
+  }
+  if (k === 'ev') {
+    ed.clipEvents = !ed.clipEvents;
+    try { localStorage.setItem(CLIP_EV_KEY, ed.clipEvents ? '1' : '0'); } catch { /* 保存できない */ }
     updateSelBar();
     return;
   }
