@@ -8,7 +8,7 @@ import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
-  listFolderFonts, listFolders, listSongs, loadSongAudio, removeFromFolder, renameFolder, type SongEntry,
+  listFolderFonts, listFolders, listSongs, loadSongAudio, loadSongJacket, removeFromFolder, renameFolder, type SongEntry,
 } from '../io/library';
 
 export interface HomeHost {
@@ -324,8 +324,9 @@ export class Home {
         const cr = topCrown(bm, s);
         // 詳しいところ（難易度・操作のボタン）は、選んでいる曲の帯にだけ入れる（曲が多くても軽いように）
         const on = s.id === this.sel && this.focus === 'song' && !pk;
-        const d = on ? this.rowDetail(s, bm) : { x: '', acts: '' };
-        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="オンライン作業の部屋あり">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
+        const d = on ? this.rowDetail(s, bm) : { x: '', acts: '', jk: '' };
+        if (on) this.fillJacket(s);
+        return `<div class="hr ${inner ? 'in' : ''} ${on ? 'on' : ''} ${pk?.has(s.id) ? 'pk' : ''}" data-song="${s.id}" ${inner ? `style="--fc:${inner}"` : ''}>${pk ? `<i class="hr-ck">${pk.has(s.id) ? '✓' : ''}</i>` : (cr ? crownIcon(cr, 'hr-crn') : '<i class="hr-mk"></i>')}${d.jk}<div class="hr-t"><b>${esc(s.title)}${s.video ? VIDEO_ICON : ''}${this.host.collab?.sharedOf(s.id) ? '<i class="hr-share" title="オンライン作業の部屋あり">👥</i>' : ''}</b><small>${esc(s.subtitle || ' ')}${tags(s).length ? ` <span class="hr-tags">${tags(s).map((f) => `<em>${esc(f.replace(/\//g, ' › '))}</em>`).join('')}</span>` : ''}</small>${d.x}</div><span class="hr-bpm">${top ? `★${top}` : ''}</span>${d.acts}</div>`;
       };
       const rows: string[] = [];
       if (this.query) {
@@ -496,11 +497,46 @@ export class Home {
     for (const r of Array.from(this.list.querySelectorAll<HTMLElement>('.hr'))) if (r.style.getPropertyValue('--d') !== '0') r.style.setProperty('--d', '0');
   }
 
+  /** ジャケットの画像の URL（曲の id: ファイル名 → URL） */
+  private jkUrls = new Map<string, string>();
+
+  /** ジャケットの画像の URL（無ければ undefined。まだ読んでいなければ読む） */
+  private async jacketUrl(s: SongEntry): Promise<string | undefined> {
+    if (!s.jacket) return undefined;
+    const key = `${s.id}:${s.jacket}`;
+    const have = this.jkUrls.get(key);
+    if (have) return have;
+    try {
+      const j = await loadSongJacket(s.id);
+      if (!j) return undefined;
+      const ext = j.name.split('.').pop()?.toLowerCase() ?? '';
+      const type = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const url = URL.createObjectURL(new Blob([j.data], { type }));
+      this.jkUrls.set(key, url);
+      return url;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 選んでいる曲の札に、ジャケットの画像を入れる（まだ読んでいなければ読んでから） */
+  private fillJacket(s: SongEntry) {
+    void this.jacketUrl(s).then((url) => {
+      if (!url) return;
+      requestAnimationFrame(() => {
+        const el = this.list.querySelector<HTMLElement>(`.hr-jk[data-jk="${s.id}"]`);
+        if (el && !el.querySelector('img')) el.innerHTML = `<img src="${url}" alt="">`;
+      });
+    });
+  }
+
   /** 選んでいる曲の帯に入れる、難易度のチップと操作のボタン */
   private rowDetail(s: SongEntry, bm: Record<string, { crown: Crown }>) {
     const cs = sortCourses(s.courses);
-    const chips = cs.map((c) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
+    const chips = cs.map((c, i) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--i:${i}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
+    const url = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}`) : undefined;
     return {
+      jk: `<span class="hr-jk" data-jk="${s.id}">${url ? `<img src="${url}" alt="">` : ''}</span>`,
       x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span>`,
       acts: `<span class="hr-acts">
           <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
@@ -513,13 +549,15 @@ export class Home {
     this.sel = id;
     this.focus = 'song';
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
-    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
+    this.list.querySelectorAll('.hr-x, .hr-acts, .hr-jk').forEach((x) => x.remove());
     const row = this.list.querySelector<HTMLElement>(`[data-song="${id}"]`);
     const s0 = this.songs.find((q) => q.id === id);
     if (row && s0 && !this.picking) {
       const d = this.rowDetail(s0, bestMap());
       row.querySelector('.hr-t')?.insertAdjacentHTML('beforeend', d.x);
+      row.querySelector('.hr-t')?.insertAdjacentHTML('beforebegin', d.jk);
       row.insertAdjacentHTML('beforeend', d.acts);
+      this.fillJacket(s0);
     }
     row?.classList.add('on');
     this.render(false, false);
@@ -537,7 +575,7 @@ export class Home {
     // フォルダを選んでいるあいだは曲を鳴らさない
     this.stopPreview();
     this.list.querySelectorAll('.hr.on').forEach((r) => r.classList.remove('on'));
-    this.list.querySelectorAll('.hr-x, .hr-acts').forEach((x) => x.remove());
+    this.list.querySelectorAll('.hr-x, .hr-acts, .hr-jk').forEach((x) => x.remove());
     this.list.querySelector(`[data-fbar="${CSS.escape(key)}"]`)?.classList.add('on');
     this.render(false, false);
     if (scroll) this.centerSel(true);
@@ -614,7 +652,13 @@ export class Home {
     el.classList.remove('hidden');
     void el.offsetWidth;
     el.classList.add('on');
+    // 開いたときだけ、札を下から順にせり上げる
+    el.classList.add('rise');
+    clearTimeout(this.riseTimer);
+    this.riseTimer = window.setTimeout(() => el.classList.remove('rise'), 900);
   }
+
+  private riseTimer = 0;
 
   private closeDiff() {
     const el = document.getElementById('homeDiff')!;
@@ -760,7 +804,15 @@ export class Home {
     rememberCourse(s.id, course);
     this.stopPreview();
     try {
-      await closeCurtain({ title: s.title, sub: s.subtitle });
+      const cs = s.courses.find((c) => c.name === course);
+      const best = loadBest(s.id, course);
+      await closeCurtain({
+        title: s.title,
+        sub: s.subtitle,
+        course: cs ? { label: course === 'Edit' ? 'おに（裏）' : COURSE_SHORT[course] ?? course, level: cs.level, color: COURSE_COLOR[course] ?? '#4d9fbe' } : undefined,
+        jacket: await this.jacketUrl(s),
+        stats: [['BPM', fmtBpm(s)], ['長さ', fmtLen(s.length)], ['自己ベスト', best ? best.score.toLocaleString() : '---']],
+      });
       this.closeDiff();
       // 曲名を 3 秒見せてから始める
       await holdCurtain(3000);

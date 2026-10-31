@@ -1844,23 +1844,55 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home .hdf-auto.on { background: var(--accent); }
 .home .hdf-go { height: 42px; min-width: 140px; padding: 0 18px; background: var(--accent); font-size: 16px; font-weight: 900; --sk: calc(42px * var(--tan)); clip-path: none; }
 
-/* ---------- 曲を始めるときの幕 ---------- */
+/* ---------- 曲を始めるときの幕（案3）: 暗くなり、ジャケットが中央へ寄る。始まるときは上下のシャッター ---------- */
 .curtain { position: fixed; inset: 0; z-index: 80; pointer-events: auto; overflow: hidden; color: #fff; font-family: var(--ff); }
-.cu-st { position: absolute; inset: -20px -15%; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); transform: skewX(calc(-1 * var(--tilt))); }
-.cu-st i { transform: translateY(-110%); transition: transform 0.5s cubic-bezier(0.6, 0, 0.3, 1); }
-.curtain.in .cu-st i { transform: none; }
-.curtain.out .cu-st i { transform: translateY(110%); }
-.cu-band { position: absolute; left: 0; right: 0; top: 30%; height: 28%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0 20px; background: rgba(20, 24, 27, 0.86); transform: scaleY(0); transition: transform 0.3s 0.45s; }
-.curtain.in .cu-band { transform: none; }
-.curtain.out .cu-band { transform: scaleY(0); transition-delay: 0s; }
-.cu-band b { font-size: clamp(20px, 7vh, 32px); font-weight: 900; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.cu-band span { font-size: 12px; color: rgba(255, 255, 255, 0.8); }
-.cu-band em { font-style: normal; font-weight: 800; color: #fff; padding: 1px 8px; background: var(--cc); }
-.cu-hint { position: absolute; left: 0; right: 0; top: 64%; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 20px; opacity: 0; transition: opacity 0.3s 0.6s; text-align: center; }
-.curtain.in .cu-hint { opacity: 1; }
-.curtain.out .cu-hint { opacity: 0; transition-delay: 0s; }
-.cu-hint small { font-size: 11px; font-weight: 800; color: var(--accent-hi); letter-spacing: 0.15em; }
-.cu-hint span { font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.cu-dim { position: absolute; inset: 0; background: #0f1215; opacity: 0; transition: opacity 0.35s; }
+.curtain.in .cu-dim { opacity: 1; }
+.cu-line { position: absolute; left: 0; right: 0; height: 2px; background: var(--accent-hi); transform: scaleX(0); transform-origin: left; transition: transform 0.5s cubic-bezier(0.7, 0, 0.2, 1) 0.3s; }
+.cu-line.t { top: calc(50% - min(31vh, 120px)); }
+.cu-line.b { top: calc(50% + min(31vh, 120px)); transition-delay: 0.38s; }
+.curtain.in .cu-line { transform: none; }
+.cu-jk {
+  position: absolute; top: 50%; left: max(6vw, calc(50% - min(48vw, 400px)));
+  width: min(52vh, 220px); height: min(52vh, 220px); margin-top: calc(min(52vh, 220px) / -2);
+  overflow: hidden; background: #2d6f88;
+  opacity: 0; transform: translate(40vw, 6vh) scale(0.3);
+  transition: transform 0.6s cubic-bezier(0.2, 0.9, 0.2, 1), opacity 0.3s;
+}
+.cu-jk::before { content: ''; position: absolute; width: 128%; height: 128%; border-radius: 50%; border: calc(min(52vh, 220px) * 0.13) solid var(--accent); left: -32%; top: 27%; box-sizing: border-box; }
+.cu-jk::after { content: ''; position: absolute; width: 44%; height: 44%; border-radius: 50%; background: var(--don); right: 9%; top: 9%; }
+.cu-jk img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block; }
+.curtain.in .cu-jk { opacity: 1; transform: none; }
+.cu-info {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: calc(max(6vw, calc(50% - min(48vw, 400px))) + min(52vh, 220px) + 30px); right: 6vw;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0;
+}
+.cu-info > * { opacity: 0; transform: translateX(30px); transition: transform 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s; max-width: 100%; }
+.curtain.in .cu-info > * { opacity: 1; transform: none; }
+.curtain.in .cu-info > :nth-child(1) { transition-delay: 0.3s; }
+.curtain.in .cu-info > :nth-child(2) { transition-delay: 0.35s; }
+.curtain.in .cu-info > :nth-child(3) { transition-delay: 0.4s; }
+.curtain.in .cu-info > :nth-child(4) { transition-delay: 0.45s; }
+.cu-course { font-size: 13px; font-weight: 800; letter-spacing: 0.1em; padding: 2px 10px; background: var(--cc); }
+.cu-title { font-size: clamp(22px, 9vh, 38px); font-weight: 900; line-height: 1.15; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cu-sub { font-size: 14px; color: rgba(255, 255, 255, 0.65); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-stats { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; font-size: 13px; color: rgba(255, 255, 255, 0.75); }
+.cu-stats span { display: flex; align-items: baseline; gap: 6px; }
+.cu-stats b { font: 800 18px var(--fd); color: #fff; }
+.cu-sh { position: absolute; left: 0; right: 0; height: 50.5%; background: var(--accent); z-index: 2; }
+.cu-sh.t { top: 0; transform: translateY(-101%); }
+.cu-sh.b { bottom: 0; transform: translateY(101%); }
+.curtain.out .cu-sh.t { animation: cu-shT 0.7s cubic-bezier(0.7, 0, 0.2, 1) both; }
+.curtain.out .cu-sh.b { animation: cu-shB 0.7s cubic-bezier(0.7, 0, 0.2, 1) both; }
+@keyframes cu-shT { 0% { transform: translateY(-101%); } 40%, 50% { transform: none; } 100% { transform: translateY(-101%); } }
+@keyframes cu-shB { 0% { transform: translateY(101%); } 40%, 50% { transform: none; } 100% { transform: translateY(101%); } }
+.curtain.out .cu-dim, .curtain.out .cu-jk, .curtain.out .cu-info, .curtain.out .cu-line { animation: cu-hide 0.7s steps(1) both; }
+@keyframes cu-hide { 0% { visibility: visible; } 45%, 100% { visibility: hidden; } }
+@media (max-width: 560px) {
+  .cu-jk { left: 50%; margin-left: calc(min(30vh, 160px) / -2); top: 12%; margin-top: 0; width: min(30vh, 160px); height: min(30vh, 160px); }
+  .cu-info { left: 6vw; top: auto; bottom: 12%; transform: none; align-items: center; text-align: center; }
+}
 .hdf-cards { grid-auto-columns: minmax(0, 160px); justify-content: center; }
 
 /* ---------- 結果画面: 青と黒 ---------- */
@@ -2705,3 +2737,153 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .res-bg::before, .res-bg .res-obj { display: none; }
 .res > .res-bg { z-index: 1; }
 .res > .res-top, .res > .res-main { z-index: 2; }
+
+/* ---------- 選曲（案1）: 選んだ曲は大きな白い札。ジャケット・光る縁・光沢 ---------- */
+.home .hr.on {
+  min-height: 128px; padding-left: 22px; gap: 16px;
+  background: linear-gradient(100deg, transparent 40%, rgba(147, 205, 226, 0.45) 50%, transparent 60%) no-repeat, #f4f7f9;
+  background-size: 300% 100%, auto;
+  animation: hr-card 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, hr-sheen 4s ease-in-out 0.4s infinite;
+}
+@keyframes hr-card { from { transform: scale(0.95); opacity: 0.4; } to { transform: none; opacity: 1; } }
+@keyframes hr-sheen { 0%, 20% { background-position: 130% 0, 0 0; } 50%, 100% { background-position: -30% 0, 0 0; } }
+.home .hr.on::after { content: ''; position: absolute; inset: -3px; border: 3px solid var(--accent-hi); pointer-events: none; animation: hr-edge 1.6s ease-in-out infinite; }
+@keyframes hr-edge { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+.hr-jk { display: none; }
+.home .hr.on .hr-jk {
+  position: relative; z-index: 1; display: block; flex: none; width: 104px; height: 104px; overflow: hidden;
+  background: #2d6f88; animation: hr-jk 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.home .hr.on .hr-jk::before { content: ''; position: absolute; width: 132px; height: 132px; border-radius: 50%; border: 14px solid var(--accent); left: -36px; top: 18px; box-sizing: border-box; }
+.home .hr.on .hr-jk::after { content: ''; position: absolute; width: 44px; height: 44px; border-radius: 50%; background: var(--don); right: 10px; top: 10px; }
+.home .hr.on .hr-jk img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block; }
+@keyframes hr-jk { from { transform: translateX(-14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.home .hr.on .hc { animation: hc-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both; animation-delay: calc(0.12s + var(--i, 0) * 0.07s); }
+@keyframes hc-pop { from { transform: scale(0); } to { transform: none; } }
+/* 一覧を出し直したときは、上から順に横からすべり込む */
+.home-list > .hr { animation: hr-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.home-list > .hr:nth-child(2) { animation-delay: 0.03s; }
+.home-list > .hr:nth-child(3) { animation-delay: 0.06s; }
+.home-list > .hr:nth-child(4) { animation-delay: 0.09s; }
+.home-list > .hr:nth-child(5) { animation-delay: 0.12s; }
+.home-list > .hr:nth-child(6) { animation-delay: 0.15s; }
+.home-list > .hr:nth-child(7) { animation-delay: 0.18s; }
+.home-list > .hr:nth-child(n+8) { animation-delay: 0.21s; }
+@keyframes hr-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.home-list > .hr.on { animation: hr-card 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both, hr-sheen 4s ease-in-out 0.4s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .home .hr.on, .home .hr.on::after, .home .hr.on .hc, .home-list > .hr, .home .hr.on .hr-jk { animation: none !important; }
+}
+
+/* ---------- 難易度えらび（案1）: 札がせり上がる・選んだ札が光る・星が順に点く ---------- */
+#homeDiff.rise .hdf-card { animation: hdf-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+#homeDiff.rise .hdf-card:nth-child(2) { animation-delay: 0.06s; }
+#homeDiff.rise .hdf-card:nth-child(3) { animation-delay: 0.12s; }
+#homeDiff.rise .hdf-card:nth-child(4) { animation-delay: 0.18s; }
+@keyframes hdf-rise { from { transform: translateY(70px); opacity: 0; } }
+.home .hdf-card.on::after { content: ''; position: absolute; inset: -6px; border: 3px solid #fff; pointer-events: none; animation: hdf-ping 0.5s ease-out both; }
+@keyframes hdf-ping { from { transform: scale(1); opacity: 1; } to { transform: scale(1.14); opacity: 0; } }
+.home .hdf-card.on .hdf-meter i.on, .home .hdf-card.on .hdf-meter i.red { animation: hdf-st 0.2s steps(1) both; }
+.home .hdf-card.on .hdf-meter i:nth-child(2) { animation-delay: 0.04s; }
+.home .hdf-card.on .hdf-meter i:nth-child(3) { animation-delay: 0.08s; }
+.home .hdf-card.on .hdf-meter i:nth-child(4) { animation-delay: 0.12s; }
+.home .hdf-card.on .hdf-meter i:nth-child(5) { animation-delay: 0.16s; }
+.home .hdf-card.on .hdf-meter i:nth-child(6) { animation-delay: 0.2s; }
+.home .hdf-card.on .hdf-meter i:nth-child(7) { animation-delay: 0.24s; }
+.home .hdf-card.on .hdf-meter i:nth-child(8) { animation-delay: 0.28s; }
+.home .hdf-card.on .hdf-meter i:nth-child(9) { animation-delay: 0.32s; }
+.home .hdf-card.on .hdf-meter i:nth-child(10) { animation-delay: 0.36s; }
+@keyframes hdf-st { from { background: rgba(255, 255, 255, 0.25); } }
+.home .hdf-go:not(:disabled) { animation: hdf-go 1.2s ease-in-out infinite; }
+@keyframes hdf-go { 0%, 100% { background: var(--accent); } 50% { background: #6bb6d2; } }
+@media (prefers-reduced-motion: reduce) {
+  #homeDiff.rise .hdf-card, .home .hdf-card.on::after, .home .hdf-card.on .hdf-meter i, .home .hdf-go { animation: none !important; }
+}
+
+/* ---------- ポーズ（案1）: 左に大きな文字の一覧、右に設定（上にタブ）。横からすべり込む ---------- */
+.play .pause-menu { display: block; overflow: hidden; padding: 0; background: rgba(10, 12, 14, 0.82); animation: pm-fade 0.25s ease-out both; }
+@keyframes pm-fade { from { opacity: 0; } }
+.pause-menu .panel.pm {
+  width: 100%; height: 100%; max-height: none; margin: 0; padding: 0; box-sizing: border-box;
+  padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
+  display: grid; grid-template-columns: minmax(200px, 40%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+  background: transparent; box-shadow: none; overflow: hidden;
+}
+.pm-main { position: relative; align-self: stretch; justify-content: center; gap: 4px; padding: 0; background: transparent; border-left: 6px solid var(--accent); overflow: visible; }
+.pause-menu .pm-main h2 { display: none; }
+.play.online .pause-menu .pm-main h2 { display: block; margin: 0 0 8px 28px; font-size: 13px; color: var(--sub); }
+.pause-menu .pm-main button, .pause-menu .pm-main #pauseBack {
+  height: clamp(44px, 13vh, 58px); margin: 0; padding: 0 0 0 28px; text-align: left; box-shadow: none;
+  font-size: clamp(18px, 6.2vh, 27px); font-weight: 800; letter-spacing: 0.04em;
+  background: transparent; color: rgba(255, 255, 255, 0.55);
+  animation: pm-it 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition: background 0.15s, color 0.15s, padding-left 0.15s;
+}
+.pause-menu .pm-main button:nth-of-type(2) { animation-delay: 0.04s; }
+.pause-menu .pm-main button:nth-of-type(3) { animation-delay: 0.08s; }
+.pause-menu .pm-main button:nth-of-type(4) { animation-delay: 0.12s; }
+@keyframes pm-it { from { transform: translateX(-60px); opacity: 0; } }
+.pause-menu .pm-main button.primary { background: var(--accent); color: #fff; }
+.pause-menu .pm-main button:not(.primary):hover, .pause-menu .pm-main button:focus-visible { color: #fff; padding-left: 36px; }
+.pm-side { display: flex; flex-direction: column; min-height: 0; margin: 16px 16px 16px 24px; background: var(--deep); animation: pm-side 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s both; }
+@keyframes pm-side { from { transform: translateX(40px); opacity: 0; } }
+.pause-menu .pm-tabs { flex: none; display: flex; flex-direction: row; gap: 0; margin: 0; padding: 0; border: 0; }
+.pause-menu .pm-tabs button { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 6px; margin: 0; font-size: 14px; font-weight: 800; background: transparent; color: var(--sub); box-shadow: none; border-radius: 0; }
+.pause-menu .pm-tabs button.on { background: var(--accent); color: #fff; }
+.pause-menu .pm-tabs svg { width: 18px; height: 18px; }
+.play .pause-menu .pm-set { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 18px 18px; }
+@media (max-height: 520px) {
+  .pause-menu .pm-tabs button { height: 38px; font-size: 13px; }
+  .pause-menu .pm-set .st-row { min-height: 44px; }
+}
+@media (max-width: 640px) {
+  .pause-menu .panel.pm { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .pm-main { padding: 8px 0; }
+  .pm-side { margin: 8px 12px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .play .pause-menu, .pause-menu .pm-main button, .pm-side { animation: none !important; }
+}
+
+/* ---------- リザルト（案1）: 点数を数え上げ、王冠が落ちて衝撃の輪、判定は横から順に、最後にボタン ---------- */
+.res-score { display: flex; align-items: flex-end; gap: 12px; padding: 8px 14px; }
+.res-score small { padding-bottom: 6px; }
+.res-score b { flex: 1; font-size: 34px; -webkit-text-stroke: 0; }
+.res-crowns { position: relative; gap: 14px; }
+.res-crown { transform: scale(3); transition: opacity 0.2s, transform 0.45s cubic-bezier(0.2, 1.8, 0.4, 1); }
+.res-crowns::before { content: ''; position: absolute; left: 28px; top: 50%; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; border: 3px solid #ffd84a; opacity: 0; pointer-events: none; }
+.res.go:not(.r-fail):not(.res-calib) .res-crowns::before { animation: res-shock 0.7s ease-out 0.15s both; }
+.res.r-clear .res-crowns::before { border-color: #fff; }
+@keyframes res-shock { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+.res-rk { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.res-rank { font-size: 20px; font-weight: 900; opacity: 0; transform: translateX(-8px); transition: opacity 0.3s 0.25s, transform 0.3s 0.25s; }
+.res-rank:empty { display: none; }
+.res.r-fc .res-rank { color: #ffd84a; }
+.res.r-allgood .res-rank { color: #ff9ad0; }
+.res.r-clear .res-rank { color: #fff; }
+.res.go .res-rank { opacity: 1; transform: none; }
+.res-counts li { transform: translateX(30px); }
+.res:not(.res-calib) .res-side { opacity: 0; transform: translateY(14px); }
+.res.go .res-side { opacity: 1; transform: none; transition: opacity 0.3s 0.45s, transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) 0.45s; }
+.res-top { animation: res-top 0.4s cubic-bezier(0.7, 0, 0.2, 1) both; transform-origin: left; }
+@keyframes res-top { from { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .res-crown, .res-rank, .res-side, .res-top { transition: none !important; animation: none !important; }
+}
+
+/* ---------- 設定（案2）: 左の縦タブは左の青い線で印を付け、すべって移る。右は見出しで区切る ---------- */
+.st-nav { position: sticky; gap: 4px; padding: 0; background: var(--deep); }
+.sheet-body .st-nav button { position: relative; z-index: 1; background: transparent; color: var(--sub); transition: color 0.2s; }
+.sheet-body .st-nav button.on { background: transparent; color: #fff; }
+.st-ind {
+  position: absolute; left: 0; right: 0; top: calc(var(--to) * 56px); height: 52px; z-index: 0;
+  background: #2a2d31; border-left: 5px solid var(--accent); box-sizing: border-box;
+}
+.st-ind.go { animation: st-ind 0.35s cubic-bezier(0.7, 0, 0.2, 1) both; }
+@keyframes st-ind { from { top: calc(var(--from) * 56px); } }
+.st-pane.swap { animation: st-pane 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes st-pane { from { transform: translateX(24px); opacity: 0; } }
+.st-h { margin: 18px 0 2px; font-size: 12px; font-weight: 800; letter-spacing: 0.2em; color: var(--accent-hi); }
+.st-h:first-child { margin-top: 2px; }
+.st-pane .st-row { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+@media (prefers-reduced-motion: reduce) { .st-ind.go, .st-pane.swap { animation: none !important; } }

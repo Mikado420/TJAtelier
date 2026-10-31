@@ -1100,6 +1100,7 @@ export class PlayMode {
     ge?.style.setProperty('--cl', `${CLEAR_LINE}%`);
     R.querySelector<HTMLElement>('.res-gauge em')!.style.left = `${CLEAR_LINE}%`;
     R.querySelector('.res-acc')!.textContent = `精度 ${acc.toFixed(2)}%`;
+    R.querySelector('.res-rank')!.textContent = { allgood: '全良', fc: 'フルコンボ', clear: 'クリア', fail: '' }[rank];
     const targets: [HTMLElement, number][] = [[R.querySelector<HTMLElement>('#resScore')!, s.score]];
     for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);
     for (const [el] of targets) el.textContent = '0';
