@@ -3,7 +3,7 @@
     "name": "TJAtelier",
     "slug": "tjatelier",
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
     "ios": {

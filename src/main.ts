@@ -1333,6 +1333,7 @@ function openSheet(kind: SheetKind) {
   // 譜面情報は縦いっぱい・横広め
   $('sheet').classList.toggle('info', kind === 'analysis' || kind === 'settings');
   document.body.classList.toggle('tja-open', kind === 'events');
+  setTjaPortrait(kind === 'events');
   renderSheet();
 }
 /** 切り貼りで使う音源（0 = 譜面の音源、ほかは足した音源） */
@@ -1353,6 +1354,35 @@ const releaseCanvas = (n: Node) => {
 new MutationObserver((recs) => { for (const r of recs) r.removedNodes.forEach(releaseCanvas); })
   .observe($('sheetBody'), { childList: true, subtree: true });
 
+/**
+ * TJA の画面は縦画面に固定する。
+ * アプリの中ではアプリに向きの固定を頼み、ブラウザでは画面の向きの固定を試す。
+ * 少し待っても横長のままなら（固定できなかったら）#root を回して縦画面として出す（タッチの端末だけ）
+ */
+let tjaRotTimer = 0;
+let tjaOpenAt = 0;
+const touchDevice = () => matchMedia('(pointer: coarse)').matches;
+function checkTjaRot() {
+  const on = document.body.classList.contains('tja-open') && touchDevice() && window.innerWidth > window.innerHeight;
+  document.body.classList.toggle('tja-rot', on);
+  // 端末を逆向きの横にしているときは逆に回す
+  document.body.classList.toggle('tja-rot2', on && screen.orientation?.type === 'landscape-secondary');
+}
+function setTjaPortrait(on: boolean) {
+  const rn = (window as unknown as { ReactNativeWebView?: { postMessage(s: string): void } }).ReactNativeWebView;
+  rn?.postMessage(JSON.stringify({ type: 'orient', portrait: on }));
+  const so = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+  if (!rn && touchDevice()) {
+    if (on) so?.lock?.('portrait').catch(() => {});
+    else try { so?.unlock?.(); } catch { /* 固定できない */ }
+  }
+  clearTimeout(tjaRotTimer);
+  tjaOpenAt = Date.now();
+  if (on) tjaRotTimer = window.setTimeout(checkTjaRot, 900);
+  else document.body.classList.remove('tja-rot', 'tja-rot2');
+}
+window.addEventListener('resize', () => { if (document.body.classList.contains('tja-open') && Date.now() - tjaOpenAt > 900) checkTjaRot(); });
+
 function closeSheet() {
   stopTempoPreview();
   stopArrPlay();
@@ -1365,6 +1395,7 @@ function closeSheet() {
   disposeTimeline = null;
   sheet = null;
   document.body.classList.remove('tja-open');
+  setTjaPortrait(false);
   $('sheet').classList.add('hidden');
 }
 function refreshSheet() {
@@ -1527,7 +1558,7 @@ window.visualViewport?.addEventListener('resize', scheduleTjaHl);
 function fitTjaKeyboard() {
   const ta = document.getElementById('tjaText') as HTMLTextAreaElement | null;
   const sh = $('sheet');
-  if (!ta || document.activeElement !== ta) {
+  if (!ta || document.activeElement !== ta || document.body.classList.contains('tja-rot')) {
     sh.style.removeProperty('--tja-kb');
     return;
   }

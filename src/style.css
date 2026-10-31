@@ -1,6 +1,7 @@
 /* iPhone の横向きで、入力欄以外の文字だけが勝手に大きくなるのを止める（入力欄と色付きの文字がずれる原因） */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 :root {
+  --mono: ui-monospace, Menlo, 'SF Mono', Consolas, 'Roboto Mono', 'Noto Sans Mono', 'Droid Sans Mono', monospace;
   /* ロゴに合わせた色: 灰色寄りの下地と、淡い青 */
   --bg: #2a2d31;
   --bar: #2a2d31;
@@ -465,7 +466,7 @@ body.playing #app { visibility: hidden; }
   padding-left: 62px;
   border: 0;
   /* 入力時の自動拡大は viewport の maximum-scale=1 で止めているので、小さめの文字で多くの行を見せる */
-  font: 13px/18px var(--ff);
+  font: 13px/18px var(--mono);
   letter-spacing: 0;
   font-kerning: none;
   font-variant-ligatures: none;
@@ -496,7 +497,7 @@ body.playing #app { visibility: hidden; }
   background: #18181c;
   border-right: 1px solid var(--line);
   /* 行番号・小節番号は 8px の文字で、5 桁でも収まる最小限の幅。行の高さは本文と同じ 18px */
-  font: 8px/18px var(--ff);
+  font: 8px/18px var(--mono);
   white-space: pre;
   box-sizing: border-box;
   z-index: 1;
@@ -568,6 +569,14 @@ html, body { overscroll-behavior: none; }
     transform: translateZ(0);
   }
 }
+/* TJA の画面は縦画面に固定する。端末の向きを固定できなかったときは #root を反時計回りに 90° 回す */
+body.tja-open.tja-rot #root {
+  width: var(--vh, 100vh);
+  height: var(--vw, 100vw);
+  transform-origin: top left;
+  transform: translateY(var(--vh, 100vh)) rotate(-90deg);
+}
+body.tja-open.tja-rot.tja-rot2 #root { transform: translateX(var(--vw, 100vw)) rotate(90deg); }
 .sheet.tja #sheetClose { min-width: 48px; height: 48px; font-size: 22px; }
 
 /* TJA の見出しの隣の太字ボタン（TJA の画面のときだけ出す） */
