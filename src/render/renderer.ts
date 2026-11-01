@@ -29,9 +29,16 @@ const BRANCH_NAME = ['NORMAL', 'EXPERT', 'MASTER'];
 
 /** #JPOSSCROLL の距離（px）は、横 1280 の画面での px として、この画面の基準座標（横 2000）に直す */
 const JPOS_SCALE = REF_W / 1280;
-const GAUGE = { x1: 768, x2: 1812, y1: 258, y2: 291, segs: 50 };
-/** 魂（ゲージの右端に重なるひし形）。叩いたノーツはここへ飛んでいく。r = ひし形の中心から角までの長さ */
-const FLOWER = { x: GAUGE.x2 + 33, y: (GAUGE.y1 + GAUGE.y2) / 2, r: 33 };
+/**
+ * 魂ゲージ（参考画面で測った位置）。台座は画面の右端まで続き、クリア欄で一段高くなる。
+ * 通常の目盛りは x1〜split、クリアの目盛りは clearX〜x2 で、クリアの目盛りは上へ長い（clearTop から）
+ */
+const GAUGE = { x1: 771, split: 1621, clearX: 1623, x2: 1857, y1: 260, y2: 293, clearTop: 225, segs: 50 };
+/** 台座: 左端・通常の上端・クリア欄の上端・下端、段差の斜めの上と下の x */
+const GAUGE_BASE = { x0: 757, top: 247, tabTop: 212, bottom: 298, stepTop: 1611, stepBottom: 1577 };
+/** 魂の字の枠（叩いたノーツはこの中心へ飛んでいく） */
+const SOUL = { x0: 1875, x1: 1946, y0: 225, y1: 287 };
+const FLOWER = { x: (SOUL.x0 + SOUL.x1) / 2, y: (SOUL.y0 + SOUL.y1) / 2 };
 const DRUM = { x: 417, y: 418, r: 76 };
 /** 動画用の画面: レーン（左のパネルも）をこれだけ下へずらす（上は曲の情報、下は帯） */
 export const BC_DY = 380;
@@ -1829,95 +1836,89 @@ export class Renderer {
 
   private drawGauge(gauge: number, wall: number) {
     const ctx = this.ctx;
-    const clearX = GAUGE.x1 + ((GAUGE.x2 - GAUGE.x1) * CLEAR_LINE) / 100;
     const G = GAUGE;
-    // 枠とクリア欄（動かないので貼るだけ）。枠は魂のひし形の中心まで伸ばし、縁の線はひし形の縁へつながる
+    const B = GAUGE_BASE;
+    const right = this.vis.x1;
     const clearOn = gauge >= CLEAR_LINE;
-    const capR = FLOWER.x;
-    this.drawSprite(`gauge:${clearOn}`, G.x1 - 12, G.y1 - 44, capR - G.x1 + 16, G.y2 - G.y1 + 56, () => {
+    const gold = '#ffd21f';
+    // 台座とクリアの文字（動かないので貼るだけ）。画面の右端まで続き、クリア欄へは斜めに一段上がる
+    this.drawSprite(`gauge:${clearOn}`, B.x0 - 4, B.tabTop - 4, right - B.x0 + 8, B.bottom - B.tabTop + 6, () => {
       const c = this.ctx;
+      c.beginPath();
+      c.moveTo(B.x0 + 8, B.bottom);
+      c.arcTo(B.x0, B.bottom, B.x0, B.top, 8);
+      c.arcTo(B.x0, B.top, B.stepBottom, B.top, 8);
+      c.lineTo(B.stepBottom, B.top);
+      c.lineTo(B.stepTop, B.tabTop);
+      c.lineTo(right + 10, B.tabTop);
+      c.lineTo(right + 10, B.bottom);
+      c.closePath();
       c.fillStyle = '#0b1015';
-      roundRect(c, G.x1 - 8, G.y1 - 7, capR - G.x1 + 8, G.y2 - G.y1 + 14, 6);
       c.fill();
-      c.strokeStyle = '#1d3a4a';
+      c.strokeStyle = clearOn ? 'rgba(255,210,31,0.7)' : '#1d3a4a';
       c.lineWidth = 3;
+      c.lineJoin = 'round';
       c.stroke();
-      c.fillStyle = '#1d3442';
-      roundRect(c, clearX - 4, G.y1 - 40, G.x2 - clearX + 12, 38, 8);
-      c.fill();
-      c.font = `800 26px ${FONT}`;
-      c.textAlign = 'left';
-      c.textBaseline = 'middle';
-      outlinedText(c, 'クリア', clearX + 10, G.y1 - 21, clearOn ? '#ffe25a' : '#b9a46a', '#0b1015', 5);
     });
 
-    // 目盛り
-    const segW = (G.x2 - G.x1) / G.segs;
+    // 目盛り（通常は 40 個、クリアは 10 個。クリアの目盛りは上へ長い）
+    const nClear = Math.round((G.segs * (100 - CLEAR_LINE)) / 100);
+    const nNorm = G.segs - nClear;
     const filled = Math.floor((gauge / 100) * G.segs + 1e-6);
     const full = gauge >= 100;
     for (let i = 0; i < G.segs; i++) {
-      const x = G.x1 + i * segW;
-      const clear = i >= (G.segs * CLEAR_LINE) / 100;
+      const clear = i >= nNorm;
+      const w = clear ? (G.x2 - G.clearX) / nClear : (G.split - G.x1) / nNorm;
+      const x = clear ? G.clearX + (i - nNorm) * w : G.x1 + i * w;
+      const top = clear ? G.clearTop : G.y1;
       let col: string;
       if (i < filled) {
         if (full) col = RAINBOW[Math.floor((i * 9 + wall / 4) % 360)];
-        else col = clear ? '#ffd21f' : '#5ab4d6';
+        else col = clear ? gold : '#5ab4d6';
       } else col = clear ? '#3d3a1e' : '#1d3442';
       ctx.fillStyle = col;
-      ctx.fillRect(x + 1, G.y1, segW - 2, G.y2 - G.y1);
+      ctx.fillRect(x + 1, top, w - 2, G.y2 - top);
       if (i < filled) {
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.fillRect(x + 1, G.y1, segW - 2, 7);
+        ctx.fillRect(x + 1, top, w - 2, 7);
       }
     }
+    ctx.font = `800 26px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    outlinedText(ctx, 'クリア', G.clearX + 7, G.clearTop + 18, clearOn ? '#ffe25a' : '#b9a46a', '#0b1015', 5);
 
-    // 魂: ゲージの右端に重なるひし形（細い枠と小さな芯）。クリアすると黄色になり、薄い波紋が広がる
+    // 魂: 枠いっぱいの「魂」の字。クリアすると金色に光り、満タンで虹色になる。ノーツが届くと少しはねる
     const pop = Math.max(0, 1 - (wall - this.flowerPop) / 160);
-    const bright = gauge >= CLEAR_LINE;
-    const R = FLOWER.r * (1 + 0.06 * pop);
-    const dia = (r: number) => {
-      ctx.beginPath();
-      ctx.moveTo(FLOWER.x, FLOWER.y - r);
-      ctx.lineTo(FLOWER.x + r, FLOWER.y);
-      ctx.lineTo(FLOWER.x, FLOWER.y + r);
-      ctx.lineTo(FLOWER.x - r, FLOWER.y);
-      ctx.closePath();
-    };
-    const gold = '#ffd21f';
-    if (bright) {
-      const k = (wall % 1600) / 1600;
-      ctx.globalAlpha = 0.5 * (1 - k);
-      ctx.strokeStyle = gold;
-      ctx.lineWidth = 1.5;
-      dia(R * (1 + 0.5 * k));
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+    const S = SOUL;
+    const cx = (S.x0 + S.x1) / 2;
+    const cy = (S.y0 + S.y1) / 2;
+    if (clearOn) {
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 70);
+      g.addColorStop(0, 'rgba(255,210,31,0.22)');
+      g.addColorStop(1, 'rgba(255,210,31,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(G.x2 + 4, B.tabTop + 2, right - G.x2 - 4, B.bottom - B.tabTop - 4);
     }
-    dia(R);
-    ctx.fillStyle = '#0b1015';
-    ctx.fill();
+    ctx.font = `900 100px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    const m = ctx.measureText('魂');
+    const gw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+    const gh = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+    const k = Math.min((S.x1 - S.x0) / gw, (S.y1 - S.y0) / gh) * (1 + 0.06 * pop);
     ctx.save();
-    if (bright) {
-      ctx.shadowColor = 'rgba(255,210,31,0.45)';
-      ctx.shadowBlur = 14;
-    }
-    ctx.strokeStyle = bright ? gold : '#1d3a4a';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.restore();
-    dia(R * 0.6);
-    ctx.strokeStyle = bright ? gold : '#2a5a70';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    dia(R * 0.2);
-    ctx.fillStyle = full ? RAINBOW[Math.floor((wall / 4) % 360)] : bright ? gold : '#2a5a70';
-    if (bright) {
-      ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(k, k);
+    const fx = -(m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+    const fy = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+    if (clearOn) {
       ctx.shadowColor = 'rgba(255,210,31,0.8)';
-      ctx.shadowBlur = 10;
-      ctx.fill();
-      ctx.restore();
-    } else ctx.fill();
+      ctx.shadowBlur = 14 / k;
+    }
+    const fill = full ? RAINBOW[Math.floor((wall / 4) % 360)] : clearOn ? '#ffe25a' : '#2a5a70';
+    outlinedText(ctx, '魂', fx, fy, fill, '#0b1015', 7 / k);
+    ctx.restore();
   }
 
   /**
