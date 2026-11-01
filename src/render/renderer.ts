@@ -1842,7 +1842,7 @@ export class Renderer {
     const clearOn = gauge >= CLEAR_LINE;
     const gold = '#ffd21f';
     // 台座とクリアの文字（動かないので貼るだけ）。画面の右端まで続き、クリア欄へは斜めに一段上がる
-    this.drawSprite(`gauge:${clearOn}`, B.x0 - 4, B.tabTop - 4, right - B.x0 + 8, B.bottom - B.tabTop + 6, () => {
+    this.drawSprite('gauge', B.x0 - 4, B.tabTop - 4, right - B.x0 + 8, B.bottom - B.tabTop + 6, () => {
       const c = this.ctx;
       c.beginPath();
       c.moveTo(B.x0 + 8, B.bottom);
@@ -1855,7 +1855,7 @@ export class Renderer {
       c.closePath();
       c.fillStyle = '#0b1015';
       c.fill();
-      c.strokeStyle = clearOn ? 'rgba(255,210,31,0.7)' : '#1d3a4a';
+      c.strokeStyle = '#1d3a4a';
       c.lineWidth = 3;
       c.lineJoin = 'round';
       c.stroke();
