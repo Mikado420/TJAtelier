@@ -3,7 +3,6 @@
  * 選んだフォルダの帯には名前の変更・削除、選んだ曲の帯には試聴・エディタ・譜面情報・「この曲にする」。
  */
 import type { AudioEngine } from '../audio/audio';
-import { starSlots } from '../chart/stars';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import {
@@ -697,23 +696,19 @@ export class Home {
     const cards = slots.map((c) => {
       const none = c.level < 0;
       const on = !none && c.name === this.diffCourse;
-      const meter = starSlots(c.level).map((k) => `<i class="${k === 'off' ? '' : k}"></i>`).join('');
       const label = c.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[c.name] ?? c.name;
       const cb = none ? null : loadBest(s.id, c.name);
       return `<button class="hdf-card ${on ? 'on' : ''} ${none ? 'none' : ''} ${flipIn && c.slot === 'Oni' ? 'fin' : ''} ${c.name === 'Edit' ? 'ura' : ''}" data-dcourse="${esc(c.name)}" data-slot="${c.slot}" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--cd:${DARK[c.name] ?? '#222'}">
         <svg viewBox="0 0 48 48" aria-hidden="true">${ICON_D[c.name] ?? ''}</svg>
-        <span>${esc(label)}</span><b>★${none ? '-' : c.level}</b><em class="hdf-meter">${meter}</em>
-        ${c.slot === 'Oni' && canUra && c.name !== 'Edit' ? '<small class="hdf-uraok">裏あり</small>' : ''}
+        <span>${esc(label)}</span><b>★${none ? '-' : c.level}</b>
+        ${c.slot === 'Oni' && canUra && c.name !== 'Edit' ? '<svg class="hdf-uraok" viewBox="0 0 24 24" aria-label="裏"><path d="M4 11V9a3 3 0 0 1 3-3h12M16 3l3 3-3 3M20 13v2a3 3 0 0 1-3 3H5M8 21l-3-3 3-3"/></svg>' : ''}
         ${c.name === 'Edit' ? '<small class="hdf-urab">裏</small>' : ''}
         ${crownIcon(cb?.crown, 'hdf-crn')}
         ${on ? '<u>1P</u>' : ''}</button>`;
     }).join('');
     const best = sel ? loadBest(s.id, sel.name) : null;
-    const crownLabel: Record<string, string> = { allgood: '全良', fc: 'フルコンボ', clear: 'クリア', fail: '未クリア' };
     const info = sel
-      ? `<span class="hdf-il">${esc(sel.name === 'Edit' ? 'おに（裏）' : COURSE_SHORT[sel.name] ?? sel.name)} ★${sel.level} の記録</span>
-         <span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>
-         <span class="hdf-ir"><span>王冠</span><b class="cr-${best?.crown ?? 'none'}">${best ? crownLabel[best.crown] ?? '' : 'なし'}</b></span>`
+      ? `<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`
       : '';
     const el = document.getElementById('homeDiff')!;
     el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));

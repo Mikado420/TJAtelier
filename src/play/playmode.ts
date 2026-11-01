@@ -991,12 +991,12 @@ export class PlayMode {
           ? Math.sqrt(g.deltas.reduce((a, b) => a + (b - mean) ** 2, 0) / g.deltas.length)
           : 0;
         const ms = Math.round(med * 1000);
-        rows.push(['ずれ', `${ms > 0 ? '+' : ''}${ms}ms（${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}）`]);
+        rows.push(['ずれ', `${ms > 0 ? '+' : ''}${ms}ms ${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}`]);
         if (g.deltas.length) rows.push(['ばらつき', `±${Math.round(sd * 1000)}ms`]);
         this.suggested = Math.round(this.settings.offset + med * 1000);
         if (Math.abs(ms) > 5) {
           calib.classList.remove('hidden');
-          calib.querySelector('button')!.textContent = `判定調整を ${this.suggested}ms にする（今は ${this.settings.offset}ms）`;
+          calib.querySelector('button')!.textContent = `判定調整 ${this.settings.offset} → ${this.suggested}ms`;
         }
       }
     }
@@ -1060,10 +1060,9 @@ export class PlayMode {
     if (hint) {
       hint.classList.toggle('hidden', !sug);
       if (sug) {
-        hint.querySelector('button')!.textContent = `ドンの幅を ${Math.round(sug.width * 100)}% にする（今 ${Math.round(cur * 100)}%）`;
+        hint.querySelector('button')!.textContent = `ドンの幅 ${Math.round(cur * 100)} → ${Math.round(sug.width * 100)}%`;
       }
     }
-    this.result.querySelector('h2')!.textContent = '結果';
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     this.showResultCard(g, acc);
   }
@@ -1086,7 +1085,6 @@ export class PlayMode {
     // 自己ベストを更新したときだけ印を出す（はじめて遊んだときは出さない）
     if (!this.auto && this.onFinished({ score: s.score, crown: rank })) R.classList.add('r-best');
     R.querySelector('.res-title')!.textContent = info.title;
-    R.querySelector('.res-sub')!.textContent = `${cl} ★${info.level}`;
     const badge = R.querySelector<HTMLElement>('.res-course')!;
     badge.textContent = `${cl} ★${info.level}`;
     badge.style.setProperty('--cc', cc);
@@ -1131,30 +1129,27 @@ export class PlayMode {
   private showCalibration(g: Game) {
     const all = [...g.deltas, ...g.outside].filter((d) => Math.abs(d) < 0.3).sort((a, b) => a - b);
     const calib = this.result.querySelector<HTMLElement>('.calib')!;
-    const rows: [string, string][] = [['叩いた回数', `${g.taps.total}（測れた ${all.length}）`]];
+    const rows: [string, string][] = [['叩いた回数', `${g.taps.total}`], ['測れた数', `${all.length}`]];
     if (all.length >= 8) {
       // 外れ値に強いよう、中央付近の半分の平均を使う
       const q = all.slice(Math.floor(all.length / 4), Math.ceil((all.length * 3) / 4));
       const mid = q.reduce((a, b) => a + b, 0) / q.length;
       const sd = Math.sqrt(all.reduce((a, b) => a + (b - mid) ** 2, 0) / all.length);
       const ms = Math.round(mid * 1000);
-      rows.push(['ずれ', `${ms > 0 ? '+' : ''}${ms}ms（${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}）`]);
+      rows.push(['ずれ', `${ms > 0 ? '+' : ''}${ms}ms ${Math.abs(ms) <= 5 ? 'ちょうど' : ms > 0 ? '遅め' : '早め'}`]);
       rows.push(['ばらつき', `±${Math.round(sd * 1000)}ms`]);
       this.suggested = Math.round(this.settings.offset + mid * 1000);
       calib.classList.remove('hidden');
-      calib.querySelector('button')!.textContent = `判定調整を ${this.suggested}ms にする（今は ${this.settings.offset}ms）`;
+      calib.querySelector('button')!.textContent = `判定調整 ${this.settings.offset} → ${this.suggested}ms`;
     } else {
-      rows.push(['結果', '測れた打撃が少ないので、もう一度試してください']);
+      rows.push(['結果', '測定不足']);
       calib.classList.add('hidden');
     }
     const c = this.audio.clockInfo();
     rows.push(['音の遅れ', `${c.latencyMs}ms`]);
-    rows.push(['バージョン', BUILD_ID.slice(0, 7)]);
     this.result.classList.remove('go', 'counting', 'r-best', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     this.result.classList.add('res-calib');
     this.result.querySelector('.res-title')!.textContent = 'タイミング調整';
-    this.result.querySelector('.res-sub')!.textContent = '';
-    this.result.querySelector('h2')!.textContent = 'タイミング調整の結果';
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     this.result.classList.remove('hidden');
   }

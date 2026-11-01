@@ -389,7 +389,7 @@ export class Editor {
     if (this.pendingLong === null) {
       this.pendingLong = tick;
       this.emit();
-      return { message: '終点をタップ' };
+      return { message: '終点' };
     }
 
     const a = this.pendingLong;
@@ -421,7 +421,7 @@ export class Editor {
       this.sel = null;
       this.pendingLong = exact ? exact.tick : tick;
       this.emit();
-      return { message: '終点をタップ' };
+      return { message: '終点' };
     }
     const a = this.pendingLong;
     const b = exact ? exact.tick : tick;
@@ -601,7 +601,7 @@ export class Editor {
       }
       this.pendingLong = tick;
       this.emit();
-      return { message: 'ゴーゴーの終点をタップ' };
+      return { message: 'ゴーゴー終点' };
     }
     const p = this.pendingLong;
     this.pendingLong = null;
@@ -645,7 +645,7 @@ export class Editor {
       if (g) return { editGrad: g };
       this.pendingLong = tick;
       this.emit();
-      return { message: '同じ位置: SCROLL ／ 別の位置: グラデ' };
+      return {};
     }
     const p = this.pendingLong;
     this.pendingLong = null;

@@ -1713,7 +1713,6 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 
 .res-top { position: relative; flex: none; display: flex; align-items: center; justify-content: center; gap: 12px; height: 40px; padding: env(safe-area-inset-top) 16px 0; background: rgba(255, 255, 255, 0.92); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.08); }
 .res-title { font-size: 17px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
-.res-sub { font-size: 12px; font-weight: 800; color: #555; white-space: nowrap; }
 .res-main { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); gap: 14px; padding: 10px 14px; overflow-y: auto; touch-action: pan-y; }
 
 .res-card { align-self: start; background: #fff; border: 4px solid #2b2b33; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 0 rgba(0, 0, 0, 0.18); }
@@ -1756,12 +1755,11 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res.go .res-ribbon { opacity: 1; transform: none; }
 
 .res-side { align-self: end; justify-self: end; width: min(340px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 12px; background: rgba(29, 32, 35, 0.86); color: #fff; border-radius: 14px; }
-.res-h { margin: 0; font-size: 15px; font-weight: 900; }
 .res-dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 8px 0; font-size: 12px; }
 .res-dl dt { color: var(--sub); }
 .res-dl dd { margin: 0; word-break: break-all; }
 /* 見出しと数値の一覧はタイミング調整のときだけ */
-.res:not(.res-calib) .res-h, .res:not(.res-calib) .res-dl { display: none; }
+.res:not(.res-calib) .res-dl { display: none; }
 .res-side .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .res-side .buttons button { height: 44px; font-size: 15px; font-weight: 900; border-radius: 0; color: #fff; background: var(--btn); --sk: calc(44px * var(--tan)); clip-path: none; }
 .res-side .buttons button.primary { background: var(--accent); }
@@ -1907,7 +1905,6 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res-fw i:nth-child(3) { --fc: #ffffff; }
 .res-fw i:nth-child(4) { --fc: #4d9fbe; }
 .res-top { background: #1d2023; box-shadow: 0 2px 0 var(--accent); }
-.res-sub { color: rgba(255, 255, 255, 0.7); }
 .res-card { background: var(--panel); border: 0; border-radius: 0; box-shadow: 0 0 0 3px var(--accent), 0 10px 0 rgba(0, 0, 0, 0.35); }
 .res-head { background: #1d2023; }
 .res-gauge { background: #3b4045; border-radius: 0; }
@@ -1950,7 +1947,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home .hdf-card.on.ura { box-shadow: 0 0 0 3px #fff, 0 0 0 6px #7b4bd0, 0 0 28px rgba(160, 120, 255, 0.9); }
 .home .hdf-card u { top: -30px; }
 .home .hdf-card.ura u { background: #7b4bd0; }
-.hdf-uraok { position: absolute; right: 5px; top: 5px; font-size: 9px; font-weight: 900; padding: 1px 4px; background: rgba(0, 0, 0, 0.35); }
+.home .hdf-card .hdf-uraok { position: absolute; right: 5px; top: 5px; width: 18px; height: 18px; padding: 2px; background: rgba(0, 0, 0, 0.35); fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .hdf-urab { position: absolute; left: 5px; top: 5px; width: 22px; height: 22px; display: grid; place-items: center; font-size: 12px; font-weight: 900; background: #fff; color: #2e1660; }
 /* めくる */
 .home .hdf-card.fout { transform: translateY(-8px) rotateY(90deg); transition: transform 0.18s ease-in; }

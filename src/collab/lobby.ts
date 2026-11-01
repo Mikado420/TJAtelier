@@ -163,12 +163,12 @@ export class CollabLobby {
   }
 
   private row(r: RoomInfo, tap = true) {
-    const left = r.online ? '' : `あと約 ${Math.max(0, Math.ceil(ROOM_DAYS - (Date.now() - r.lastActive) / 86400_000))} 日`;
+    const left = r.online ? '' : `残り ${Math.max(0, Math.ceil(ROOM_DAYS - (Date.now() - r.lastActive) / 86400_000))} 日`;
     const cs = r.courses.map(([c, n]) => `<em class="cl-c cd-${c.toLowerCase()}">${COURSE_SHORT[c] ?? c} ${n}</em>`).join('');
     return `<div class="item cl-room" ${tap ? `data-room="${r.id}"` : ''}>
       <div class="grow">
         <b>${esc(r.name || r.title || '（無題）')}</b>${r.unlisted ? ' <small class="cl-tag">一覧に出さない</small>' : ''}${r.watch ? ' <small class="cl-tag">見学できる</small>' : ''}
-        <div class="pos">${esc(r.title)} ・ リーダー ${esc(r.leader)} ・ 部屋番号 ${r.id}</div>
+        <div class="pos">${r.title && r.title !== r.name ? `${esc(r.title)} ・ ` : ''}リーダー ${esc(r.leader)} ・ 部屋番号 ${r.id}</div>
         <div class="pos">👥 ${r.online}/${r.members} 人${r.viewers ? `（見学 ${r.viewers}）` : ''} ・ 編集 ${ago(r.updatedAt)}${left ? ` ・ ${left}` : ''}</div>
         ${cs ? `<div class="cl-cs">${cs}</div>` : ''}
       </div>

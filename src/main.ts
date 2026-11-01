@@ -831,7 +831,7 @@ function updateSelBar() {
   if (!on) return;
   const n = ed.selectedNotes().length;
   const has = !!ed.sel;
-  bar.querySelector<HTMLElement>('.sel-info')!.textContent = has ? `${n} 個` : ed.pendingLong !== null ? '終点をタップ' : '始点をタップ';
+  bar.querySelector<HTMLElement>('.sel-info')!.textContent = has ? `${n} 個` : ed.pendingLong !== null ? '終点' : '始点';
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
     b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
@@ -935,8 +935,8 @@ function renderAnalysisSheet(body: HTMLElement) {
       ${tile('総ノーツ数', fmtNum(a.notes), `${COURSE_JA[course.name] ?? course.name} ★${course.level}`)}
       ${tile('天井スコア', fmtNum(a.ceiling), a.hasRoll ? '＋ 連打' : '連打なし')}
       ${tile('BPM', bpmMain, bpmRange || '変化なし')}
-      ${tile('平均密度', a.density.toFixed(2), `打/秒・小節ごとの最大 ${peak.toFixed(2)}`)}
-      ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `曲の長さ ${fmtSec3(A.length)}` : '音源なし')}
+      ${tile('平均密度', a.density.toFixed(2), `打/秒・最大 ${peak.toFixed(2)}`)}
+      ${tile('演奏時間', fmtSec3(a.playTime), A.length > 0 ? `音源 ${fmtSec3(A.length)}` : '音源なし')}
       <div class="an-tile an-ratio">
         <span class="an-k">ドン : カッ</span>
         <b class="an-v"><em class="don">${donPct.toFixed(1)}%</em> : <em class="ka">${(100 - donPct).toFixed(1)}%</em></b>
@@ -1071,7 +1071,6 @@ function renderGradPickSheet(body: HTMLElement) {
     } else if (k === 'new') {
       closeSheet();
       ed.startScrollAt(gp.tick);
-      toast(gp.after ? '始めにしたい位置をタップしてください' : '終わりにしたい位置をタップしてください');
     } else if (k === 'point') {
       closeSheet();
       openPoint('scroll', gp.tick);
@@ -1497,7 +1496,7 @@ function renderSheet() {
           </div>`
       : t === 'view' ? viewRows(true)
       : t === 'vol' ? volumeRows()
-      : t === 'ed' ? `<div class="st-sub">レーンの下に出すイベント</div>
+      : t === 'ed' ? `<div class="st-sub">表示するイベント</div>
           <div class="st-chips">${(Object.keys(EV_NAMES) as (keyof EventShow)[]).map((k) => `<label class="st-chip" style="--c:${EVENT_COLOR[k]}"><input type="checkbox" data-evshow="${k}" ${settings.evShow[k] ? 'checked' : ''}><span>${EV_NAMES[k]}</span></label>`).join('')}</div>`
       : `<div class="st-btns">
             <button data-act="backup">バックアップを書き出す</button>
@@ -2042,8 +2041,8 @@ function choose<T extends string>(title: string, options: { value: T; label: str
 /** mp4 だけ（音源が別に無い動画）を読み込むとき: 音だけ .ogg にするか、動画も背景に使うか */
 const askVideoOnly = () =>
   choose('mp4 の読み込み方', [
-    { value: 'audio', label: '音だけ（.ogg）' },
-    { value: 'video', label: '動画も使う（音は .ogg）' },
+    { value: 'audio', label: '音だけ' },
+    { value: 'video', label: '動画も' },
   ]);
 
 /** 読み込み: .tja・.zip・音源を何でも。譜面は新しい曲として一覧に入れ、音源はすべて .ogg にする */
@@ -2433,7 +2432,7 @@ let playFromHome = false;
 let lastTestFromStart = true;
 
 async function startTest(fromStart = lastTestFromStart) {
-  $('back').textContent = playFromHome ? '曲えらびへ' : 'エディタへ戻る';
+  $('back').textContent = playFromHome ? '曲えらびへ' : 'エディタへ';
   lastTestFromStart = fromStart;
   stopPlayback();
   closeSheet();
@@ -2824,7 +2823,7 @@ function renderGradSheet(body: HTMLElement) {
         ${seg('basis', [['time', '秒数'], ['count', '個数']], g.basis ?? 'count')}
         <label class="field"><span>小数の桁数</span><input type="number" min="0" max="6" step="1" inputmode="numeric" data-g="digits" value="${g.digits}"></label>
         <h3>#BPMCHANGE</h3>
-        ${seg('speed', [['visual', '見た目(終点)'], ['visualBase', '見た目(始点)'], ['scroll', 'SCROLL値']], g.speed ?? 'scroll')}
+        ${seg('speed', [['visual', '終点基準'], ['visualBase', '始点基準'], ['scroll', 'SCROLL値']], g.speed ?? 'scroll')}
         <p class="grad-err" id="gradErr"></p>
         <div class="btns${st.old ? ' three' : ''}">
           ${st.old ? '<button data-gact="del">グラデを消す</button>' : ''}

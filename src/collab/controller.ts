@@ -253,9 +253,9 @@ export class Collab {
       },
       room: () => { this.renderChip(); this.rerenderPanel(); },
       error: (msg) => this.h.toast(msg),
-      rejected: (n) => this.h.toast(`${n} 個の変更は、編集できない所だったので戻しました`),
-      conflicts: (n) => this.h.toast(`${n} 個の変更は、つながっていない間にほかの人が同じ所を変えていたので取り消しました`),
-      dropped: (n) => this.h.toast(`版が戻されたので、送っていなかった ${n} 個の変更を取り消しました`),
+      rejected: (n) => this.h.toast(`${n} 個の変更を取り消しました`),
+      conflicts: (n) => this.h.toast(`${n} 個の変更を取り消しました`),
+      dropped: (n) => this.h.toast(`${n} 個の変更を取り消しました`),
       left: () => {
         this.h.toast('部屋を抜けました');
         forgetJoined(link.id);
@@ -296,7 +296,7 @@ export class Collab {
     this.h.view.ghosts = [];
     this.h.view.cursors = [];
     document.body.classList.remove('collab');
-    if (toast) this.h.toast('合作を閉じました（変更はサーバーに残っています）');
+    if (toast) this.h.toast('合作を閉じました');
   }
 
   /** プロジェクトを受け取り直した */
@@ -310,7 +310,7 @@ export class Collab {
       this.seed = null;
       s.apply([seed.meta, ...seed.lanes.map((l) => ({ o: 'new', lane: { ...l, owner: this.me } }) as Op)]);
       if (seed.audio) await this.uploadAudio(seed.audio, 0, '');
-      this.h.toast(`部屋 ${s.link.id} を作りました。部屋番号とあいことばを仲間に伝えてください`);
+      this.h.toast(`部屋 ${s.link.id} を作りました`);
     }
     this.ensureOwnLanes();
     for (const id of Object.keys(doc.lanes)) this.bump(id);
@@ -1085,7 +1085,7 @@ export class Collab {
       case 'pmine': this.playMode = 'mine'; this.renderPanel(); return;
       case 'pcmp':
         this.playMode = 'compare';
-        if (!this.compare.size) this.h.toast('「レーン」で見比べるレーンにチェックを入れてください');
+        if (!this.compare.size) this.h.toast('見比べるレーンがありません');
         this.renderPanel();
         return;
       case 'playall': {
@@ -1098,7 +1098,6 @@ export class Collab {
       case 'follow': {
         if (this.follow) { this.follow = null; this.renderPanel(); return; }
         go('members');
-        this.h.toast('ついていく人の「ついていく」を押してください');
         return;
       }
       case 'followOne':
@@ -1331,7 +1330,7 @@ export class Collab {
     if (!ed.sel) { this.h.toast('先に選択ツールで範囲を選んでください'); return; }
     const main = sortedLanes(doc, src.course).find((l) => l.main);
     if (!main) { this.h.toast(`${src.course} に本譜面がありません`); return; }
-    if (main.id === src.id) { this.h.toast('本譜面を開いています（自分のレーンを開いて範囲を選んでください）'); return; }
+    if (main.id === src.id) { this.h.toast('本譜面を開いています'); return; }
     const dst = this.laneData(main.id)!;
     const ta = ed.timing.tickToTime(ed.sel.start);
     const tb = ed.timing.tickToTime(ed.sel.end);
@@ -1339,7 +1338,7 @@ export class Collab {
     const toDst = (tick: number) => {
       const exact = dst.timing.timeToTick(ed.timing.tickToTime(tick));
       const r = Math.round(exact / G) * G;
-      return { tick: Math.max(0, Math.round(r)), off: Math.abs(exact - r) > 2 };
+      return { tick: Math.max(0, Math.round(r)) };
     };
     const a = dst.timing.timeToTick(ta) - 1;
     const z = dst.timing.timeToTick(tb) + 1;
@@ -1348,10 +1347,8 @@ export class Collab {
       const t = Number(k);
       if (t >= a && t <= z) ops.push({ o: 'n', l: main.id, k, v: null });
     }
-    let off = 0;
     for (const n of ed.selectedNotes()) {
       const p = toDst(n.tick);
-      if (p.off) off++;
       const v: NoteVal = { type: n.type };
       if (n.endTick !== undefined) v.endTick = toDst(n.endTick).tick;
       if (n.hits !== undefined) v.hits = n.hits;
@@ -1379,7 +1376,7 @@ export class Collab {
     s.cmd('adoptNote', { src: src.id, dst: main.id, range: `${fmt(ta)}〜${fmt(tb)}` });
     this.refreshGhosts();
     this.h.updateHeader();
-    this.h.toast(off ? `本譜面へ採用しました（${off} 個の音符は本譜面のグリッドに合わず、近い位置に置きました）` : '本譜面へ採用しました');
+    this.h.toast('本譜面へ採用しました');
   }
 
   /**

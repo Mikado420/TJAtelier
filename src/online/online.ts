@@ -311,7 +311,7 @@ export class OnlineScreen {
         <div class="ol-field"><span>1 人の予約</span>
           <div class="ol-step"><button data-set-limit="-1" ${host && s.limit > 1 ? '' : 'disabled'} aria-label="減らす">−</button><b>${s.limit} 曲まで</b><button data-set-limit="1" ${host && s.limit < 5 ? '' : 'disabled'} aria-label="増やす">＋</button></div>
         </div>
-        <div class="ol-field"><span>全員が準備OKなら自動で始める</span>
+        <div class="ol-field"><span>自動スタート</span>
           <div class="ol-seg"><button data-set-auto="1" class="${s.auto ? 'on' : ''}" ${host ? '' : 'disabled'}>ON</button><button data-set-auto="0" class="${s.auto ? '' : 'on'}" ${host ? '' : 'disabled'}>OFF</button></div>
         </div>
         <div class="ol-mbtn"><button class="ol-btn primary" data-ol="close">閉じる</button></div>
