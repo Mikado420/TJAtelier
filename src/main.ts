@@ -976,7 +976,7 @@ function renderAnalysisSheet(body: HTMLElement) {
     const r = simulateRolls(a, settings.rollRate);
     const rows: string[] = [];
     if (a.rolls.length) {
-      const chips = a.rolls.map((x, i) => `<span class="rb-c"><small>${x.sec.toFixed(3)}秒${x.type === 'bigRoll' ? '・大' : ''}</small><b>${r.roll[i]}<i>打</i></b></span>`).join('');
+      const chips = a.rolls.map((x, i) => `<span class="rb-c"><small>${x.sec.toFixed(3)}秒</small><b>${r.roll[i]}<i>打</i></b></span>`).join('');
       rows.push(`<div class="rb-row roll"><div class="rb-t"><span>連打 ${a.rolls.length}本</span><b>${sum(a.rolls.map((x) => x.sec)).toFixed(3)}<i>秒</i></b></div><div class="rb-cs">${chips}</div><div class="rb-sum"><span>合計</span><b>${r.rollHits}<i>打</i></b></div></div>`);
     }
     if (a.balloons.length) {
