@@ -1488,7 +1488,7 @@ function renderSheet() {
     $('sheetTitle').textContent = '設定';
     const t = settingsTab;
     const pane =
-      t === 'play' ? `<h4 class="st-h">叩き方</h4>${stSwitch('auto', 'オート', settings.auto)}${hitRow()}
+      t === 'play' ? `<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
           <h4 class="st-h">譜面</h4>${chartRows()}
           <div class="st-btns">
             <button data-act="calibrate">タイミング調整</button>
@@ -1710,7 +1710,11 @@ const stSwitch = (key: string, label: string, on: boolean) =>
 /** スライダーと、数字を入れられる欄（scale = 表示の倍率。ドンの幅は % で出す） */
 const stRange = (key: string, label: string, min: number, max: number, step: number, v: number, scale = 1, unit = '') =>
   `<div class="st-row st-range"><span>${label}</span><input type="range" min="${min}" max="${max}" step="${step}" data-set="${key}" value="${v}">` +
-  `<label class="st-num"><input type="number" inputmode="decimal" step="any" data-set="${key}" data-scale="${scale}" value="${Number((v * scale).toFixed(3))}"><i>${unit}</i></label></div>`;
+  `<label class="st-num"><input type="${key === 'speed' ? 'text' : 'number'}" inputmode="decimal" step="any" data-set="${key}" data-scale="${scale}" value="${numText(key, v * scale)}"><i>${unit}</i></label></div>`;
+/** 数字の欄に出す文字（ハイスピードは難易度選択と同じ「×1.0」） */
+const numText = (key: string, x: number) => (key === 'speed' ? `×${x.toFixed(1)}` : String(Number(x.toFixed(3))));
+/** オートの切り替え（設定・ポーズ・難易度選択で同じ形のボタン） */
+const autoBtn = (on: boolean) => `<button class="st-auto ${on ? 'on' : ''}" data-autobtn aria-pressed="${on}">オート ${on ? 'ON' : 'OFF'}</button>`;
 const HIT_MODES = [['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const;
 /** プレイの設定（叩き方に関わるもの） */
 function playRows() {
@@ -1763,10 +1767,10 @@ function onSettingInput(el: HTMLInputElement, commit: boolean): boolean {
   if (el.type === 'checkbox') (settings[key] as boolean) = el.checked;
   else {
     const scale = Number(el.dataset.scale || 1);
-    const raw = el.value.trim();
+    const raw = el.value.trim().replace(/^[×xX]\s*/, '');
     // 入力の途中（空・「-」だけなど）は、確定するまで反映しない
     if (raw === '' || !Number.isFinite(Number(raw))) {
-      if (commit) el.value = String(Number(((settings[key] as number) * scale).toFixed(3)));
+      if (commit) el.value = numText(key, (settings[key] as number) * scale);
       return false;
     }
     let v = Number(raw) / scale;
@@ -1778,7 +1782,7 @@ function onSettingInput(el: HTMLInputElement, commit: boolean): boolean {
     // 同じ行のスライダーと数字の欄をそろえる
     el.closest('.st-row')?.querySelectorAll<HTMLInputElement>(`input[data-set="${key}"]`).forEach((o) => {
       if (o === el && !commit) return;
-      o.value = o.type === 'range' ? String(v) : String(Number((v * Number(o.dataset.scale || 1)).toFixed(3)));
+      o.value = o.type === 'range' ? String(v) : numText(key, v * Number(o.dataset.scale || 1));
     });
   }
   if (key === 'drumSize') settings.donWidth = (DRUM_BASE * settings.drumSize) / 100;
@@ -1821,6 +1825,13 @@ $('sheetBody').addEventListener('click', (e) => {
   if (tb) {
     settingsTab = tb.dataset.sttab as SettingsTab;
     renderSheet();
+    return;
+  }
+  const ab = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-autobtn]');
+  if (ab) {
+    settings.auto = !settings.auto;
+    saveSettings();
+    ab.outerHTML = autoBtn(settings.auto);
     return;
   }
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-hitmode]');
@@ -2494,7 +2505,7 @@ function renderPauseSettings() {
   $('pauseTabs').innerHTML = SETTINGS_TABS.filter(([k]) => k === 'play' || k === 'view' || k === 'vol')
     .map(([k, l, d]) => `<button data-ptab="${k}" class="${k === pauseTab ? 'on' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('');
   $('pauseSettings').innerHTML =
-    pauseTab === 'play' ? `${play.isOnline ? '' : '<div class="st-row"><span>叩き方</span><div class="st-seg two"><button data-pmode="play">プレイ</button><button data-pmode="auto">オート</button></div></div>'}${playRows()}`
+    pauseTab === 'play' ? `${play.isOnline ? '' : `<div class="st-row"><span>オート</span>${autoBtn(!!settings.auto)}</div>`}${playRows()}`
     : pauseTab === 'view' ? viewRows()
     : volumeRows();
   play.refreshPauseMode();
@@ -2507,8 +2518,7 @@ $('pauseTabs').addEventListener('click', (e) => {
 });
 $('pauseSettings').addEventListener('click', (e) => {
   const t = e.target as HTMLElement;
-  const pm = t.closest<HTMLButtonElement>('[data-pmode]');
-  if (pm) { play.setAuto(pm.dataset.pmode === 'auto'); return; }
+  if (t.closest('[data-autobtn]')) { play.setAuto(!settings.auto); return; }
   const hm = t.closest<HTMLButtonElement>('[data-hitmode]');
   if (hm) onHitModeClick(hm);
   const vm = t.closest<HTMLButtonElement>('[data-vmode]');

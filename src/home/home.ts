@@ -48,7 +48,7 @@ const SORT_LABEL: Record<Sort, string> = { updated: '更新順', title: '名前�
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 /** ジャケットが無いときの印（音符） */
 export const JACKET_NONE = '<svg class="jk-none" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
-const fmtLen = (s: number) => (s > 0 ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '--:--');
+const fmtLen = (s: number) => (s > 0 ? `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '');
 const fmtBpm = (e: SongEntry) => {
   const r = (x: number) => String(Number(x.toFixed(2)));
   return e.bpmMin !== e.bpmMax ? `${r(e.bpmMin)}-${r(e.bpmMax)}` : r(e.bpm);
@@ -537,7 +537,7 @@ export class Home {
     const cs = sortCourses(s.courses);
     const chips = cs.map((c, i) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--i:${i}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
     return {
-      x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}　${fmtLen(s.length)}</span><span class="hr-cs">${chips}</span></span>`,
+      x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span><span class="hr-cs">${chips}</span></span>`,
       acts: `<span class="hr-acts">
           <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
           <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`,
@@ -725,7 +725,7 @@ export class Home {
       <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
       <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
-        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}　${fmtLen(s.length)}</small></div>
+        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</small></div>
         <div class="hdf-body">
           <div class="hdf-side">
             <button data-df="back" aria-label="曲えらびにもどる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
@@ -814,7 +814,7 @@ export class Home {
         sub: s.subtitle,
         course: cs ? { label: course === 'Edit' ? 'おに（裏）' : COURSE_SHORT[course] ?? course, level: cs.level, color: COURSE_COLOR[course] ?? '#4d9fbe' } : undefined,
         jacket: await this.jacketUrl(s),
-        stats: [['BPM', fmtBpm(s)], ['長さ', fmtLen(s.length)], ['自己ベスト', best ? best.score.toLocaleString() : '---']],
+        stats: [['BPM', fmtBpm(s)], ...(s.length > 0 ? [['長さ', fmtLen(s.length)] as [string, string]] : []), ['自己ベスト', best ? best.score.toLocaleString() : '---']],
       });
       this.closeDiff();
       // 曲名を 3 秒見せてから始める

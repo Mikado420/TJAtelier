@@ -771,7 +771,7 @@ button { border-radius: 0; }
 .stage {
   background:
     var(--stripes),
-    linear-gradient(calc(90deg + var(--tilt)), transparent 0 64%, rgba(77, 159, 190, 0.14) 64% 100%),
+    linear-gradient(calc(90deg + var(--tilt)), transparent 30%, rgba(77, 159, 190, 0.1) 100%),
     var(--bg);
 }
 /* ツール: 下に浮かぶ斜めの台 */
@@ -1449,6 +1449,10 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .st-range input[type=range] { flex: 1; min-width: 0; }
 .st-range output { flex: none; min-width: 44px; text-align: right; font-family: var(--fd); font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent-hi); }
 /* スイッチ */
+.st-row:has(.st-auto) > span { flex: 1; }
+.st-auto { flex: none; height: 36px; padding: 0 18px; border: 0; background: var(--btn); color: #fff; font: 800 14px var(--fd); white-space: nowrap; cursor: pointer; }
+.st-auto.on { background: var(--accent); }
+.pause-menu .st-auto { border-radius: 0; height: 36px; padding: 0 18px; font-size: 14px; }
 .st-sw { appearance: none; -webkit-appearance: none; flex: none; width: 46px; height: 26px; margin: 0; border-radius: 13px; background: var(--btn); position: relative; cursor: pointer; transition: background 0.15s; }
 .st-sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #c9cdd2; transition: transform 0.15s, background 0.15s; }
 .st-sw:checked { background: var(--accent); }
@@ -1490,7 +1494,9 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .play .pause-menu {
   --bg: #2a2d31; --panel: #303439; --deep: #1d2023; --inp: #383c41; --sub: rgba(255, 255, 255, 0.6);
   --accent: #4d9fbe; --accent-hi: #93cde2; --btn: #3b4045; --line: rgba(255, 255, 255, 0.16);
-  background: rgba(10, 12, 14, 0.72);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
 }
 .pause-menu .panel.pm {
@@ -1738,11 +1744,13 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res-acc { font: 800 13px var(--fd); color: #444; }
 .res-counts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .res-counts li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 8px 2px 4px; background: #f1f1f4; border-radius: 6px; }
-.res-counts span { font-size: 11px; font-weight: 900; color: #fff; background: #555b6a; padding: 1px 7px; border-radius: 4px; white-space: nowrap; }
+.res-counts span { font-size: 15px; font-weight: 900; color: #fff; background: #555b6a; padding: 2px 9px; border-radius: 4px; white-space: nowrap; text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 1px 0 #000, 0 -1px 0 #000, 1px 0 0 #000, -1px 0 0 #000; }
 .res-counts .good span { background: #e8a10f; }
 .res-counts .ok span { background: #8a8f99; }
 .res-counts .bad span { background: #4a6fd8; }
-.res-counts b { font: 900 18px var(--fd); font-variant-numeric: tabular-nums; }
+.res-counts .roll span { background: #f5b800; }
+.res-counts .combo span { background: #e8603c; }
+.res-counts b { font: 900 22px var(--fd); font-variant-numeric: tabular-nums; }
 .res-foot { position: relative; min-height: 44px; padding: 0 12px 10px; display: flex; align-items: center; gap: 10px; }
 .res-bubble { position: relative; padding: 6px 14px; border-radius: 18px; background: linear-gradient(#ffe0ec, #ffb3cf); border: 2px solid #2b2b33; font-size: 13px; font-weight: 900; opacity: 0; transform: translateY(6px); transition: opacity 0.3s 0.2s, transform 0.3s 0.2s; }
 .res-bubble::before { content: ''; position: absolute; left: -9px; top: 50%; margin-top: -6px; border: 6px solid transparent; border-right: 8px solid #2b2b33; border-left: 0; }

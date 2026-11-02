@@ -515,10 +515,11 @@ export class PlayMode {
   }
 
   private paintPauseMode() {
-    this.root.querySelectorAll<HTMLButtonElement>('[data-pmode]').forEach((b) => {
-      const on = (b.dataset.pmode === 'auto') === !!this.settings.auto;
+    const on = !!this.settings.auto;
+    this.root.querySelectorAll<HTMLButtonElement>('[data-autobtn]').forEach((b) => {
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
+      b.textContent = `オート ${on ? 'ON' : 'OFF'}`;
     });
   }
 
