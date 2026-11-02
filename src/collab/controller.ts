@@ -988,7 +988,7 @@ export class Collab {
         <h3>この部屋</h3>
         <div class="btns">
           ${edit ? '<button data-cp="rename">名前を変える</button>' : ''}
-          <button data-cp="leave">閉じる</button>
+          <button data-cp="closeRoom">閉じる</button>
           <button data-cp="forget" class="danger">一覧から外す</button>
         </div>`;
       if (!this.isLeader) return `${head}<p class="note">部屋の名前: ${esc(r.name)} ・ ${r.unlisted ? '一覧に出さない' : '一覧に出す'} ・ 見学 ${r.watch ? 'できる' : 'できない'}</p>${out}`;
@@ -1251,7 +1251,7 @@ export class Collab {
         s.cmd('profile', { name: name.trim() });
         return;
       }
-      case 'leave':
+      case 'closeRoom':
         this.closePanel();
         this.close();
         await this.h.showHome();

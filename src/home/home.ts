@@ -710,10 +710,7 @@ export class Home {
         ${crownIcon(cb?.crown, 'hdf-crn')}
         ${on ? '<u>1P</u>' : ''}</button>`;
     }).join('');
-    const best = sel ? loadBest(s.id, sel.name) : null;
-    const info = sel
-      ? `<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`
-      : '';
+    const info = this.diffInfoHtml(s, sel);
     const el = document.getElementById('homeDiff')!;
     el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));
     const jk = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}`) : undefined;
@@ -743,6 +740,46 @@ export class Home {
         <button class="hdf-opt hdf-auto ${o.auto ? 'on' : ''}" data-df="auto">オート ${o.auto ? 'ON' : 'OFF'}</button>
         <button class="hdf-go" data-df="go" ${sel ? '' : 'disabled'}>はじめる</button>
       </div>`;
+  }
+
+  /** 左の自己ベストの欄の中身 */
+  private diffInfoHtml(s: SongEntry, sel: { name: string } | undefined) {
+    if (!sel) return '';
+    const best = loadBest(s.id, sel.name);
+    return `<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`;
+  }
+
+  /**
+   * 選んだ難易度・ハイスピード・オートが変わったときは、変わった所だけ書き換える
+   * （全部作り直すと、カードが出てくる動きやメーターの動きが最初からやり直しになる）
+   */
+  private refreshDiff() {
+    const s = this.diffSong;
+    if (!s) return;
+    const el = document.getElementById('homeDiff')!;
+    const sel = this.diffSlots(s).slots.find((x) => x.name === this.diffCourse && x.level >= 0);
+    el.querySelectorAll<HTMLElement>('.hdf-card').forEach((c) => {
+      const on = !!sel && c.dataset.dcourse === sel.name;
+      c.classList.toggle('on', on);
+      const u = c.querySelector('u');
+      if (on && !u) c.insertAdjacentHTML('beforeend', '<u>1P</u>');
+      else if (!on && u) u.remove();
+    });
+    const info = el.querySelector<HTMLElement>('.hdf-info');
+    if (info) {
+      info.style.setProperty('--cc', sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)');
+      info.innerHTML = this.diffInfoHtml(s, sel);
+    }
+    const o = this.host.playOpts();
+    const sp = el.querySelector('.hdf-opt b');
+    if (sp) sp.textContent = `×${o.speed.toFixed(1)}`;
+    const au = el.querySelector<HTMLElement>('[data-df="auto"]');
+    if (au) {
+      au.classList.toggle('on', !!o.auto);
+      au.textContent = `オート ${o.auto ? 'ON' : 'OFF'}`;
+    }
+    const go = el.querySelector<HTMLButtonElement>('[data-df="go"]');
+    if (go) go.disabled = !sel;
   }
 
   /** おにの枠をめくって、裏おに⇔おもてのおにを入れ替える */
@@ -775,7 +812,7 @@ export class Home {
         return;
       }
       this.diffCourse = c;
-      this.paintDiff();
+      this.refreshDiff();
       return;
     }
     const b = t.closest<HTMLElement>('[data-df]');
@@ -790,10 +827,10 @@ export class Home {
     else if (a === 'sp-' || a === 'sp+') {
       const v = Math.round((o.speed + (a === 'sp+' ? 0.1 : -0.1)) * 10) / 10;
       this.host.setPlayOpt('speed', Math.max(0.1, Math.min(10, v)));
-      this.paintDiff();
+      this.refreshDiff();
     } else if (a === 'auto') {
       this.host.setPlayOpt('auto', !o.auto);
-      this.paintDiff();
+      this.refreshDiff();
     } else if (a === 'go' && this.diffCourse) await this.startSong();
   }
 

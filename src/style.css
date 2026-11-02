@@ -2820,7 +2820,10 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .home .hdf-card.on .hdf-meter i:nth-child(8) { animation-delay: 0.28s; }
 .home .hdf-card.on .hdf-meter i:nth-child(9) { animation-delay: 0.32s; }
 .home .hdf-card.on .hdf-meter i:nth-child(10) { animation-delay: 0.36s; }
-@keyframes hdf-st { from { background: rgba(255, 255, 255, 0.25); } }
+/* 終わりの色も書いておく（書かないと Safari で最後の 1 つが暗いまま残ることがある） */
+@keyframes hdf-st { from { background: rgba(255, 255, 255, 0.25); } to { background: #fff; } }
+@keyframes hdf-st-red { from { background: rgba(255, 255, 255, 0.25); } to { background: #ff3b3b; } }
+.home .hdf-card.on .hdf-meter i.red { animation-name: hdf-st-red; }
 .home .hdf-go:not(:disabled) { animation: hdf-go 1.2s ease-in-out infinite; }
 @keyframes hdf-go { 0%, 100% { background: var(--accent); } 50% { background: #6bb6d2; } }
 @media (prefers-reduced-motion: reduce) {
