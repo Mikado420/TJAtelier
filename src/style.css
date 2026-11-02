@@ -1965,10 +1965,15 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hdf-best { font: 800 22px/1.05 var(--fd); }
 /* BPM・長さ（ジャケットの下）。狭い画面ではジャケットごと隠れるので、曲名の下に出す */
 .hdf-st { display: flex; gap: 10px; padding-bottom: 7px; margin-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
-.hdf-st span { display: flex; flex-direction: column; min-width: 0; }
+.hdf-st span { display: flex; flex-direction: column; min-width: 0; flex: 0 1 auto; }
 .hdf-st small { color: rgba(255, 255, 255, 0.65); font-size: 10px; }
-.hdf-st b { font: 800 17px/1.1 var(--fd); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hdf-st b { display: block; max-width: 100%; overflow: hidden; font: 800 17px/1.1 var(--fd); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .hdf-st span + span { padding-left: 10px; border-left: 1px solid rgba(255, 255, 255, 0.12); }
+/* 横に並ばないときは 2 段（見出しは左・数字は右） */
+.hdf-st.stack { flex-direction: column; gap: 3px; }
+.hdf-st.stack span { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 6px; }
+.hdf-st.stack span + span { padding-left: 0; border-left: 0; }
+.hdf-st.stack small { flex: none; }
 .hdf-hs { display: none; }
 @media (max-width: 640px) { .hdf-hs { display: inline; } }
 .hdf-ir { display: flex; justify-content: space-between; margin-top: 4px; }

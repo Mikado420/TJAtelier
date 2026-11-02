@@ -181,6 +181,8 @@ export class Home {
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
+    // 画面の向き・大きさが変わると、ジャケットの下の欄の幅も変わる
+    window.addEventListener('resize', () => { if (this.diffSong) this.fitDiffStats(); });
     this.list.addEventListener('scroll', () => this.onListScroll(), { passive: true });
     // 指・ホイール・キーで動かしたときだけ、止まった所の曲を選ぶ（こちらで動かしたスクロールでは選ばない）
     const byUser = () => { this.userScrollAt = performance.now(); this.autoScroll = false; };
@@ -740,6 +742,30 @@ export class Home {
         <button class="hdf-opt hdf-auto ${o.auto ? 'on' : ''}" data-df="auto">オート ${o.auto ? 'ON' : 'OFF'}</button>
         <button class="hdf-go" data-df="go" ${sel ? '' : 'disabled'}>はじめる</button>
       </div>`;
+    this.fitDiffStats();
+  }
+
+  /**
+   * BPM・長さが欄の幅に収まるようにする。横に並ばなければ 2 段にし、
+   * それでもはみ出す数字は文字を小さくする（画面に出てから測る）
+   */
+  private fitDiffStats() {
+    requestAnimationFrame(() => {
+      const st = document.querySelector<HTMLElement>('#homeDiff .hdf-st');
+      if (!st || !st.clientWidth) return;
+      st.classList.remove('stack');
+      const bs = [...st.querySelectorAll<HTMLElement>('b')];
+      for (const b of bs) b.style.fontSize = '';
+      const over = (x: HTMLElement) => x.scrollWidth > x.clientWidth + 0.5;
+      if (over(st) || bs.some(over)) st.classList.add('stack');
+      for (const b of bs) {
+        let fs = parseFloat(getComputedStyle(b).fontSize);
+        while (over(b) && fs > 9) {
+          fs -= 1;
+          b.style.fontSize = `${fs}px`;
+        }
+      }
+    });
   }
 
   /** ジャケットの下の欄の中身（BPM・長さと、選んだ難易度の自己ベスト） */
@@ -771,6 +797,7 @@ export class Home {
     if (info) {
       info.style.setProperty('--cc', sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)');
       info.innerHTML = this.diffInfoHtml(s, sel);
+      this.fitDiffStats();
     }
     const o = this.host.playOpts();
     const sp = el.querySelector('.hdf-opt b');
