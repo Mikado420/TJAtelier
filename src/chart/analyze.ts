@@ -25,10 +25,10 @@ export interface Analysis {
   density: number;
   /** 最初の音符から最後の音符まで（秒。#DELAY は入れない） */
   playTime: number;
-  /** 連打の長さ（秒）。type は roll / bigRoll */
-  rolls: { type: 'roll' | 'bigRoll'; sec: number }[];
-  /** 風船の長さ（秒）と打数 */
-  balloons: { sec: number; hits: number }[];
+  /** 連打の長さ（秒）と、始まる小節（1 から）。type は roll / bigRoll */
+  rolls: { type: 'roll' | 'bigRoll'; sec: number; bar: number }[];
+  /** 風船の長さ（秒）と打数と、始まる小節（1 から） */
+  balloons: { sec: number; hits: number; bar: number }[];
   /**
    * 小節ごとの密度: 小節の始まりと終わりの時刻（秒、曲の再生位置）と、その小節の打/秒（音符数 ÷ 小節の秒数）。
    * don・ka はそのうちドン（大ドン）・カッ（大カッ）の打/秒。連打・風船は入れない
@@ -89,14 +89,21 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
   let bpmMain = bpms[0];
   for (const [b, s] of used) if (s > (used.get(bpmMain) ?? 0)) bpmMain = b;
 
+  const allMeasures = measures(course, contentEnd(course));
+  /** その tick がある小節の番号（1 から） */
+  const barOf = (tick: number) => {
+    for (let i = allMeasures.length - 1; i >= 0; i--) if (tick >= allMeasures[i].start) return allMeasures[i].index + 1;
+    return 1;
+  };
+  const rollTicks = course.notes.filter((n) => n.type === 'roll' || n.type === 'bigRoll').map((n) => n.tick).sort((x, y) => x - y);
+  const balloonTicks = course.notes.filter((n) => n.type === 'balloon').map((n) => n.tick).sort((x, y) => x - y);
   const rolls = pc.notes
     .filter((n) => n.type === 'roll' || n.type === 'bigRoll')
-    .map((n) => ({ type: n.type as 'roll' | 'bigRoll', sec: Math.max(0, (n.endTime ?? n.time) - n.time) }));
-  const balloons = balloonsAll.map((n) => ({ sec: Math.max(0, (n.endTime ?? n.time) - n.time), hits: n.hits ?? 0 }));
+    .map((n, i) => ({ type: n.type as 'roll' | 'bigRoll', sec: Math.max(0, (n.endTime ?? n.time) - n.time), bar: barOf(rollTicks[i] ?? 0) }));
+  const balloons = balloonsAll.map((n, i) => ({ sec: Math.max(0, (n.endTime ?? n.time) - n.time), hits: n.hits ?? 0, bar: barOf(balloonTicks[i] ?? 0) }));
 
   /** 小節ごとの密度（最初の音符の小節から最後の音符の小節まで）。秒数は（60 ÷ BPM）× 拍数（#DELAY は入れない） */
   const comboNotes = course.notes.filter((n) => COMBO.has(n.type));
-  const allMeasures = measures(course, contentEnd(course));
   function measureDensity() {
     const out: Analysis['curve'] = [];
     if (!ticks.length) return out;

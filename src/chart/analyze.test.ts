@@ -21,7 +21,7 @@ describe('譜面情報', () => {
     // 初項 = ceil((1000000 − 40×100) ÷ 4 ÷ 10) × 10 = 249000
     expect(a.ceiling).toBe(249000 * 4 + 40 * 100);
     expect(a.hasRoll).toBe(false);
-    expect(a.balloons).toEqual([{ sec: 1.5, hits: 40 }]);
+    expect(a.balloons).toEqual([{ sec: 1.5, hits: 40, bar: 2 }]);
   });
 
   it('BPM の下限・上限と、いちばん長く使われている BPM', () => {

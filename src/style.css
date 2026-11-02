@@ -3034,33 +3034,6 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .an-flow .tl-tools { position: absolute; top: 5px; left: 120px; right: 12px; }
 .sheet .an-flow .tl-tools button { height: 26px; min-width: 32px; }
 @media (max-height: 460px) { .an-flow .tl-tools { top: 2px; right: 8px; left: 100px; } }
-/* 連打・風船（内訳と、秒速で何打入るか） */
-.an-rb { margin-top: 6px; display: flex; flex-direction: column; gap: 5px; }
-.an-rb-h { display: flex; align-items: center; gap: 8px; }
-.an-rb-h > span:first-child { color: var(--sub); font-size: 11px; font-weight: 700; }
-.an-rb-h .an-rate { margin-left: auto; gap: 4px; }
-.an-rb-h .an-rate small { color: var(--sub); font-size: 11px; }
-.sheet .an-rb-h .an-rate button { width: 30px; height: 28px; font-size: 16px; }
-.sheet .an-rb-h .an-rate input { width: 58px; height: 28px; font-size: 15px; }
-#anSim { display: flex; flex-direction: column; gap: 4px; }
-.rb-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 8px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 3px 0 0 var(--rc); }
-.rb-row.roll { --rc: #f7c11b; }
-.rb-row.balloon { --rc: #ff9a3a; }
-.rb-t, .rb-sum { display: flex; flex-direction: column; white-space: nowrap; }
-.rb-t span, .rb-sum span { color: var(--sub); font-size: 10px; font-weight: 700; }
-.rb-t b { color: var(--rc); font: 800 17px/1.1 var(--fd); font-variant-numeric: tabular-nums; }
-.rb-sum { align-items: flex-end; }
-.rb-sum b { font: 800 17px/1.1 var(--fd); font-variant-numeric: tabular-nums; }
-.rb-t i, .rb-sum i, .rb-c i { font-style: normal; font-size: 10px; color: var(--sub); margin-left: 2px; }
-.rb-cs { display: flex; gap: 4px; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; }
-.rb-c { flex: none; display: flex; flex-direction: column; align-items: center; padding: 2px 8px; background: var(--btn); }
-.rb-c small { color: var(--sub); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rb-c b { font: 800 14px/1.15 var(--fd); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rb-c.pop b { color: #8fe3a0; }
-.rb-c.miss b { color: #ff8a7a; }
-.rb-score { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 2px 0; }
-.rb-score span { color: var(--sub); font-size: 11px; font-weight: 700; }
-.rb-score b { font: 800 17px var(--fd); color: var(--accent-hi); font-variant-numeric: tabular-nums; }
 /* 譜面情報: 上から 情報・譜面の流れ・譜面画像 を 1 つずつ並べ、画面ごと縦にスクロール */
 .sheet.an .sheet-body { display: flex; flex-direction: column; overflow-y: auto; touch-action: pan-y; gap: 12px; padding: 12px 14px calc(16px + var(--safe-b)); }
 .sheet.an .an-p { flex: none; padding: 10px 14px 12px; }
@@ -3078,3 +3051,45 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .tl-ov { display: block; width: 100%; height: 34px; cursor: pointer; touch-action: none; }
 /* 譜面画像: 1 枚を全部載せる（中でスクロールしない） */
 .sheet.an .an-img { flex: none; max-height: none; overflow: visible; }
+/* 譜面情報 案1: 曲・ノーツ・連打/風船 を横に並べたカード（名前の上、数字は下）、その下に 流れ・内訳・画像 */
+.sheet.an .an-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sheet.an .an-cards.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sheet.an .an-c { flex: none; padding: 0 0 12px; gap: 0; border-top: 3px solid var(--accent); }
+.sheet-body .an-c > h3 { padding: 7px 14px; background: rgba(255, 255, 255, 0.04); min-height: 40px; }
+.an-cb { padding: 4px 14px 0; display: flex; flex-direction: column; min-width: 0; }
+.an-st { display: flex; flex-direction: column; gap: 1px; padding: 7px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); min-width: 0; }
+.an-st:last-child { border-bottom: 0; }
+.an-st > span { color: var(--sub); font-size: 12px; font-weight: 700; }
+.an-st > b { font: 800 20px/1.2 var(--fd); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.an-st > b small { margin: 0 2px; color: var(--sub); font-size: 12px; font-weight: 700; }
+.an-st em { font-style: normal; }
+.an-st em.roll { color: #f7c11b; }
+.an-st em.balloon { color: #ff9a3a; }
+.an-st em.pop { color: #8fe3a0; }
+.an-st em.miss { color: #ff8a7a; }
+.an-st.an-ratio { grid-column: auto; }
+.an-st .an-bar { margin-top: 4px; }
+.an-st .an-brs { flex-wrap: wrap; margin-top: 2px; }
+.an-c > h3 .an-rate { margin-left: auto; gap: 4px; }
+.an-c > h3 .an-rate small { color: var(--sub); font-size: 11px; }
+.sheet .an-c > h3 .an-rate button { width: 30px; height: 28px; font-size: 16px; }
+.sheet .an-c > h3 .an-rate input { width: 58px; height: 28px; font-size: 15px; }
+.an-c > h3 .an-imgbtn { margin-left: auto; }
+.sheet.an .an-flow .an-cb { padding-top: 6px; }
+.sheet.an .an-flow .tl-tools { top: 7px; }
+.sheet.an .an-imgp .an-cb { padding-top: 8px; }
+/* 内訳: 連打は左、風船は右。1 行に 1 本 */
+.an-det { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; padding-top: 6px; }
+.an-dc { display: flex; flex-direction: column; min-width: 0; }
+.an-dh { padding: 4px 0 4px 10px; font-size: 13px; font-weight: 900; box-shadow: inset 3px 0 0 var(--rc); color: var(--rc); }
+.an-dc.roll { --rc: #f7c11b; }
+.an-dc.balloon { --rc: #ff9a3a; }
+.an-dr { display: grid; grid-template-columns: 2em 5em minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 6px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); font: 700 15px var(--fd); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.an-dr i { font-style: normal; color: var(--sub); font-size: 13px; }
+.an-dr small { margin-left: 2px; color: var(--sub); font-size: 11px; }
+.an-dr b { font-size: 17px; font-weight: 800; color: var(--rc); text-align: right; }
+.an-dc.balloon .an-dr b { color: #8fe3a0; }
+.an-dr.miss { background: rgba(230, 53, 46, 0.16); }
+.an-dc.balloon .an-dr.miss b { color: #ff8a7a; }
+@media (max-width: 720px) { .sheet.an .an-cards.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sheet.an .an-cards.three > :last-child { grid-column: 1 / -1; } }
+@media (max-width: 560px) { .sheet.an .an-cards, .sheet.an .an-cards.three, .an-det { grid-template-columns: minmax(0, 1fr); } .sheet.an .an-cards.three > :last-child { grid-column: auto; } }

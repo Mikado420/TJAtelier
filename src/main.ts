@@ -922,72 +922,59 @@ function renderAnalysisSheet(body: HTMLElement) {
     A.course = Number(b.dataset.anCourse);
     renderAnalysisSheet(body);
   }));
-  const item = (k: string, v: string, cls = '') => `<div class="an-it ${cls}"><span>${k}</span><b>${v}</b></div>`;
+  /** 名前の下に数字（視線が横に飛ばないように） */
+  const item = (k: string, v: string, cls = '') => `<div class="an-st ${cls}"><span>${k}</span><b>${v}</b></div>`;
   const unit = (u: string) => `<small>${u}</small>`;
   // BPM: 最低〜最高（基本 BPM = いちばん長く流れている BPM）
   const bpmText = a.bpmMin === a.bpmMax ? fmtBpm(a.bpmMin) : `${fmtBpm(a.bpmMin)}〜${fmtBpm(a.bpmMax)}(${fmtBpm(a.bpmMain)})`;
   const hasRB = a.rolls.length > 0 || a.balloons.length > 0;
   // 分岐ごとのノーツ数（押すとその分岐の数字にする）
   const brRow = hasBr
-    ? `<div class="an-gl">分岐</div><div class="an-it wide"><span>ノーツ数</span><b class="an-brs">${BRANCH_NAME.map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n} ${fmtNum(analyzeCourse(chart, pathOf(k as BranchNo)).notes)}</button>`).join('')}</b></div>`
+    ? `<div class="an-st"><span>分岐ごとのノーツ数</span><b class="an-brs">${BRANCH_NAME.map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n} ${fmtNum(analyzeCourse(chart, pathOf(k as BranchNo)).notes)}</button>`).join('')}</b></div>`
     : '';
+  const card = (title: string, inner: string, cls = '', extra = '') => `<section class="an-p an-c ${cls}"><h3>${title}${extra}</h3><div class="an-cb">${inner}</div></section>`;
+  const rate = `<span class="an-rate">
+      <small>秒速</small>
+      <button data-rate="-1" aria-label="秒速を下げる">−</button>
+      <input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${settings.rollRate}">
+      <button data-rate="1" aria-label="秒速を上げる">＋</button>
+    </span>`;
   body.innerHTML = `
-    <section class="an-p an-info">
-      <h3>譜面の情報</h3>
-      <div class="an-grid">
-        <div class="an-gl">曲</div>
-        ${item('演奏時間', fmtSec3(a.playTime))}
-        ${item('小節数', String(a.measureCount))}
-        ${item('BPM', bpmText)}
-        <div class="an-gl">ノーツ</div>
-        ${item('総ノーツ数', fmtNum(a.notes))}
-        ${item('天井スコア', fmtNum(a.ceiling))}
-        ${item('平均密度', `${a.density.toFixed(2)}${unit('打/秒')}`)}
-        <div class="an-it wide an-ratio"><span>ドン : カッ</span><b><em class="don">${donPct.toFixed(1)}%</em> : <em class="ka">${(100 - donPct).toFixed(1)}%</em></b><div class="an-bar"><i style="width:${donPct.toFixed(2)}%"></i></div></div>
-        ${brRow}
-      </div>
-      ${hasRB ? `
-      <div class="an-rb">
-        <div class="an-rb-h">
-          <span class="an-gl">連打・風船</span>
-          <span class="an-rate">
-            <button data-rate="-1" aria-label="秒速を下げる">−</button>
-            <input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${settings.rollRate}">
-            <button data-rate="1" aria-label="秒速を上げる">＋</button>
-            <small>打/秒</small>
-          </span>
-        </div>
-        <div id="anSim"></div>
-      </div>` : ''}
-    </section>
-    <section class="an-p an-flow">
-      <h3>譜面の流れ</h3>
-      <div class="an-timeline" id="anTimeline"></div>
-    </section>
-    <section class="an-p an-imgp">
-      <h3>譜面画像<span class="an-imgbtn"><button data-an-img="save" class="primary">画像を保存</button></span></h3>
-      <div class="an-img" id="anImg"></div>
-    </section>`;
+    <div class="an-cards ${hasRB ? 'three' : ''}">
+      ${card('曲', `${item('演奏時間', fmtSec3(a.playTime))}${item('BPM', bpmText)}${item('小節数', String(a.measureCount))}`)}
+      ${card('ノーツ', `${item('総ノーツ数', fmtNum(a.notes))}${item('天井スコア', fmtNum(a.ceiling))}${item('平均密度', `${a.density.toFixed(2)}${unit('打/秒')}`)}
+        <div class="an-st an-ratio"><span>ドン : カッ</span><b><em class="don">${donPct.toFixed(1)}%</em> : <em class="ka">${(100 - donPct).toFixed(1)}%</em></b><div class="an-bar"><i style="width:${donPct.toFixed(2)}%"></i></div></div>${brRow}`)}
+      ${hasRB ? card('連打・風船', '<div id="anSum"></div>') : ''}
+    </div>
+    ${card('譜面の流れ', '<div class="an-timeline" id="anTimeline"></div>', 'an-flow')}
+    ${hasRB ? card('連打・風船の内訳', '<div class="an-det" id="anDet"></div>', '', rate) : ''}
+    ${card('譜面画像', '<div class="an-img" id="anImg"></div>', 'an-imgp', '<span class="an-imgbtn"><button data-an-img="save" class="primary">画像を保存</button></span>')}`;
 
-  /** 連打・風船の内訳と、秒速で叩いたときに何打入るか（風船は割れるか）・スコア（全良） */
+  /** 連打・風船: 上のまとめ（本数に関係なく同じ大きさ）と、1 本ずつの内訳（連打は左・風船は右、1 行に 1 本） */
   const paintSim = () => {
-    const el = document.getElementById('anSim');
-    if (!el) return;
     const r = simulateRolls(a, settings.rollRate);
-    const rows: string[] = [];
-    if (a.rolls.length) {
-      const chips = a.rolls.map((x, i) => `<span class="rb-c"><small>${x.sec.toFixed(3)}秒</small><b>${r.roll[i]}<i>打</i></b></span>`).join('');
-      rows.push(`<div class="rb-row roll"><div class="rb-t"><span>連打 ${a.rolls.length}本</span><b>${sum(a.rolls.map((x) => x.sec)).toFixed(3)}<i>秒</i></b></div><div class="rb-cs">${chips}</div><div class="rb-sum"><span>合計</span><b>${r.rollHits}<i>打</i></b></div></div>`);
+    const sumEl = document.getElementById('anSum');
+    if (sumEl) {
+      const parts: string[] = [];
+      if (a.rolls.length) parts.push(item(`連打 ${a.rolls.length}本`, `<em class="roll">${sum(a.rolls.map((x) => x.sec)).toFixed(3)}${unit('秒')}</em> → ${fmtNum(r.rollHits)}${unit('打')}`));
+      if (a.balloons.length) {
+        const all = r.popped === a.balloons.length;
+        parts.push(item(`風船 ${a.balloons.length}個`, `<em class="balloon">${fmtNum(sum(a.balloons.map((x) => x.hits)))}${unit('打')}</em> → 割れる <em class="${all ? 'pop' : 'miss'}">${r.popped}</em>${unit(`/${a.balloons.length}`)}`));
+      }
+      parts.push(item('スコア（全良）', fmtNum(a.ceiling - r.balloonLoss + r.rollScore)));
+      sumEl.innerHTML = parts.join('');
     }
-    if (a.balloons.length) {
-      const chips = a.balloons.map((x, i) => {
+    const det = document.getElementById('anDet');
+    if (det) {
+      const bar = (n: number) => `${n}${unit('小節')}`;
+      const col = (title: string, cls: string, rows: string) => `<div class="an-dc ${cls}"><div class="an-dh">${title}</div>${rows}</div>`;
+      const rolls = a.rolls.map((x, i) => `<div class="an-dr"><i>${i + 1}</i><span>${bar(x.bar)}</span><span>${x.sec.toFixed(3)}${unit('秒')}</span><b>${r.roll[i]}${unit('打')}</b></div>`).join('');
+      const balloons = a.balloons.map((x, i) => {
         const ok = r.balloon[i] >= x.hits;
-        return `<span class="rb-c ${ok ? 'pop' : 'miss'}"><small>${x.hits}打・${x.sec.toFixed(2)}秒</small><b>${ok ? '割れる' : `あと ${x.hits - r.balloon[i]}`}</b></span>`;
+        return `<div class="an-dr ${ok ? '' : 'miss'}"><i>${i + 1}</i><span>${bar(x.bar)}</span><span>${x.hits}${unit('打')}・${x.sec.toFixed(2)}${unit('秒')}</span><b>${ok ? '割れる' : `あと ${x.hits - r.balloon[i]}`}</b></div>`;
       }).join('');
-      rows.push(`<div class="rb-row balloon"><div class="rb-t"><span>風船 ${a.balloons.length}個</span><b>${sum(a.balloons.map((x) => x.hits))}<i>打</i></b></div><div class="rb-cs">${chips}</div><div class="rb-sum"><span>割れる</span><b>${r.popped}<i>/${a.balloons.length}</i></b></div></div>`);
+      det.innerHTML = `${a.rolls.length ? col(`連打 ${a.rolls.length}本`, 'roll', rolls) : '<div></div>'}${a.balloons.length ? col(`風船 ${a.balloons.length}個`, 'balloon', balloons) : '<div></div>'}`;
     }
-    rows.push(`<div class="rb-score"><span>スコア（全良）</span><b>${fmtNum(a.ceiling - r.balloonLoss + r.rollScore)}</b></div>`);
-    el.innerHTML = rows.join('');
   };
   paintSim();
   const rateIn = body.querySelector<HTMLInputElement>('#anRate');
