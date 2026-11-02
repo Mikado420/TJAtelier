@@ -30,7 +30,7 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, getCurrentId, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
+import { addFolder, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
 import { Home } from './home/home';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
@@ -1033,26 +1033,32 @@ function renderAnalysisSheet(body: HTMLElement) {
 }
 
 /** グラデのつなぎ目（始点・終点）をタップしたときの選択肢 */
-let gradPick: { tick: number; before?: Grad; after?: Grad } | null = null;
+let gradPick: { tick: number; before?: Grad; after?: Grad; inside?: Grad } | null = null;
 
 function renderGradPickSheet(body: HTMLElement) {
   const gp = gradPick!;
   const range = (g: Grad) => `${ed.label(g.start)} 〜 ${ed.label(g.end)}`;
   const val = (g: Grad) => `${g.from} → ${g.to}`;
-  $('sheetTitle').textContent = gp.before && gp.after ? 'グラデのつなぎ目' : gp.before ? 'グラデの終点' : 'グラデの始点';
+  $('sheetTitle').textContent = gp.inside ? 'グラデ' : gp.before && gp.after ? 'グラデのつなぎ目' : gp.before ? 'グラデの終点' : 'グラデの始点';
   const items: string[] = [];
+  const pin = gp.inside && ed.eventAt('scroll', gp.tick);
+  if (gp.inside) {
+    items.push(`<button data-gp="inside" class="gp-item"><b>グラデを開く</b><small>${val(gp.inside)}　${range(gp.inside)}</small></button>`);
+    items.push(`<button data-gp="point" class="gp-item"><b>${pin && pin.kind === 'scroll' && pin.pin ? 'この SCROLL を変える' : 'ここに SCROLL を置く'}</b></button>`);
+  } else {
   if (gp.before) items.push(`<button data-gp="before" class="gp-item"><b>前のグラデを開く</b><small>${val(gp.before)}　${range(gp.before)}</small></button>`);
   if (gp.after) items.push(`<button data-gp="after" class="gp-item"><b>後ろのグラデを開く</b><small>${val(gp.after)}　${range(gp.after)}</small></button>`);
   if (!gp.after) items.push(`<button data-gp="new" class="gp-item"><b>ここから新しいグラデ</b></button>`);
   else if (!gp.before) items.push(`<button data-gp="new" class="gp-item"><b>ここまでの新しいグラデ</b></button>`);
   items.push(`<button data-gp="point" class="gp-item"><b>ここに SCROLL を置く</b></button>`);
+  }
   body.innerHTML = `<div class="gp-list">${items.join('')}</div>`;
   // タップで開いた直後に、そのタップから来るクリックがちょうど指の下のボタンを押してしまわないように
   const openedAt = performance.now();
   body.querySelectorAll<HTMLButtonElement>('[data-gp]').forEach((b) => b.addEventListener('click', () => {
     if (performance.now() - openedAt < 350) return;
     const k = b.dataset.gp;
-    const g = k === 'before' ? gp.before : k === 'after' ? gp.after : undefined;
+    const g = k === 'before' ? gp.before : k === 'after' ? gp.after : k === 'inside' ? gp.inside : undefined;
     gradPick = null;
     if (g) {
       gradEdit = { grad: { ...g }, old: g };
@@ -2231,7 +2237,7 @@ async function nativeSaveToast(blob: Blob, name: string, mime?: string) {
     const r = await nativeSave(blob, name, mime);
     if (r === 'old') {
       const v = nativeAppVersion();
-      toast(v ? `アプリ（v${v}）から返事がありません。もう一度押してください` : 'アプリ本体が古い版です（v3 未満）。Expo Go を完全に閉じて、開き直してください');
+      toast(v ? `アプリ（v${v}）から返事がありません。もう一度押してください` : 'アプリから返事がありません。Expo Go を完全に閉じて、開き直してください');
     }
   } catch {
     toast('書き出せませんでした');
@@ -2593,7 +2599,7 @@ async function boot() {
   ed.load(newChart(), null, 0);
   view.pos = 0;
   updateHeader();
-  await home.show(await getCurrentId());
+  await home.show();
 }
 
 /** 音源の長さ（秒）。再生できない形式なら 0 */
@@ -2626,6 +2632,8 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   void setCurrentId(id);
   ed.load(data.chart, null, data.courseIndex);
   view.pos = 0;
+  // エディタは譜面だけ先に出す（音源の読み込み・変換を待たない）
+  if (mode === 'edit') { home.hide(); updateHeader(); }
   let a = await loadSongAudio(id);
   // 前の版で入れた .mp3 などは、開いたときに .ogg にしておく
   if (a && !isOgg(a.data) && !isVideoName(a.name)) {
@@ -2637,9 +2645,9 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
     } catch { /* そのまま使う */ }
     busyEnd();
   }
-  await setAudio(a, false);
-  await refreshVideo(id);
-  await refreshJacket(id);
+  if (id !== currentSongId) return;
+  await Promise.all([setAudio(a, false), refreshVideo(id), refreshJacket(id)]);
+  if (id !== currentSongId) return;
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
   home.hide();
@@ -2924,7 +2932,9 @@ function openPoint(kind: 'scroll' | 'bpm' | 'measure' | 'lyric', tick: number) {
 function renderPointSheet(body: HTMLElement) {
   const { kind, tick } = pointEdit!;
   const m = ed.measureOf(tick);
-  const cur = ed.eventAt(kind, tick);
+  const at = ed.eventAt(kind, tick);
+  // グラデが置いた #SCROLL は、新しく置く扱い（単体で置いたものだけ変更・消す）
+  const cur = at && at.kind === 'scroll' && !at.pin && ed.gradAt(tick) ? undefined : at;
   const title = { scroll: '#SCROLL', bpm: '#BPMCHANGE', measure: '#MEASURE', lyric: '#LYRIC' }[kind];
   let value = '';
   if (kind === 'scroll') value = cur && cur.kind === 'scroll' ? scrollText(cur.value, cur.im) : scrollText(ed.timing.scrollAt(tick), ed.timing.scrollImAt(tick));

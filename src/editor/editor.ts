@@ -22,7 +22,7 @@ export interface TapResult {
   /** UI 側で設定を変えるグラデ */
   editGrad?: Grad;
   /** UI 側で選ばせる、グラデの始点・終点（つなぎ目）の上のタップ（before = ここで終わるグラデ、after = ここから始まるグラデ） */
-  gradPick?: { tick: number; before?: Grad; after?: Grad };
+  gradPick?: { tick: number; before?: Grad; after?: Grad; inside?: Grad };
   /** 範囲を選び終えた */
   selected?: boolean;
   /** UI 側で値を聞く、1 か所の命令（#SCROLL / #BPMCHANGE / #MEASURE） */
@@ -641,8 +641,9 @@ export class Editor {
       const before = this.course.grads?.find((g) => g.end === tick);
       const after = this.course.grads?.find((g) => g.start === tick);
       if (before || after) return { gradPick: { tick, before, after } };
+      // グラデの中: グラデを開くか、そこに単体の #SCROLL を置くかを UI で選ばせる
       const g = this.gradAt(tick);
-      if (g) return { editGrad: g };
+      if (g) return { gradPick: { tick, inside: g } };
       this.pendingLong = tick;
       this.emit();
       return {};
@@ -709,11 +710,11 @@ export class Editor {
 
   addEvent(ev: EEvent) {
     if (ev.kind === 'measure') ev = { ...ev, tick: this.measureOf(ev.tick).start };
-    // グラデの始点・終点に置く #SCROLL は、グラデの値の代わりにする（グラデを置き直しても消さない）
+    // グラデの範囲（始点・終点を含む）に置く #SCROLL は、その位置のグラデの値の代わりにする（グラデを置き直しても消さない）
     if (ev.kind === 'scroll') {
       const t = ev.tick;
       ev = { tick: t, kind: 'scroll', value: ev.value, ...(ev.im ? { im: ev.im } : {}) };
-      if (this.course.grads?.some((g) => g.start === t || g.end === t)) ev.pin = true;
+      if (this.course.grads?.some((g) => t >= g.start && t <= g.end)) ev.pin = true;
     }
     this.mutate(() => {
       const ev2 = ev;

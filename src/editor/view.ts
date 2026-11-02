@@ -1105,7 +1105,8 @@ export class EditorView {
         ctx.fill();
       }
       // グラデの中の #SCROLL は、グラデの始点の 1 つにまとめる
-      const g = e.kind === 'scroll' ? grads.find((x) => e.tick >= x.start && e.tick < x.end) : undefined;
+      // （グラデの中に単体で置いた #SCROLL は、ふつうの命令と同じく出す）
+      const g = e.kind === 'scroll' ? grads.find((x) => e.tick >= x.start && e.tick < x.end && !(e.pin && e.tick !== x.start)) : undefined;
       if (g) {
         const it = evItems.find((x) => x.grad === g);
         if (it) it.events.push(e);
@@ -1818,7 +1819,7 @@ export class EditorView {
         const pad = 7 * s;
         const ends = new Map<number, number>();
         for (const e of evs) {
-          if (e.kind === 'scroll' && grads.some((gr) => e.tick > gr.start && e.tick < gr.end)) continue;
+          if (e.kind === 'scroll' && !e.pin && grads.some((gr) => e.tick > gr.start && e.tick < gr.end)) continue;
           const x = Xt(e.tick);
           if (x < x0 || x > this.w) continue;
           const er = ln.rowOf(e.tick);

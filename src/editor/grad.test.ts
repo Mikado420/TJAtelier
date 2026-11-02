@@ -31,8 +31,34 @@ describe('グラデ', () => {
     const text = writeTJA(ed.chart);
     ed.replaceChart(parseTJA(text));
     expect(ed.course.grads?.length).toBe(1);
+    // 値を変えた #SCROLL は、グラデの中に単体で置いたものになる
     ed.replaceChart(parseTJA(text.replace('#SCROLL 1.25', '#SCROLL 1.3')));
+    expect(ed.course.grads?.length).toBe(1);
+    expect(ed.course.events.find((e) => e.kind === 'scroll' && e.tick === M / 4)).toMatchObject({ value: 1.3, pin: true });
+    // グラデが置く #SCROLL を消すと、グラデは外れる
+    ed.replaceChart(parseTJA(text.replace('#SCROLL 1.5\n', '')));
     expect(ed.course.grads?.length ?? 0).toBe(0);
+  });
+
+  it('グラデの間に単体の #SCROLL を差し込める（置き直しても残り、消すとグラデの値に戻る）', () => {
+    const ed = new Editor(parseTJA(TJA));
+    ed.setGrad({ start: 0, end: M, from: 1, to: 2, mode: 'linear', digits: 3 });
+    const vals = () => ed.course.events.filter((e) => e.kind === 'scroll').sort((a, b) => a.tick - b.tick).map((e) => [e.tick, (e as { value: number }).value]);
+    // 音符の位置（グラデが置く所）を上書き、音符の間（グラデが置かない所）にも置く
+    ed.addEvent({ tick: M / 4, kind: 'scroll', value: 5 });
+    ed.addEvent({ tick: (M * 3) / 8, kind: 'scroll', value: 0.5 });
+    expect(vals()).toEqual([[0, 1], [M / 4, 5], [(M * 3) / 8, 0.5], [M / 2, 1.5], [(M * 3) / 4, 1.75], [M, 2]]);
+    // グラデの設定を変えても残る
+    const g = ed.course.grads![0];
+    ed.setGrad({ ...g, to: 3 }, g);
+    expect(vals()).toEqual([[0, 1], [M / 4, 5], [(M * 3) / 8, 0.5], [M / 2, 2], [(M * 3) / 4, 2.5], [M, 3]]);
+    // TJA のテキストから読み直しても、グラデも差し込んだ #SCROLL も残る
+    ed.replaceChart(parseTJA(writeTJA(ed.chart)));
+    expect(ed.course.grads?.length).toBe(1);
+    expect(vals()).toEqual([[0, 1], [M / 4, 5], [(M * 3) / 8, 0.5], [M / 2, 2], [(M * 3) / 4, 2.5], [M, 3]]);
+    // 消すと、グラデの値に戻る
+    ed.removeEvent(ed.course.events.find((e) => e.kind === 'scroll' && e.tick === M / 4)!);
+    expect(vals()).toEqual([[0, 1], [M / 4, 1.5], [(M * 3) / 8, 0.5], [M / 2, 2], [(M * 3) / 4, 2.5], [M, 3]]);
   });
 
   it('見た目の速さで: BPM が倍になる所では SCROLL を半分にして、BPM × SCROLL を滑らかにする', () => {

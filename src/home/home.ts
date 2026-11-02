@@ -725,9 +725,11 @@ export class Home {
       });
     }
     el.innerHTML = `
-      <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
-      <div class="hdf-acts"><button data-df="edit">${ICON_EDIT}<span>エディタ</span></button><button data-df="info">${ICON_INFO}<span>譜面情報</span></button></div>
-      <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
+      <div class="hdf-left">
+        <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
+        <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
+        <div class="hdf-acts"><button data-df="edit">${ICON_EDIT}<span>エディタ</span></button><button data-df="info">${ICON_INFO}<span>譜面情報</span></button></div>
+      </div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
         <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}<span class="hdf-hs">${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span></small></div>
         <div class="hdf-body">

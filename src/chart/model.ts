@@ -19,7 +19,7 @@ export interface ENote {
 
 export type EEvent =
   | { tick: number; kind: 'bpm'; value: number }
-  /** pin: グラデの始点・終点に、グラデの値の代わりに置いた #SCROLL（グラデを置き直しても消さない） */
+  /** pin: グラデの範囲（始点・終点を含む）に、グラデの値の代わりに単体で置いた #SCROLL（グラデを置き直しても消さない） */
   | { tick: number; kind: 'scroll'; value: number; pin?: boolean; im?: number }
   | { tick: number; kind: 'measure'; num: number; den: number }
   | { tick: number; kind: 'gogo'; on: boolean }

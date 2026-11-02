@@ -89,7 +89,7 @@ async function saveAndShare(name, mime, b64) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -183,6 +183,8 @@ export default function App() {
         injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
         injectedJavaScript={INJECT_BEFORE}
         onLoadStart={() => setPlaying(false)}
+        // 読み込みのたびに、アプリの版をもう一度知らせる（読み直した後に知らせが届いていないことがあるため）
+        onLoadEnd={() => web.current?.injectJavaScript(INJECT_BEFORE)}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         bounces={false}

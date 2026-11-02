@@ -45,14 +45,16 @@ export async function nativeSave(blob: Blob, name: string, mime = blob.type || '
   const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const total = Math.max(1, Math.ceil(b64.length / CHUNK));
-  const acked = new Promise<boolean>((res) => {
-    acks.set(id, () => res(true));
-    setTimeout(() => { acks.delete(id); res(false); }, 4000);
-  });
+  let got = false;
+  let done: (ok: boolean) => void = () => {};
+  const acked = new Promise<boolean>((res) => { done = res; });
+  acks.set(id, () => { got = true; done(true); });
   for (let i = 0; i < total; i++) {
     host.postMessage(JSON.stringify({ type: 'file', id, name, mime, part: i, total, data: b64.slice(i * CHUNK, (i + 1) * CHUNK) }));
     // 大きいときは少しずつ（アプリ側が詰まらないように）
     if (total > 1) await new Promise((r) => setTimeout(r, 0));
   }
+  // 大きいファイル（譜面画像など）はアプリが受け取るまで時間がかかるので、送り終えてから大きさに応じて待つ
+  if (!got) setTimeout(() => { acks.delete(id); done(false); }, 6000 + total * 1500);
   return (await acked) ? 'ok' : 'old';
 }
