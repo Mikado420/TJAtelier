@@ -2719,11 +2719,13 @@ const home = new Home({
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
   online: () => online.open(),
-  analyze: (id) => void (async () => {
+  analyze: (id, course) => void (async () => {
     const d = await loadSongData(id);
     if (!d) { toast('譜面を読み込めませんでした'); return; }
     const e = (await listSongs()).find((x) => x.id === id);
-    analysisOf = { chart: d.chart, course: d.courseIndex, length: e?.length ?? 0 };
+    // 難易度えらびから開いたときは、選んでいる難易度を見せる
+    const ci = course ? d.chart.courses.findIndex((c) => c.name === course) : -1;
+    analysisOf = { chart: d.chart, course: ci >= 0 ? ci : d.courseIndex, length: e?.length ?? 0 };
     openSheet('analysis');
   })(),
   toast,

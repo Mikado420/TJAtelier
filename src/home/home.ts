@@ -25,7 +25,7 @@ export interface HomeHost {
   /** オンライン対戦の画面を開く */
   online(): void;
   /** 譜面情報を出す */
-  analyze(id: string): void;
+  analyze(id: string, course?: string): void;
   toast(msg: string): void;
   /** 試聴を鳴らす音の仕組み */
   audio: AudioEngine;
@@ -133,6 +133,8 @@ function bestMap(): Record<string, { score: number; crown: Crown }> {
 }
 
 /** 背景の動画がある曲の印 */
+const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
+const ICON_INFO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>';
 const VIDEO_ICON = '<svg class="hr-vid" viewBox="0 0 24 24" role="img" aria-label="動画あり"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>';
 
 const ICON = {
@@ -181,6 +183,7 @@ export class Home {
     const q = document.getElementById('homeQuery') as HTMLInputElement;
     q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
     this.el.addEventListener('click', (e) => this.onClick(e));
+    this.bindSongMenu();
     // 画面の向き・大きさが変わると、ジャケットの下の欄の幅も変わる
     window.addEventListener('resize', () => { if (this.diffSong) this.fitDiffStats(); });
     this.list.addEventListener('scroll', () => this.onListScroll(), { passive: true });
@@ -542,9 +545,8 @@ export class Home {
     const chips = cs.map((c, i) => `<span class="hc" style="--cc:${COURSE_COLOR[c.name] ?? 'var(--btn)'};--i:${i}">${crownIcon(bm[`${s.id}:${c.name}`]?.crown)}${esc(COURSE_SHORT[c.name] ?? c.name)}<b>${c.level}</b></span>`).join('');
     return {
       x: `<span class="hr-x"><span class="hr-meta">BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span><span class="hr-cs">${chips}</span></span>`,
-      acts: `<span class="hr-acts">
-          <span class="hr-ib"><button data-h="pp" aria-label="試聴"></button><button data-edit="${s.id}" aria-label="エディタで開く"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg><small>エディタ</small></button><button data-analyze="${s.id}" aria-label="譜面情報"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><small>譜面情報</small></button><button data-smore="${s.id}" aria-label="曲の操作">${ICON.more}</button></span>
-          <button class="hr-go" data-pickdiff="${s.id}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>この曲にする</button></span>`,
+      // 操作のボタンは置かない（もう一度タップで難易度えらび。エディタ・譜面情報は難易度えらびの左、ほかの操作は長押し）
+      acts: '',
     };
   }
 
@@ -724,13 +726,16 @@ export class Home {
     }
     el.innerHTML = `
       <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
+      <div class="hdf-acts"><button data-df="edit">${ICON_EDIT}<span>エディタ</span></button><button data-df="info">${ICON_INFO}<span>譜面情報</span></button></div>
       <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
-        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}<span class="hdf-hs">　BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span></small></div>
+        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}<span class="hdf-hs">${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span></small></div>
         <div class="hdf-body">
           <div class="hdf-side">
             <button data-df="back" aria-label="曲えらびにもどる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
             <button data-df="opt" aria-label="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+            <button data-df="edit" class="hdf-narrow" aria-label="エディタ">${ICON_EDIT}</button>
+            <button data-df="info" class="hdf-narrow" aria-label="譜面情報">${ICON_INFO}</button>
           </div>
           <div class="hdf-cards">${cards}</div>
         </div>
@@ -763,10 +768,9 @@ export class Home {
     });
   }
 
-  /** ジャケットの下の欄の中身（BPM・長さと、選んだ難易度の自己ベスト） */
+  /** ジャケットの下の欄の中身（長さと、選んだ難易度の自己ベスト） */
   private diffInfoHtml(s: SongEntry, sel: { name: string } | undefined) {
-    const stat = (k: string, v: string) => `<span><small>${k}</small><b>${esc(v)}</b></span>`;
-    const stats = `<div class="hdf-st">${stat('BPM', fmtBpm(s))}${s.length > 0 ? stat('長さ', fmtLen(s.length)) : ''}</div>`;
+    const stats = s.length > 0 ? `<div class="hdf-st"><span><small>長さ</small><b>${esc(fmtLen(s.length))}</b></span></div>` : '';
     if (!sel) return stats;
     const best = loadBest(s.id, sel.name);
     return `${stats}<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`;
@@ -848,6 +852,8 @@ export class Home {
     const o = this.host.playOpts();
     if (a === 'back') this.closeDiff();
     else if (a === 'opt') this.host.settings();
+    else if (a === 'edit' && this.diffSong) { const id = this.diffSong.id; const c = this.diffCourse || undefined; this.closeDiff(); this.stopPreview(); void this.host.open(id, 'edit', c); }
+    else if (a === 'info' && this.diffSong) this.host.analyze(this.diffSong.id, this.diffCourse || undefined);
     else if (a === 'sp-' || a === 'sp+') {
       const v = Math.round((o.speed + (a === 'sp+' ? 0.1 : -0.1)) * 10) / 10;
       this.host.setPlayOpt('speed', Math.max(0.1, Math.min(10, v)));
@@ -890,6 +896,7 @@ export class Home {
   }
 
   private onClick(e: MouseEvent) {
+    if (this.longPressed) { this.longPressed = false; return; }
     const t = e.target as HTMLElement;
     const d = (sel: string) => t.closest<HTMLElement>(sel);
     let x: HTMLElement | null;
@@ -1077,6 +1084,40 @@ export class Home {
       void items[Number(b.dataset.i)][1]();
     });
     setTimeout(() => document.addEventListener('pointerdown', (e) => { if (!pop.contains(e.target as Node)) pop.remove(); }, { once: true }), 0);
+  }
+
+  /**
+   * 曲の帯を長押し（PC は右クリック）で、曲の操作のメニュー（フォルダ・消すなど）を出す。
+   * 長押しで出したときは、指を離したときのタップ（難易度えらびなど）を取り消す
+   */
+  private longPressed = false;
+  private bindSongMenu() {
+    let timer = 0;
+    let start: { x: number; y: number } | null = null;
+    const stop = () => { window.clearTimeout(timer); timer = 0; start = null; };
+    const rowOf = (t: EventTarget | null) => (t as HTMLElement | null)?.closest<HTMLElement>('[data-song]') ?? null;
+    this.list.addEventListener('pointerdown', (e) => {
+      const row = rowOf(e.target);
+      if (!row || this.picking || e.button !== 0) return;
+      start = { x: e.clientX, y: e.clientY };
+      timer = window.setTimeout(() => {
+        timer = 0;
+        this.longPressed = true;
+        this.songMenu(row.dataset.song!, row);
+      }, 550);
+    });
+    this.list.addEventListener('pointermove', (e) => {
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) stop();
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave'] as const) this.list.addEventListener(ev, stop);
+    this.list.addEventListener('scroll', stop, { passive: true });
+    this.list.addEventListener('contextmenu', (e) => {
+      const row = rowOf(e.target);
+      if (!row || this.picking) return;
+      e.preventDefault();
+      stop();
+      this.songMenu(row.dataset.song!, row);
+    });
   }
 
   private songMenu(id: string, anchor: HTMLElement) {
