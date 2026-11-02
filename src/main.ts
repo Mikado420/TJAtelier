@@ -914,7 +914,6 @@ function renderAnalysisSheet(body: HTMLElement) {
   const sum = (xs: number[]) => xs.reduce((p, q) => p + q, 0);
   const donAll = a.don + a.bigDon;
   const donPct = a.notes ? (donAll / a.notes) * 100 : 50;
-  const range = (lo: number, hi: number, f: (x: number) => string) => (lo === hi ? f(lo) : `${f(lo)}〜${f(hi)}`);
   const sub = chart.subtitle.replace(/^--/, '');
   // 上の帯: 曲名と難易度の切り替え（スクロールしても消えない）
   const tabs = chart.courses.map((c, i) => `<button data-an-course="${i}" class="an-tab hd-${esc(c.name.toLowerCase())} ${i === ci ? 'on' : ''}"><span>${esc(COURSE_JA[c.name] ?? c.name)}</span><b>★${c.level}</b></button>`).join('');
@@ -930,18 +929,19 @@ function renderAnalysisSheet(body: HTMLElement) {
   const hasRB = a.rolls.length > 0 || a.balloons.length > 0;
   // 分岐ごとのノーツ数（押すとその分岐の数字にする）
   const brRow = hasBr
-    ? `<div class="an-it wide"><span>分岐</span><b class="an-brs">${BRANCH_NAME.map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n} ${fmtNum(analyzeCourse(chart, pathOf(k as BranchNo)).notes)}</button>`).join('')}</b></div>`
+    ? `<div class="an-gl">分岐</div><div class="an-it wide"><span>ノーツ数</span><b class="an-brs">${BRANCH_NAME.map((n, k) => `<button data-an-br="${k}" class="br-${k} ${(A.branch ?? 0) === k ? 'on' : ''}">${n} ${fmtNum(analyzeCourse(chart, pathOf(k as BranchNo)).notes)}</button>`).join('')}</b></div>`
     : '';
   body.innerHTML = `
     <section class="an-p an-info">
       <h3>譜面の情報</h3>
       <div class="an-grid">
-        ${item('総ノーツ数', fmtNum(a.notes))}
-        ${item('天井スコア', fmtNum(a.ceiling))}
-        ${item('BPM', bpmText)}
-        ${a.scrollMin !== a.scrollMax || a.scrollMin !== 1 ? item('SCROLL', range(a.scrollMin, a.scrollMax, (x) => String(Number(x.toFixed(3))))) : ''}
+        <div class="an-gl">曲</div>
         ${item('演奏時間', fmtSec3(a.playTime))}
         ${item('小節数', String(a.measureCount))}
+        ${item('BPM', bpmText)}
+        <div class="an-gl">ノーツ</div>
+        ${item('総ノーツ数', fmtNum(a.notes))}
+        ${item('天井スコア', fmtNum(a.ceiling))}
         ${item('平均密度', `${a.density.toFixed(2)}${unit('打/秒')}`)}
         <div class="an-it wide an-ratio"><span>ドン : カッ</span><b><em class="don">${donPct.toFixed(1)}%</em> : <em class="ka">${(100 - donPct).toFixed(1)}%</em></b><div class="an-bar"><i style="width:${donPct.toFixed(2)}%"></i></div></div>
         ${brRow}
@@ -949,7 +949,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       ${hasRB ? `
       <div class="an-rb">
         <div class="an-rb-h">
-          <span>連打・風船</span>
+          <span class="an-gl">連打・風船</span>
           <span class="an-rate">
             <button data-rate="-1" aria-label="秒速を下げる">−</button>
             <input type="number" id="anRate" min="1" max="60" step="0.5" inputmode="decimal" value="${settings.rollRate}">
@@ -965,7 +965,7 @@ function renderAnalysisSheet(body: HTMLElement) {
       <div class="an-timeline" id="anTimeline"></div>
     </section>
     <section class="an-p an-imgp">
-      <h3>譜面画像<span class="an-imgbtn"><button data-an-img="open">大きく見る</button><button data-an-img="save" class="primary">画像を保存</button></span></h3>
+      <h3>譜面画像<span class="an-imgbtn"><button data-an-img="save" class="primary">画像を保存</button></span></h3>
       <div class="an-img" id="anImg"></div>
     </section>`;
 
@@ -1009,7 +1009,7 @@ function renderAnalysisSheet(body: HTMLElement) {
 
   // 譜面の流れ（横のレーンと密度。時刻の位置をそろえる）
   disposeTimeline = mountTimeline(body.querySelector<HTMLElement>('#anTimeline')!, {
-    course: toPlayable(chart, course), curve: a.curve, density: a.density, firstTime: a.firstTime, lastTime: a.lastTime,
+    course: toPlayable(chart, course), secs: a.secs, density: a.density, firstTime: a.firstTime, lastTime: a.lastTime,
   });
 
   // 譜面画像（重いので、画面を出してから作る）
@@ -1042,9 +1042,6 @@ function renderAnalysisSheet(body: HTMLElement) {
     a2.href = blobUrl;
     a2.download = name;
     a2.click();
-  });
-  body.querySelector('[data-an-img="open"]')!.addEventListener('click', () => {
-    if (blobUrl) window.open(blobUrl, '_blank');
   });
 }
 

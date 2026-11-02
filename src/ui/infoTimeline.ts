@@ -1,6 +1,7 @@
 /**
- * 譜面情報の「譜面の流れ」: 上に横のレーン（音符を時刻の位置に並べた譜面）、下に小節ごとの密度の棒（ドンとカッを積む）。
- * 横の位置（時刻）は上下で同じ。横に拡大・縮小（ボタン・2 本指・ホイール）、横にスクロールできる。
+ * 譜面情報の「譜面の流れ」: いちばん上に全体の小さな図（白い枠が今見ている所。タップ・ドラッグで動かす）、
+ * その下に横のレーン（音符を時刻の位置に並べた譜面）と 1 秒ごとの密度の棒（ドンとカッを積む）。
+ * 横の位置（時刻）は上下で同じ。最初は音符が詰まらない広さで出し、横にスクロールして見る。拡大・縮小もできる。
  */
 import type { Course } from '../chart/types';
 import { pixelRatio, uiScale } from '../orient';
@@ -8,8 +9,8 @@ import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/no
 
 export interface TimelineData {
   course: Course;
-  /** 小節ごとの密度（時刻は曲の再生位置）。don・ka はそのうちドン・カッの打/秒 */
-  curve: { t0: number; t1: number; v: number; don: number; ka: number }[];
+  /** 1 秒ごとの密度（時刻は曲の再生位置）。don・ka はそのうちドン・カッの打/秒 */
+  secs: { t0: number; t1: number; v: number; don: number; ka: number }[];
   /** 平均密度 */
   density: number;
   /** 最初の音符の時刻 */
@@ -24,6 +25,10 @@ const AXIS_H = 18;
 let H = 192;
 let GRAPH_H = H - LANE_H - AXIS_H;
 const MAX_ZOOM = 60;
+/** 最初に出すときの 1 秒の幅（px）。これより狭くなる（音符が詰まる）ときは広げて、横にスクロールする */
+const START_PPS = 170;
+/** 全体の小さな図の高さ */
+const OV_H = 34;
 /** レーンの音符の半径（px） */
 const NOTE_R = 9;
 const noteR = () => Math.min(NOTE_R, LANE_H / 6);
@@ -36,7 +41,9 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       <button data-tl="reset" aria-label="全体を表示"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/></svg><b class="tl-zoom">100%</b></button>
       <button data-tl="in" aria-label="拡大"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     </div>
+    <canvas class="tl-ov"></canvas>
     <div class="tl-scroll"><div class="tl-inner"><canvas class="tl-canvas"></canvas></div></div>`;
+  const ov = root.querySelector<HTMLCanvasElement>('.tl-ov')!;
   const scroller = root.querySelector<HTMLElement>('.tl-scroll')!;
   const inner = root.querySelector<HTMLElement>('.tl-inner')!;
   const cv = root.querySelector<HTMLCanvasElement>('.tl-canvas')!;
@@ -48,10 +55,16 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
   let viewW = 0;
   /** 1 秒の幅（px） */
   const pps = () => (viewW / dur) * zoom;
-  const top = Math.max(1, Math.ceil(d.curve.reduce((m, q) => Math.max(m, q.v), 0)));
+  const top = Math.max(1, Math.ceil(d.secs.reduce((m, q) => Math.max(m, q.v), 0)));
+  let started = false;
 
   const layout = () => {
     viewW = Math.max(1, scroller.clientWidth);
+    // 最初だけ: 音符が詰まらない広さにする（画面に収まる曲はそのまま）
+    if (!started && viewW > 1) {
+      started = true;
+      zoom = Math.max(1, Math.min(MAX_ZOOM, (START_PPS * dur) / viewW));
+    }
     H = Math.max(80, scroller.clientHeight || 192);
     LANE_H = Math.round(Math.min(54, Math.max(30, H * 0.32)));
     GRAPH_H = H - LANE_H - AXIS_H;
@@ -59,6 +72,47 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     draw();
   };
+
+  /** 全体の小さな図（密度の棒と、今見ている所の白い枠） */
+  const drawOverview = () => {
+    const dpr = Math.min(3, pixelRatio());
+    const w = Math.max(1, ov.clientWidth);
+    if (ov.width !== Math.round(w * dpr) || ov.height !== Math.round(OV_H * dpr)) {
+      ov.width = Math.round(w * dpr);
+      ov.height = Math.round(OV_H * dpr);
+    }
+    const c = ov.getContext('2d')!;
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, OV_H);
+    c.fillStyle = '#26292d';
+    c.fillRect(0, 0, w, OV_H);
+    const k = w / dur;
+    for (const q of d.secs) {
+      const x = (q.t0 - t0) * k;
+      const bw = Math.max(1, (q.t1 - q.t0) * k - 1);
+      const hd = (q.don / top) * (OV_H - 4);
+      const hk = (q.ka / top) * (OV_H - 4);
+      c.fillStyle = COLOR.don;
+      c.fillRect(x, OV_H - hd, bw, hd);
+      c.fillStyle = COLOR.ka;
+      c.fillRect(x, OV_H - hd - hk, bw, hk);
+    }
+    const a = scroller.scrollLeft / (viewW * zoom);
+    const b = Math.min(1, (scroller.scrollLeft + viewW) / (viewW * zoom));
+    c.fillStyle = 'rgba(255,255,255,0.12)';
+    c.fillRect(a * w, 0, (b - a) * w, OV_H);
+    c.strokeStyle = '#fff';
+    c.lineWidth = 2;
+    c.strokeRect(a * w + 1, 1, Math.max(4, (b - a) * w - 2), OV_H - 2);
+  };
+  // 小さな図をタップ・ドラッグすると、その所を真ん中にする
+  const ovJump = (e: PointerEvent) => {
+    const r = ov.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    scroller.scrollLeft = f * viewW * zoom - viewW / 2;
+  };
+  ov.addEventListener('pointerdown', (e) => { ov.setPointerCapture(e.pointerId); ovJump(e); });
+  ov.addEventListener('pointermove', (e) => { if (ov.hasPointerCapture(e.pointerId)) ovJump(e); });
 
   const draw = () => {
     const dpr = Math.min(3, pixelRatio());
@@ -130,8 +184,8 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.fillStyle = 'rgba(255,255,255,0.07)';
       c.fillRect(0, Math.round(yOf(v)), w, 1);
     }
-    // 小節ごとの棒（下がドン・上にカッを積む）
-    for (const q of d.curve) {
+    // 1 秒ごとの棒（下がドン・上にカッを積む）
+    for (const q of d.secs) {
       if (q.t1 < vis0 || q.t0 > vis1) continue;
       const x0 = xOf(q.t0);
       const bw = (q.t1 - q.t0) * p;
@@ -174,6 +228,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.textAlign = x < 16 ? 'left' : x > w - 16 ? 'right' : 'center';
       c.fillText(`${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`, x, ay + 11);
     }
+    drawOverview();
   };
 
   /** 拡大率を変える（cx = 画面の中で動かさない位置。省略すると真ん中） */

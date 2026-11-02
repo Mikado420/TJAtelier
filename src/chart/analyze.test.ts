@@ -50,6 +50,15 @@ describe('譜面情報', () => {
     expect(s.total).toBe(110);
     expect(s.rollScore).toBe(30 * 100 + 50 * 200);
     expect(s.balloonLoss).toBe(10 * 100);
+    // 割り切れないときは切り上げ（1.5 秒 × 21 = 31.5 → 32 打）
+    expect(simulateRolls(a, 21).roll).toEqual([32, 53]);
+  });
+
+  it('1 秒ごとの密度', () => {
+    // 120BPM: 0.5 秒ごとに 1 打 → 1 秒に 2 打。最初の音符から数える
+    const c = parseTJA('TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1212,\n1111,\n#END\n');
+    const a = analyzeCourse(c, c.courses[0]);
+    expect(a.secs.map((x) => [x.don, x.ka])).toEqual([[1, 1], [1, 1], [2, 0], [2, 0]]);
   });
 });
 

@@ -34,6 +34,8 @@ export interface Analysis {
    * don・ka はそのうちドン（大ドン）・カッ（大カッ）の打/秒。連打・風船は入れない
    */
   curve: { t0: number; t1: number; v: number; don: number; ka: number }[];
+  /** 1 秒ごとの密度（ドン・カッの打/秒。連打・風船は入れない）。t0 は区間の始まり（秒、曲の再生位置） */
+  secs: { t0: number; t1: number; v: number; don: number; ka: number }[];
   /** 小節数 */
   measureCount: number;
   /** #SCROLL の下限と上限（音符の所の値） */
@@ -111,6 +113,18 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     return out;
   }
 
+  // 1 秒ごとの密度（最初の音符から、同じ幅の区間で数える）
+  const secs: Analysis['secs'] = [];
+  const hit = pc.notes.filter((n) => COMBO.has(n.type) && !n.dummy);
+  if (hit.length) {
+    const s0 = hit[0].time;
+    const s1 = hit[hit.length - 1].time;
+    for (let x = s0; x <= s1 + 1e-9; x += 1) {
+      const inW = hit.filter((n) => n.time >= x - 1e-9 && n.time < x + 1 - 1e-9);
+      const dn = inW.filter((n) => n.type === 'don' || n.type === 'bigDon').length;
+      secs.push({ t0: x, t1: x + 1, v: inW.length, don: dn, ka: inW.length - dn });
+    }
+  }
   const scrolls = pc.notes.filter((n) => !n.dummy).map((n) => n.scroll);
   if (!scrolls.length) scrolls.push(1);
 
@@ -133,6 +147,7 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     rolls,
     balloons,
     curve: measureDensity(),
+    secs,
     measureCount: allMeasures.length,
     scrollMin: Math.min(...scrolls),
     scrollMax: Math.max(...scrolls),
@@ -143,10 +158,10 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
 
 /**
  * 秒速 rate 打で叩いたときに、連打・風船に何打入るか。
- * 1 本の連打に入る数 = floor(秒数 × 秒速)。風船は必要な打数まで（それ以上は入らない）、足りなければ割れない
+ * 1 本の連打に入る数 = 秒数 × 秒速 の切り上げ。風船は必要な打数まで（それ以上は入らない）、足りなければ割れない
  */
 export function simulateRolls(a: Pick<Analysis, 'rolls' | 'balloons'>, rate: number) {
-  const n = (sec: number) => Math.max(0, Math.floor(sec * rate + 1e-9));
+  const n = (sec: number) => Math.max(0, Math.ceil(sec * rate - 1e-9));
   const roll = a.rolls.map((r) => n(r.sec));
   const balloon = a.balloons.map((b) => Math.min(b.hits, n(b.sec)));
   const popped = a.balloons.filter((b, i) => balloon[i] >= b.hits).length;

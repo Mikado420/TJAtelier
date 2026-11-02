@@ -3061,3 +3061,20 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .rb-score { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 2px 0; }
 .rb-score span { color: var(--sub); font-size: 11px; font-weight: 700; }
 .rb-score b { font: 800 17px var(--fd); color: var(--accent-hi); font-variant-numeric: tabular-nums; }
+/* 譜面情報: 上から 情報・譜面の流れ・譜面画像 を 1 つずつ並べ、画面ごと縦にスクロール */
+.sheet.an .sheet-body { display: flex; flex-direction: column; overflow-y: auto; touch-action: pan-y; gap: 12px; padding: 12px 14px calc(16px + var(--safe-b)); }
+.sheet.an .an-p { flex: none; padding: 10px 14px 12px; }
+.sheet.an .an-info { overflow: visible; }
+.sheet.an .an-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; }
+.an-gl { grid-column: 1 / -1; margin-top: 8px; color: var(--accent-hi); font-size: 11px; font-weight: 900; letter-spacing: 0.08em; }
+.an-grid > .an-gl:first-child { margin-top: 0; }
+.an-rb-h > .an-gl { margin: 0; }
+.sheet.an .an-it > span { font-size: 12px; }
+.sheet.an .an-it > b { font-size: 19px; }
+@media (max-width: 700px) { .sheet.an .an-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* 譜面の流れ: 高さは決めて、横にスクロール */
+.sheet.an .an-flow .an-timeline { flex: none; }
+.sheet.an .an-flow .tl-scroll { flex: none; height: 230px; }
+.tl-ov { display: block; width: 100%; height: 34px; cursor: pointer; touch-action: none; }
+/* 譜面画像: 1 枚を全部載せる（中でスクロールしない） */
+.sheet.an .an-img { flex: none; max-height: none; overflow: visible; }
