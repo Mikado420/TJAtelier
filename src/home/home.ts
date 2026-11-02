@@ -745,19 +745,14 @@ export class Home {
     this.fitDiffStats();
   }
 
-  /**
-   * BPM・長さが欄の幅に収まるようにする。横に並ばなければ 2 段にし、
-   * それでもはみ出す数字は文字を小さくする（画面に出てから測る）
-   */
+  /** BPM・長さ（2 段）の数字が欄の幅に収まらなければ、文字を小さくする（画面に出てから測る） */
   private fitDiffStats() {
     requestAnimationFrame(() => {
       const st = document.querySelector<HTMLElement>('#homeDiff .hdf-st');
       if (!st || !st.clientWidth) return;
-      st.classList.remove('stack');
       const bs = [...st.querySelectorAll<HTMLElement>('b')];
       for (const b of bs) b.style.fontSize = '';
       const over = (x: HTMLElement) => x.scrollWidth > x.clientWidth + 0.5;
-      if (over(st) || bs.some(over)) st.classList.add('stack');
       for (const b of bs) {
         let fs = parseFloat(getComputedStyle(b).fontSize);
         while (over(b) && fs > 9) {

@@ -1736,18 +1736,21 @@ export class Renderer {
     const right = this.vis.x1 - 40;
     const genre = info.genre?.trim();
     const col = (genre && GENRE_COLOR.find(([re]) => re.test(genre))?.[1]) || '#3fc1c9';
+    // 使える幅: 左上のポーズボタンにかからない所まで（描く範囲 1400 の中）
+    const maxW = Math.min(1340, right - (Math.max(this.vis.x0, this.vis.x1 - 1400) + 200));
     ctx.font = `900 56px ${FONT}`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    outlinedText(ctx, info.title, right, 68, '#fff', '#111', 11);
+    fitText(ctx, info.title, right, 68, maxW, (t, x, y) => outlinedText(ctx, t, x, y, '#fff', '#111', 11));
     if (genre) {
       ctx.font = `900 26px ${FONT}`;
-      const gw = Math.max(240, ctx.measureText(genre).width + 60);
+      const gmax = Math.min(maxW, 760);
+      const gw = Math.min(gmax, Math.max(240, ctx.measureText(genre).width + 60));
       ctx.fillStyle = col;
       roundRect(ctx, right + 10 - gw, 108, gw, 34, 17);
       ctx.fill();
       ctx.textAlign = 'center';
-      outlinedText(ctx, genre, right + 10 - gw / 2, 126, '#fff', '#1a1a1a', 6);
+      fitText(ctx, genre, right + 10 - gw / 2, 126, gw - 40, (t, x, y) => outlinedText(ctx, t, x, y, '#fff', '#1a1a1a', 6));
     }
   }
 
@@ -2618,6 +2621,29 @@ function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
   ctx.quadraticCurveTo(x, y, x - r, y);
   ctx.quadraticCurveTo(x, y, x, y - r);
   ctx.fill();
+}
+
+/**
+ * 幅 maxW に収めて文字を描く。入らなければ高さはそのままで横だけ縮め（60% まで）、
+ * それでも入らなければ末尾を「…」で省く。x は textAlign に合わせた位置
+ */
+function fitText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, draw: (t: string, x: number, y: number) => void) {
+  const MIN = 0.6;
+  let t = text;
+  let w = ctx.measureText(t).width;
+  if (w <= maxW) { draw(t, x, y); return; }
+  if (w * MIN > maxW) {
+    const chars = [...text];
+    while (chars.length > 1 && ctx.measureText(`${chars.join('')}…`).width * MIN > maxW) chars.pop();
+    t = `${chars.join('').trimEnd()}…`;
+    w = ctx.measureText(t).width;
+  }
+  const k = Math.max(MIN, Math.min(1, maxW / w));
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(k, 1);
+  draw(t, 0, 0);
+  ctx.restore();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
