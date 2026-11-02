@@ -2546,10 +2546,10 @@ play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
 play.onError = (msg) => toast(msg);
 play.onFinished = (r) => {
-  if (!currentSongId || !lastTestFromStart) return false;
+  if (!currentSongId || !lastTestFromStart) return null;
   const prev = loadBest(currentSongId, ed.course.name);
-  saveBest(currentSongId, ed.course.name, r.score, r.crown);
-  return !!prev && r.score > prev.score;
+  const plays = saveBest(currentSongId, ed.course.name, r.score, r.crown);
+  return { best: !!prev && r.score > prev.score, diff: prev ? r.score - prev.score : null, plays };
 };
 // 結果画面: Enter でもう一度、Esc で戻る
 window.addEventListener('keydown', (e) => {

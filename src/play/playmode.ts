@@ -84,7 +84,8 @@ export class PlayMode {
   onSettingsChange: () => void = () => {};
   /** 結果が出たとき（自己ベストを残す）。オート・タイミング調整のときは呼ばない */
   /** 終わったとき（自己ベストを更新したら true を返す） */
-  onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => boolean = () => false;
+  /** 遊び終わったとき（記録を残す）。自己ベストを更新したか・自己ベストとの差（初めてなら null）・遊んだ回数。記録しないときは null */
+  onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => { best: boolean; diff: number | null; plays: number } | null = () => null;
   /** ポーズの画面を出したとき（設定の欄を作る） */
   onPauseOpen: () => void = () => {};
   /** いちばん最後に始めたときの引数（「やりなおす」で同じ所から） */
@@ -971,6 +972,7 @@ export class PlayMode {
     // 判定幅の外だった打撃も含めて中央値を取るので、端末の音の遅れが 114ms より大きくても調整できる
     const calib = this.result.querySelector<HTMLElement>('.calib')!;
     calib.classList.add('hidden');
+    this.paintTimingBar(this.auto ? [] : [...g.deltas, ...g.outside]);
     if (!this.auto) {
       const T = g.taps;
       const all = [...g.deltas, ...g.outside].sort((a, b) => a - b);
@@ -1068,6 +1070,54 @@ export class PlayMode {
     this.showResultCard(g, acc);
   }
 
+  /**
+   * タイミングのバー。0 を中心に、遅れ（+）は左の赤・早い（−）は右の水色。
+   * 外れ値を除いた一番遅い所から一番早い所までを光らせ、平均を線で出す。測れた打撃が少ないときは出さない
+   */
+  private paintTimingBar(raw: number[]) {
+    const box = this.result.querySelector<HTMLElement>('.res-tim')!;
+    const v = raw.filter((d) => Math.abs(d) < 0.3).sort((a, b) => a - b);
+    box.classList.toggle('hidden', v.length < 8);
+    if (v.length < 8) return;
+    const q = (p: number) => v[Math.round(p * (v.length - 1))];
+    const q1 = q(0.25);
+    const q3 = q(0.75);
+    const iqr = q3 - q1;
+    const ok = v.filter((d) => d >= q1 - 1.5 * iqr && d <= q3 + 1.5 * iqr);
+    const early = ok[0];
+    const late = ok[ok.length - 1];
+    const mean = ok.reduce((a, b) => a + b, 0) / ok.length;
+    const range = Math.max(0.03, Math.max(Math.abs(early), Math.abs(late)) * 1.25);
+    const x = (d: number) => 50 - (d / range) * 50;
+    const L = x(late);
+    const E = x(early);
+    const bar = box.querySelector<HTMLElement>('.res-tbar')!;
+    const seg = (cls: string, a: number, b: number) => {
+      const el = bar.querySelector<HTMLElement>(cls)!;
+      el.style.display = b > a ? '' : 'none';
+      el.style.left = `${a}%`;
+      el.style.width = `${Math.max(0, b - a)}%`;
+    };
+    seg('.tb-late', L, Math.min(E, 50));
+    seg('.tb-early', Math.max(L, 50), E);
+    const ms = (d: number) => `${Math.abs(Math.round(d * 1000))}ms`;
+    const mark = (cls: string, d: number) => {
+      const el = bar.querySelector<HTMLElement>(cls)!;
+      el.style.left = `${x(d)}%`;
+      el.textContent = ms(d);
+      el.classList.toggle('late', d > 0);
+      el.classList.toggle('early', d <= 0);
+      // 0 や端の文字と重なるときは出さない
+      el.style.display = Math.abs(x(d) - 50) < 7 || x(d) < 13 || x(d) > 87 ? 'none' : '';
+    };
+    mark('.tb-a', late);
+    mark('.tb-b', early);
+    bar.querySelector<HTMLElement>('.tb-mean')!.style.left = `${x(mean)}%`;
+    const ml = bar.querySelector<HTMLElement>('.tb-meanl')!;
+    ml.style.left = `${Math.max(12, Math.min(88, x(mean)))}%`;
+    ml.textContent = `平均 ${ms(mean)}`;
+  }
+
   /** 結果のカード（スコア・良可不可・王冠など）を出して、数を数え上げる */
   private showResultCard(g: Game, acc: number) {
     const R = this.result;
@@ -1084,7 +1134,20 @@ export class PlayMode {
     R.classList.remove('res-calib', 'go', 'counting', 'r-best', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     R.classList.add(`r-${rank}`);
     // 自己ベストを更新したときだけ印を出す（はじめて遊んだときは出さない）
-    if (!this.auto && this.onFinished({ score: s.score, crown: rank })) R.classList.add('r-best');
+    const rec = this.auto ? null : this.onFinished({ score: s.score, crown: rank });
+    if (rec?.best) R.classList.add('r-best');
+    // 記録の 1 行: 自己ベストとの差（はじめてのときは出さない）とプレイ回数
+    R.querySelector('.res-rec')!.classList.toggle('hidden', !rec);
+    if (rec) {
+      const d = R.querySelector<HTMLElement>('.res-diff')!;
+      d.closest('.rr')!.classList.toggle('hidden', rec.diff === null);
+      if (rec.diff !== null) {
+        d.textContent = `${rec.diff >= 0 ? '+' : '−'}${Math.abs(rec.diff).toLocaleString()}`;
+        d.classList.toggle('up', rec.diff > 0);
+        d.classList.toggle('down', rec.diff < 0);
+      }
+      R.querySelector('.res-plays')!.textContent = String(rec.plays);
+    }
     R.querySelector('.res-title')!.textContent = info.title;
     const badge = R.querySelector<HTMLElement>('.res-course')!;
     badge.textContent = `${cl} ★${info.level}`;
@@ -1130,6 +1193,8 @@ export class PlayMode {
   private showCalibration(g: Game) {
     const all = [...g.deltas, ...g.outside].filter((d) => Math.abs(d) < 0.3).sort((a, b) => a - b);
     const calib = this.result.querySelector<HTMLElement>('.calib')!;
+    // 判定調整のボタンはタイミングの欄の中にあるので、欄は出しておく（バーなどは CSS で隠れる）
+    this.result.querySelector('.res-tim')!.classList.remove('hidden');
     const rows: [string, string][] = [['叩いた回数', `${g.taps.total}`], ['測れた数', `${all.length}`]];
     if (all.length >= 8) {
       // 外れ値に強いよう、中央付近の半分の平均を使う

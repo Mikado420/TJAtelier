@@ -1779,6 +1779,37 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   .res-main { grid-template-columns: 1fr; }
   .res-side { justify-self: stretch; width: auto; }
 }
+/* 右側: 記録の 1 行・タイミングのバー（遅れは左の赤・早いのは右の水色）・判定調整の提案。ボタンは右下 */
+.res:not(.res-calib) .res-side { align-self: stretch; justify-self: stretch; width: auto; padding: 0; background: none; box-shadow: none; }
+.res:not(.res-calib) .res-side .buttons { margin-top: auto; align-self: end; width: min(340px, 100%); padding: 12px; background: rgba(20, 24, 27, 0.88); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.res-rec, .res-tim { background: var(--panel); box-shadow: inset 0 0 0 3px var(--accent); color: #fff; padding: 10px 16px; }
+.res-rec { display: flex; gap: 18px; align-items: baseline; }
+.res-rec .rr { flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.res-rec small, .res-tim-h { font-size: 12px; font-weight: 800; color: var(--sub); }
+.res-rec b { font: 900 22px var(--fd); font-variant-numeric: tabular-nums; }
+.res-rec .res-diff.up { color: #ffd23f; }
+.res-rec .res-diff.down { color: #9db4ff; }
+.res-tim { display: flex; flex-direction: column; }
+.res-tim-h { margin: 0; color: var(--accent-hi); }
+.res-tbar { position: relative; height: 22px; margin: 30px 0 26px; background: linear-gradient(90deg, rgba(255, 80, 80, 0.18) 50%, rgba(90, 200, 240, 0.18) 50%); }
+.res-tbar i { position: absolute; top: 0; bottom: 0; }
+.res-tbar .tb-late { background: linear-gradient(90deg, rgba(255, 90, 90, 0.55), #ff5a5a); box-shadow: 0 0 12px rgba(255, 90, 90, 0.8); }
+.res-tbar .tb-early { background: linear-gradient(90deg, #5ac8f0, rgba(90, 200, 240, 0.55)); box-shadow: 0 0 12px rgba(90, 200, 240, 0.8); }
+.res-tbar .tb-zero { left: calc(50% - 1px); width: 2px; top: -5px; bottom: -5px; background: rgba(255, 255, 255, 0.55); }
+.res-tbar .tb-mean { width: 3px; margin-left: -1.5px; top: -8px; bottom: -8px; background: #fff; box-shadow: 0 0 6px #fff; }
+.res-tbar em { position: absolute; top: -27px; transform: translateX(-50%); font: 900 14px var(--fd); font-style: normal; white-space: nowrap; }
+.res-tbar small { position: absolute; top: calc(100% + 5px); font: 800 12px var(--fd); white-space: nowrap; }
+.res-tbar .tb-l, .res-tbar .tb-a.late, .res-tbar .tb-b.late { color: #ff8a8a; }
+.res-tbar .tb-r, .res-tbar .tb-a.early, .res-tbar .tb-b.early { color: #8fdcff; }
+.res-tbar .tb-l { left: 0; }
+.res-tbar .tb-r { right: 0; }
+.res-tbar .tb-0, .res-tbar .tb-a, .res-tbar .tb-b { transform: translateX(-50%); }
+.res-tbar .tb-0 { left: 50%; color: var(--sub); }
+.res-tim .calib { flex-direction: row; justify-content: flex-end; }
+.res-tim .calib button { height: 40px; padding: 0 18px; background: var(--accent); color: #fff; font-weight: 900; }
+.res.res-calib .res-rec, .res.res-calib .res-tbar, .res.res-calib .res-tim-h { display: none; }
+.res.res-calib .res-tim { padding: 0; background: none; box-shadow: none; }
+.res.res-calib .res-tim .calib button { width: 100%; }
 
 /* ---------- 曲えらび（案A: まんなかの縦リスト・右の青い面・難易度えらび） ---------- */
 .home { grid-template-columns: calc(clamp(118px, 17%, 190px) + var(--safe-l)) minmax(0, 1fr) calc(clamp(190px, 27%, 300px) + var(--det-sk) + var(--safe-r)); }

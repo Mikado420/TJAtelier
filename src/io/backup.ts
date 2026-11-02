@@ -17,7 +17,7 @@ interface Manifest {
   part: number;
   parts: number;
   folders: string[];
-  best: Record<string, { score: number; crown: string }>;
+  best: Record<string, { score: number; crown: string; plays?: number }>;
   songs: { entry: SongEntry; audioName: string | null; videoName?: string; videoFromAudio?: boolean; jacketName?: string; bgName?: string }[];
 }
 
@@ -105,7 +105,7 @@ export async function importBackup(entries: ZipEntry[]): Promise<number> {
     const rank: Record<string, number> = { fail: 0, clear: 1, fc: 2, allgood: 3 };
     for (const [k, v] of Object.entries(m.best ?? {})) {
       const p = cur[k];
-      cur[k] = { score: Math.max(v.score, p?.score ?? 0), crown: !p || (rank[v.crown] ?? 0) > (rank[p.crown] ?? 0) ? v.crown : p.crown };
+      cur[k] = { score: Math.max(v.score, p?.score ?? 0), crown: !p || (rank[v.crown] ?? 0) > (rank[p.crown] ?? 0) ? v.crown : p.crown, plays: Math.max(v.plays ?? 0, p?.plays ?? 0) };
     }
     localStorage.setItem(BEST, JSON.stringify(cur));
   } catch { /* 残せない */ }

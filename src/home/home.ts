@@ -61,19 +61,21 @@ const LAST_COURSE = 'malody-web:lastCourse';
 const BEST = 'malody-web:best';
 export type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
 /** 自己ベスト（曲・難易度ごと） */
-export function loadBest(id: string, course: string): { score: number; crown: Crown } | null {
-  try { return (JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown }>)[`${id}:${course}`] ?? null; } catch { return null; }
+export function loadBest(id: string, course: string): { score: number; crown: Crown; plays?: number } | null {
+  try { return (JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown; plays?: number }>)[`${id}:${course}`] ?? null; } catch { return null; }
 }
 const CROWN_RANK: Record<Crown, number> = { fail: 0, clear: 1, fc: 2, allgood: 3 };
-/** 遊んだ記録を残す（点数・王冠はそれぞれ良いほうを残す） */
-export function saveBest(id: string, course: string, score: number, crown: Crown) {
+/** 遊んだ記録を残す（点数・王冠はそれぞれ良いほうを残し、遊んだ回数を 1 つ増やす）。増やした後の回数を返す */
+export function saveBest(id: string, course: string, score: number, crown: Crown): number {
   try {
-    const m = JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown }>;
+    const m = JSON.parse(localStorage.getItem(BEST) ?? '{}') as Record<string, { score: number; crown: Crown; plays?: number }>;
     const k = `${id}:${course}`;
     const p = m[k];
-    m[k] = { score: Math.max(score, p?.score ?? 0), crown: !p || CROWN_RANK[crown] > CROWN_RANK[p.crown] ? crown : p.crown };
+    const plays = (p?.plays ?? 0) + 1;
+    m[k] = { score: Math.max(score, p?.score ?? 0), crown: !p || CROWN_RANK[crown] > CROWN_RANK[p.crown] ? crown : p.crown, plays };
     localStorage.setItem(BEST, JSON.stringify(m));
-  } catch { /* 保存できない */ }
+    return plays;
+  } catch { return 0; /* 保存できない */ }
 }
 function rememberCourse(id: string, c: string) {
   try {
