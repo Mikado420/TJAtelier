@@ -3008,11 +3008,6 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .sheet .an-brs .br-0.on { background: #6f7880; }
 .sheet .an-brs .br-1.on { background: #3a96d2; }
 .sheet .an-brs .br-2.on { background: #c846be; }
-.an-simrow2 { align-items: center; }
-.an-simrow2 .an-rate { margin-left: auto; gap: 4px; }
-.sheet .an-simrow2 .an-rate button { width: 30px; height: 28px; font-size: 16px; }
-.sheet .an-simrow2 .an-rate input { width: 58px; height: 28px; font-size: 15px; }
-.an-simrow2 > b { flex: none; }
 /* 譜面の流れ（高さは置き場所いっぱい） */
 .an-flow .an-timeline { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
 .an-flow .tl-scroll { flex: 1; min-height: 0; }
@@ -3039,3 +3034,30 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .an-flow .tl-tools { position: absolute; top: 5px; left: 120px; right: 12px; }
 .sheet .an-flow .tl-tools button { height: 26px; min-width: 32px; }
 @media (max-height: 460px) { .an-flow .tl-tools { top: 2px; right: 8px; left: 100px; } }
+/* 連打・風船（内訳と、秒速で何打入るか） */
+.an-rb { margin-top: 6px; display: flex; flex-direction: column; gap: 5px; }
+.an-rb-h { display: flex; align-items: center; gap: 8px; }
+.an-rb-h > span:first-child { color: var(--sub); font-size: 11px; font-weight: 700; }
+.an-rb-h .an-rate { margin-left: auto; gap: 4px; }
+.an-rb-h .an-rate small { color: var(--sub); font-size: 11px; }
+.sheet .an-rb-h .an-rate button { width: 30px; height: 28px; font-size: 16px; }
+.sheet .an-rb-h .an-rate input { width: 58px; height: 28px; font-size: 15px; }
+#anSim { display: flex; flex-direction: column; gap: 4px; }
+.rb-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 8px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 3px 0 0 var(--rc); }
+.rb-row.roll { --rc: #f7c11b; }
+.rb-row.balloon { --rc: #ff9a3a; }
+.rb-t, .rb-sum { display: flex; flex-direction: column; white-space: nowrap; }
+.rb-t span, .rb-sum span { color: var(--sub); font-size: 10px; font-weight: 700; }
+.rb-t b { color: var(--rc); font: 800 17px/1.1 var(--fd); font-variant-numeric: tabular-nums; }
+.rb-sum { align-items: flex-end; }
+.rb-sum b { font: 800 17px/1.1 var(--fd); font-variant-numeric: tabular-nums; }
+.rb-t i, .rb-sum i, .rb-c i { font-style: normal; font-size: 10px; color: var(--sub); margin-left: 2px; }
+.rb-cs { display: flex; gap: 4px; overflow-x: auto; touch-action: pan-x; scrollbar-width: none; }
+.rb-c { flex: none; display: flex; flex-direction: column; align-items: center; padding: 2px 8px; background: var(--btn); }
+.rb-c small { color: var(--sub); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rb-c b { font: 800 14px/1.15 var(--fd); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rb-c.pop b { color: #8fe3a0; }
+.rb-c.miss b { color: #ff8a7a; }
+.rb-score { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 2px 0; }
+.rb-score span { color: var(--sub); font-size: 11px; font-weight: 700; }
+.rb-score b { font: 800 17px var(--fd); color: var(--accent-hi); font-variant-numeric: tabular-nums; }
