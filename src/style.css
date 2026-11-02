@@ -148,6 +148,14 @@ button.icon { min-width: 40px; height: 40px; padding: 0 10px; font-size: 18px; }
 .sel-bar button:disabled { opacity: 0.35; }
 .sel-bar button.on { background: var(--accent); color: var(--accent-ink); }
 .tool.measure svg text { fill: #ffd21f; stroke: none; font: 900 17px var(--ff); }
+/* 命令（ゴーゴー・SCROLL・BPM・拍子）の下の短い名前 */
+.tool:has(.tool-lb) { gap: calc(4px * var(--es, 0.45)); }
+.tool:has(.tool-lb) svg { width: 58%; height: 58%; }
+.tool-lb { font: 800 clamp(9px, calc(17px * var(--es, 0.45)), 13px) / 1 var(--fd); color: #fff; white-space: nowrap; }
+/* 選んでいるとき（青い地）は線を白くして見やすく */
+.tool.cmd.active:is(.scroll, .bpm, .measure) svg { stroke: #fff; }
+.tool.bpm.active svg circle { fill: #fff; }
+.tool.measure.active svg text { fill: #fff; }
 
 .tool {
   display: flex;
