@@ -724,7 +724,7 @@ export class Home {
       <div class="hdf-jk">${jk ? `<img src="${jk}" alt="">` : JACKET_NONE}</div>
       <div class="hdf-info" style="--cc:${sel ? COURSE_COLOR[sel.name] ?? 'var(--accent)' : 'var(--accent)'}">${info}</div>
       <div class="hdf-box" role="dialog" aria-label="むずかしさをえらぶ">
-        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}　BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</small></div>
+        <div class="hdf-head"><b>${esc(s.title)}</b><small>${esc(s.subtitle || '')}<span class="hdf-hs">　BPM ${fmtBpm(s)}${s.length > 0 ? `　${fmtLen(s.length)}` : ''}</span></small></div>
         <div class="hdf-body">
           <div class="hdf-side">
             <button data-df="back" aria-label="曲えらびにもどる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
@@ -742,11 +742,13 @@ export class Home {
       </div>`;
   }
 
-  /** 左の自己ベストの欄の中身 */
+  /** ジャケットの下の欄の中身（BPM・長さと、選んだ難易度の自己ベスト） */
   private diffInfoHtml(s: SongEntry, sel: { name: string } | undefined) {
-    if (!sel) return '';
+    const stat = (k: string, v: string) => `<span><small>${k}</small><b>${esc(v)}</b></span>`;
+    const stats = `<div class="hdf-st">${stat('BPM', fmtBpm(s))}${s.length > 0 ? stat('長さ', fmtLen(s.length)) : ''}</div>`;
+    if (!sel) return stats;
     const best = loadBest(s.id, sel.name);
-    return `<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`;
+    return `${stats}<span class="hdf-il">自己ベスト</span><b class="hdf-best">${best ? best.score.toLocaleString() : '---'}</b>`;
   }
 
   /**

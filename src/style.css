@@ -1963,6 +1963,14 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hdf-info { position: absolute; left: calc(12px + var(--safe-l)); top: 22%; width: clamp(120px, 17vw, 160px); display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; background: var(--panel); box-shadow: inset 3px 0 0 var(--cc); font-size: 11px; }
 .hdf-il { color: rgba(255, 255, 255, 0.65); font-size: 10px; }
 .hdf-best { font: 800 22px/1.05 var(--fd); }
+/* BPM・長さ（ジャケットの下）。狭い画面ではジャケットごと隠れるので、曲名の下に出す */
+.hdf-st { display: flex; gap: 10px; padding-bottom: 7px; margin-bottom: 4px; border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+.hdf-st span { display: flex; flex-direction: column; min-width: 0; }
+.hdf-st small { color: rgba(255, 255, 255, 0.65); font-size: 10px; }
+.hdf-st b { font: 800 17px/1.1 var(--fd); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hdf-st span + span { padding-left: 10px; border-left: 1px solid rgba(255, 255, 255, 0.12); }
+.hdf-hs { display: none; }
+@media (max-width: 640px) { .hdf-hs { display: inline; } }
 .hdf-ir { display: flex; justify-content: space-between; margin-top: 4px; }
 .hdf-ir .cr-allgood { background: linear-gradient(90deg, #ff7a9a, #ffd23f, #5ee07a, #6fd0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .hdf-ir .cr-fc { color: #ffd23f; }
