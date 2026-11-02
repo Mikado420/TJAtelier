@@ -1,5 +1,5 @@
 /**
- * 譜面情報の「譜面の流れ」: 上に横のレーン（音符を時刻の位置に並べた譜面）、下に密度の推移。
+ * 譜面情報の「譜面の流れ」: 上に横のレーン（音符を時刻の位置に並べた譜面）、下に小節ごとの密度の棒（ドンとカッを積む）。
  * 横の位置（時刻）は上下で同じ。横に拡大・縮小（ボタン・2 本指・ホイール）、横にスクロールできる。
  */
 import type { Course } from '../chart/types';
@@ -8,8 +8,8 @@ import { BIG_SCALE, COLOR, drawBalloon, drawNoteHead, isBig } from '../render/no
 
 export interface TimelineData {
   course: Course;
-  /** 小節ごとの密度（時刻は曲の再生位置） */
-  curve: { t0: number; t1: number; v: number }[];
+  /** 小節ごとの密度（時刻は曲の再生位置）。don・ka はそのうちドン・カッの打/秒 */
+  curve: { t0: number; t1: number; v: number; don: number; ka: number }[];
   /** 平均密度 */
   density: number;
   /** 最初の音符の時刻 */
@@ -17,18 +17,21 @@ export interface TimelineData {
   lastTime: number;
 }
 
-const LANE_H = 54;
-const GRAPH_H = 120;
+/** レーンの高さ（低い置き場所では小さくする） */
+let LANE_H = 54;
 const AXIS_H = 18;
-const H = LANE_H + GRAPH_H + AXIS_H;
+/** 高さは置き場所に合わせる（密度の棒の高さが変わる） */
+let H = 192;
+let GRAPH_H = H - LANE_H - AXIS_H;
 const MAX_ZOOM = 60;
 /** レーンの音符の半径（px） */
 const NOTE_R = 9;
+const noteR = () => Math.min(NOTE_R, LANE_H / 6);
 
 export function mountTimeline(root: HTMLElement, d: TimelineData) {
   root.innerHTML = `
     <div class="tl-tools">
-      <span class="tl-hint"></span>
+      <span class="tl-lg"><i class="don"></i>ドン<i class="ka"></i>カッ</span>
       <button data-tl="out" aria-label="縮小"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
       <button data-tl="reset" aria-label="全体を表示"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v4h4"/></svg><b class="tl-zoom">100%</b></button>
       <button data-tl="in" aria-label="拡大"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
@@ -45,11 +48,13 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
   let viewW = 0;
   /** 1 秒の幅（px） */
   const pps = () => (viewW / dur) * zoom;
-  const peak = d.curve.reduce((m, p) => (p.v > m.v ? p : m), d.curve[0] ?? { t0: 0, t1: 0, v: 0 });
-  const top = Math.max(1, Math.ceil(peak.v));
+  const top = Math.max(1, Math.ceil(d.curve.reduce((m, q) => Math.max(m, q.v), 0)));
 
   const layout = () => {
     viewW = Math.max(1, scroller.clientWidth);
+    H = Math.max(80, scroller.clientHeight || 192);
+    LANE_H = Math.round(Math.min(54, Math.max(30, H * 0.32)));
+    GRAPH_H = H - LANE_H - AXIS_H;
     inner.style.width = `${Math.round(viewW * zoom)}px`;
     zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     draw();
@@ -93,7 +98,7 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     // 音符（後ろから）
     const cy = LANE_H / 2;
     // 音符の大きさは拡大率に関係なく同じ（拡大・縮小で変わるのは間隔だけ）
-    const r = NOTE_R;
+    const r = noteR();
     const notes = d.course.notes;
     for (let i = notes.length - 1; i >= 0; i--) {
       const n = notes[i];
@@ -125,39 +130,20 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
       c.fillStyle = 'rgba(255,255,255,0.07)';
       c.fillRect(0, Math.round(yOf(v)), w, 1);
     }
-    if (d.curve.length) {
-      // 小節ごとの点（小節の真ん中）を、行き過ぎない滑らかな線（単調な 3 次曲線）でつなぐ
-      let a0 = 0;
-      while (a0 < d.curve.length - 1 && d.curve[a0 + 1].t1 < vis0) a0++;
-      let a1 = d.curve.length - 1;
-      while (a1 > a0 && d.curve[a1 - 1].t0 > vis1) a1--;
-      const pts = d.curve.slice(Math.max(0, a0 - 1), a1 + 2).map((q) => ({ x: xOf((q.t0 + q.t1) / 2), y: yOf(q.v) }));
-      const first = d.curve[0];
-      const last = d.curve[d.curve.length - 1];
-      if (a0 === 0) pts.unshift({ x: xOf(first.t0), y: yOf(first.v) });
-      if (a1 === d.curve.length - 1) pts.push({ x: xOf(last.t1), y: yOf(last.v) });
-      const path = new Path2D();
-      smoothPath(path, pts);
-      const area = new Path2D();
-      area.moveTo(pts[0].x, gy + GRAPH_H);
-      area.lineTo(pts[0].x, pts[0].y);
-      smoothPath(area, pts, true);
-      area.lineTo(pts[pts.length - 1].x, gy + GRAPH_H);
-      area.closePath();
-      c.fillStyle = 'rgba(77,159,190,0.28)';
-      c.fill(area);
-      c.strokeStyle = '#93cde2';
-      c.lineWidth = 2;
-      c.lineJoin = 'round';
-      c.stroke(path);
-      // いちばん高い小節
-      const px = xOf((peak.t0 + peak.t1) / 2);
-      c.fillStyle = '#ffd21f';
-      c.beginPath();
-      c.arc(px, yOf(peak.v), 3.5, 0, Math.PI * 2);
-      c.fill();
-      c.textAlign = px > w - 90 ? 'right' : px < 60 ? 'left' : 'center';
-      c.fillText(`最大 ${peak.v.toFixed(2)}`, px, Math.max(gy + 8, yOf(peak.v) - 9));
+    // 小節ごとの棒（下がドン・上にカッを積む）
+    for (const q of d.curve) {
+      if (q.t1 < vis0 || q.t0 > vis1) continue;
+      const x0 = xOf(q.t0);
+      const bw = (q.t1 - q.t0) * p;
+      const pad = Math.min(3, bw * 0.12);
+      const x = x0 + pad;
+      const ww = Math.max(1, bw - pad * 2);
+      const yd = yOf(q.don);
+      const yk = yOf(q.don + q.ka);
+      c.fillStyle = COLOR.don;
+      c.fillRect(x, yd, ww, gy + GRAPH_H - yd);
+      c.fillStyle = COLOR.ka;
+      c.fillRect(x, yk, ww, yd - yk);
     }
     // 平均（点線）
     c.setLineDash([5, 4]);
@@ -180,10 +166,12 @@ export function mountTimeline(root: HTMLElement, d: TimelineData) {
     c.fillStyle = 'rgba(255,255,255,0.6)';
     const steps = [1, 2, 5, 10, 15, 30, 60];
     const st = steps.find((s) => s * p >= 56) ?? 120;
-    c.textAlign = 'center';
     for (let s = Math.ceil(Math.max(0, vis0) / st) * st; s <= vis1; s += st) {
       const x = xOf(s);
+      if (x < 0 || x > w) continue;
       c.fillRect(Math.round(x) - 0.5, ay, 1, 4);
+      // 端の文字は切れないように寄せる
+      c.textAlign = x < 16 ? 'left' : x > w - 16 ? 'right' : 'center';
       c.fillText(`${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`, x, ay + 11);
     }
   };
@@ -238,28 +226,4 @@ function roundBar(c: CanvasRenderingContext2D, x1: number, x2: number, y: number
   c.arc(x2, y, r, -Math.PI / 2, Math.PI / 2);
   c.closePath();
   c.fill();
-}
-
-/**
- * 点を滑らかにつなぐ線（単調な 3 次エルミート曲線。山と谷で行き過ぎない）。
- * cont = true なら、今の位置から続けて描く（最初の点へ moveTo しない）
- */
-function smoothPath(p: Path2D, pts: { x: number; y: number }[], cont = false) {
-  const n = pts.length;
-  if (!n) return;
-  if (!cont) p.moveTo(pts[0].x, pts[0].y);
-  if (n < 3) { for (let i = 1; i < n; i++) p.lineTo(pts[i].x, pts[i].y); return; }
-  const dx: number[] = [];
-  const m: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    dx.push(pts[i + 1].x - pts[i].x || 1e-6);
-    m.push((pts[i + 1].y - pts[i].y) / (dx[i] || 1e-6));
-  }
-  const tan: number[] = [m[0]];
-  for (let i = 1; i < n - 1; i++) tan.push(m[i - 1] * m[i] <= 0 ? 0 : (3 * (dx[i - 1] + dx[i])) / ((2 * dx[i] + dx[i - 1]) / m[i - 1] + (dx[i] + 2 * dx[i - 1]) / m[i]));
-  tan.push(m[n - 2]);
-  for (let i = 0; i < n - 1; i++) {
-    const h = dx[i] / 3;
-    p.bezierCurveTo(pts[i].x + h, pts[i].y + tan[i] * h, pts[i + 1].x - h, pts[i + 1].y - tan[i + 1] * h, pts[i + 1].x, pts[i + 1].y);
-  }
 }

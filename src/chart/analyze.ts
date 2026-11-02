@@ -4,7 +4,7 @@
  * 連打（本数と秒数）・風船（本数と打数）・演奏時間・密度の推移。秒速を決めて連打・風船に何打入るかのシミュレーションも。
  */
 import { scoreBase, BALLOON_HIT_SCORE } from '../engine/game';
-import { contentEnd, measures, sortCourse, Timing, toPlayable, type EChart, type ECourse } from './model';
+import { contentEnd, measures, sortCourse, Timing, toPlayable, TPB, type EChart, type ECourse } from './model';
 
 export interface Analysis {
   /** 判定のある音符（ドン・カッ・大ドン・大カッ）の数 = 最大コンボ数 */
@@ -29,8 +29,20 @@ export interface Analysis {
   rolls: { type: 'roll' | 'bigRoll'; sec: number }[];
   /** 風船の長さ（秒）と打数 */
   balloons: { sec: number; hits: number }[];
-  /** 小節ごとの密度: 小節の始まりと終わりの時刻（秒、曲の再生位置）と、その小節の打/秒（音符数 ÷ 小節の秒数） */
-  curve: { t0: number; t1: number; v: number }[];
+  /**
+   * 小節ごとの密度: 小節の始まりと終わりの時刻（秒、曲の再生位置）と、その小節の打/秒（音符数 ÷ 小節の秒数）。
+   * don・ka はそのうちドン（大ドン）・カッ（大カッ）の打/秒。連打・風船は入れない
+   */
+  curve: { t0: number; t1: number; v: number; don: number; ka: number }[];
+  /** 小節数 */
+  measureCount: number;
+  /** #SCROLL の下限と上限（音符の所の値） */
+  scrollMin: number;
+  scrollMax: number;
+  /** いちばん細かい音符の間隔: 何分音符か（割り切れないときは 0）と秒数。音符が 2 つ未満なら null */
+  finest: { div: number; sec: number } | null;
+  /** 16 分以下の間隔で続く音符の、いちばん長い続き（打数） */
+  longestRun: number;
   /** 最初の音符の時刻と最後の音符（連打・風船の終わりも含む）の時刻（秒、曲の再生位置） */
   firstTime: number;
   lastTime: number;
@@ -84,19 +96,41 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
   const balloons = balloonsAll.map((n) => ({ sec: Math.max(0, (n.endTime ?? n.time) - n.time), hits: n.hits ?? 0 }));
 
   /** 小節ごとの密度（最初の音符の小節から最後の音符の小節まで）。秒数は（60 ÷ BPM）× 拍数（#DELAY は入れない） */
+  const comboNotes = course.notes.filter((n) => COMBO.has(n.type));
+  const allMeasures = measures(course, contentEnd(course));
   function measureDensity() {
-    const out: { t0: number; t1: number; v: number }[] = [];
+    const out: Analysis['curve'] = [];
     if (!ticks.length) return out;
-    for (const m of measures(course, contentEnd(course))) {
+    for (const m of allMeasures) {
       const end = m.start + m.length;
       if (end <= firstTick) continue;
       if (m.start > lastTick) break;
-      const n = ticks.filter((tk) => tk >= m.start && tk < end).length;
+      const inM = comboNotes.filter((n) => n.tick >= m.start && n.tick < end);
+      const dn = inM.filter((n) => n.type === 'don' || n.type === 'bigDon').length;
       const sec = noDelay(end) - noDelay(m.start);
-      out.push({ t0: t.tickToTime(m.start), t1: t.tickToTime(end), v: sec > 0 ? n / sec : 0 });
+      const ps = (x: number) => (sec > 0 ? x / sec : 0);
+      out.push({ t0: t.tickToTime(m.start), t1: t.tickToTime(end), v: ps(inM.length), don: ps(dn), ka: ps(inM.length - dn) });
     }
     return out;
   }
+
+  // いちばん細かい音符（同じ位置の音符は 1 つに数える）と、16 分以下の間隔で続くいちばん長い続き
+  const uniq = [...new Set(ticks)].sort((x, y) => x - y);
+  let finest: Analysis['finest'] = null;
+  let run = uniq.length ? 1 : 0;
+  let longestRun = run;
+  for (let i = 1; i < uniq.length; i++) {
+    const dt = uniq[i] - uniq[i - 1];
+    const sec = noDelay(uniq[i]) - noDelay(uniq[i - 1]);
+    if (sec > 0 && (!finest || sec < finest.sec - 1e-6)) {
+      const d = (TPB * 4) / dt;
+      finest = { div: Math.abs(d - Math.round(d)) < 1e-6 ? Math.round(d) : 0, sec };
+    }
+    run = dt <= TPB / 4 ? run + 1 : 1;
+    longestRun = Math.max(longestRun, run);
+  }
+  const scrolls = pc.notes.filter((n) => !n.dummy).map((n) => n.scroll);
+  if (!scrolls.length) scrolls.push(1);
 
   const firstTime = pc.notes.length ? pc.notes[0].time : 0;
   const lastTime = pc.notes.reduce((m, n) => Math.max(m, n.endTime ?? n.time), firstTime);
@@ -117,6 +151,11 @@ export function analyzeCourse(chart: EChart, course: ECourse): Analysis {
     rolls,
     balloons,
     curve: measureDensity(),
+    measureCount: allMeasures.length,
+    scrollMin: Math.min(...scrolls),
+    scrollMax: Math.max(...scrolls),
+    finest,
+    longestRun,
     firstTime,
     lastTime,
   };

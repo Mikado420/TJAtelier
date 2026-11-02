@@ -2977,3 +2977,65 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .cu-jk { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.14); }
 .hdf-jk::before, .hdf-jk::after, .cu-jk::before, .cu-jk::after { display: none; }
 .jk-none { width: 34%; height: 34%; fill: none; stroke: rgba(255, 255, 255, 0.32); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- 譜面情報（上に 情報｜譜面の流れ を同じ大きさで、下に横いっぱいの譜面画像。1 画面に収める） ---------- */
+.sheet.an .sheet-panel { width: 100%; }
+.sheet.an .sheet-head { padding: 6px 10px 10px 16px; }
+.sheet.an #sheetTitle { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.sheet.an .sheet-title { min-width: 0; flex: 1; }
+.an-ttl { display: flex; flex-direction: column; min-width: 0; }
+.an-ttl b { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.an-ttl small { font: 600 11px var(--fd); opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet.an .an-tabs { flex: none; flex-wrap: nowrap; }
+.sheet.an .sheet-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1.05fr); gap: 10px; overflow: hidden; padding: 10px 14px calc(10px + var(--safe-b)); }
+.an-p { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 10px; background: var(--deep); }
+.sheet-body .an-p h3 { margin: 0; flex: none; display: flex; align-items: center; gap: 8px; color: var(--accent-hi); font-size: 13px; font-weight: 900; }
+.an-info { overflow-y: auto; touch-action: pan-y; }
+.an-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+.an-it { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; padding: 3px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.an-it > span { flex: none; color: var(--sub); font-size: 11px; font-weight: 700; }
+.an-it > b { min-width: 0; font: 800 17px/1.2 var(--fd); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.an-it > b small { margin-left: 3px; color: var(--sub); font-size: 11px; font-weight: 700; }
+.an-it.wide { grid-column: 1 / -1; }
+.an-it.roll > b { color: #f7c11b; }
+.an-it.balloon > b { color: #ff9a3a; }
+.an-it.an-ratio { flex-wrap: wrap; }
+.an-it.an-ratio .an-bar { flex: 0 0 100%; margin: 3px 0 1px; }
+.an-ratio em { font-style: normal; }
+.an-brs { display: flex; gap: 4px; }
+.sheet .an-brs button { padding: 3px 10px; font: 800 13px var(--fd); border-radius: 0; color: #fff; background: var(--btn); opacity: 0.6; }
+.sheet .an-brs button.on { opacity: 1; }
+.sheet .an-brs .br-0.on { background: #6f7880; }
+.sheet .an-brs .br-1.on { background: #3a96d2; }
+.sheet .an-brs .br-2.on { background: #c846be; }
+.an-simrow2 { align-items: center; }
+.an-simrow2 .an-rate { margin-left: auto; gap: 4px; }
+.sheet .an-simrow2 .an-rate button { width: 30px; height: 28px; font-size: 16px; }
+.sheet .an-simrow2 .an-rate input { width: 58px; height: 28px; font-size: 15px; }
+.an-simrow2 > b { flex: none; }
+/* 譜面の流れ（高さは置き場所いっぱい） */
+.an-flow .an-timeline { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.an-flow .tl-scroll { flex: 1; min-height: 0; }
+.an-flow .tl-inner { height: 100%; }
+.tl-lg { margin-right: auto; display: flex; align-items: center; gap: 4px; color: var(--sub); font-size: 11px; font-weight: 700; }
+.tl-lg i { width: 10px; height: 10px; margin-left: 6px; display: inline-block; }
+.tl-lg i.don { background: #e6352e; margin-left: 0; }
+.tl-lg i.ka { background: #4ecbbe; }
+/* 譜面画像（横いっぱい・暗い枠。長い譜面は中で縦にスクロール） */
+.an-imgp { grid-column: 1 / -1; }
+.an-imgbtn { margin-left: auto; display: flex; gap: 4px; }
+.sheet .an-imgbtn button { height: 28px; padding: 0 14px; font-size: 12px; font-weight: 800; border-radius: 0; color: #fff; background: var(--btn); }
+.sheet .an-imgbtn button.primary { background: var(--accent); }
+.sheet.an .an-img { flex: 1; min-height: 0; max-height: none; display: block; padding: 6px; background: #141719; overflow-y: auto; touch-action: pan-y; }
+@media (max-height: 460px) {
+  .sheet.an .sheet-body { gap: 6px; padding: 6px 10px calc(6px + var(--safe-b)); }
+  .an-p { padding: 5px 8px 6px; gap: 3px; }
+  .an-it { padding: 1px 0; }
+  .an-it > b { font-size: 14px; }
+  .an-ttl b { font-size: 15px; }
+}
+/* 凡例と拡大・縮小は見出しの行に並べる（譜面の流れを高く） */
+.an-flow { position: relative; }
+.an-flow .tl-tools { position: absolute; top: 5px; left: 120px; right: 12px; }
+.sheet .an-flow .tl-tools button { height: 26px; min-width: 32px; }
+@media (max-height: 460px) { .an-flow .tl-tools { top: 2px; right: 8px; left: 100px; } }
