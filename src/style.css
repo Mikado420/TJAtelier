@@ -2810,7 +2810,7 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 @keyframes hdf-rise { from { transform: translateY(70px); opacity: 0; } }
 .home .hdf-card.on::after { content: ''; position: absolute; inset: -6px; border: 3px solid #fff; pointer-events: none; animation: hdf-ping 0.5s ease-out both; }
 @keyframes hdf-ping { from { transform: scale(1); opacity: 1; } to { transform: scale(1.14); opacity: 0; } }
-.home .hdf-card.on .hdf-meter i.on, .home .hdf-card.on .hdf-meter i.red { animation: hdf-st 0.2s steps(1) both; }
+.home .hdf-card.on .hdf-meter i.on, .home .hdf-card.on .hdf-meter i.red { animation: hdf-st 0.2s steps(1) backwards; }
 .home .hdf-card.on .hdf-meter i:nth-child(2) { animation-delay: 0.04s; }
 .home .hdf-card.on .hdf-meter i:nth-child(3) { animation-delay: 0.08s; }
 .home .hdf-card.on .hdf-meter i:nth-child(4) { animation-delay: 0.12s; }
@@ -2820,10 +2820,11 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .home .hdf-card.on .hdf-meter i:nth-child(8) { animation-delay: 0.28s; }
 .home .hdf-card.on .hdf-meter i:nth-child(9) { animation-delay: 0.32s; }
 .home .hdf-card.on .hdf-meter i:nth-child(10) { animation-delay: 0.36s; }
-/* 終わりの色も書いておく（書かないと Safari で最後の 1 つが暗いまま残ることがある） */
-@keyframes hdf-st { from { background: rgba(255, 255, 255, 0.25); } to { background: #fff; } }
-@keyframes hdf-st-red { from { background: rgba(255, 255, 255, 0.25); } to { background: #ff3b3b; } }
-.home .hdf-card.on .hdf-meter i.red { animation-name: hdf-st-red; }
+/*
+ * 点くまでの間だけ薄くする（動きが終わったら元の色に戻るだけで、最後の値を持ち続けない）。
+ * 色を動きで持ち続けると、Safari で途中の 1 つが暗いまま描き直されないことがある
+ */
+@keyframes hdf-st { 0%, 100% { opacity: 0.25; } }
 .home .hdf-go:not(:disabled) { animation: hdf-go 1.2s ease-in-out infinite; }
 @keyframes hdf-go { 0%, 100% { background: var(--accent); } 50% { background: #6bb6d2; } }
 @media (prefers-reduced-motion: reduce) {
