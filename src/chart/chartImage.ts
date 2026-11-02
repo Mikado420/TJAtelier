@@ -182,9 +182,9 @@ export function drawChartImage(chart: EChart, course: ECourse, scale = 2): HTMLC
   const LINE = 11;
   for (const [tick, ls] of labels) {
     const p = pos(tick);
-    // 縦の位置は決まっている: 下から 小節の番号・HS（#SCROLL）・BPM（#BPMCHANGE）。片方だけでも位置は変えない
+    // 縦の位置は決まっている: 下から 小節の番号・BPM（#BPMCHANGE）・HS（#SCROLL）。片方だけでも位置は変えない
     const base = rowTop(p.ri) + LANE_Y - 22;
-    const slot = (hs: boolean) => (hs ? 0 : 1);
+    const slot = (hs: boolean) => (hs ? 1 : 0);
     for (const l of ls) pixText(c, l.text, p.x + 3, base - slot(l.hs) * LINE, 1.6, l.hs ? '#d01e1e' : '#1d3fd0');
     if (tick > 0) {
       c.fillStyle = 'rgba(30,30,30,0.7)';
