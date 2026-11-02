@@ -238,6 +238,20 @@
 
     </div>
 
+    <!--
+      起動できなかったとき（公開し直した直後に古いページが残っていて、プログラムのファイルが見つからないなど）は、
+      ロゴが止まったままになるので、12 秒たっても動き出さなければ 1 回だけ読み直す（?r を付けて、繰り返さない）
+    -->
+    <script>
+      setTimeout(function () {
+        var s = document.getElementById('splash');
+        if (!s || s.classList.contains('go')) return;
+        var u = new URL(location.href);
+        if (u.searchParams.has('r')) return;
+        u.searchParams.set('r', String(Date.now()));
+        location.replace(u.toString());
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
