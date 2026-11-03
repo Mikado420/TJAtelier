@@ -36,49 +36,48 @@ const mmss = (t: number) => {
  * 上半分の背景にするジャケットの絵: 小さく縮めてぼかし・色の濃さ・暗さを一度だけ計算した canvas（2160×820 の 1/10）。
  * 表示のたびにぼかしを計算しないように
  */
-const artCache = new Map<string, Promise<HTMLCanvasElement | null>>();
-function blurredArt(src: string): Promise<HTMLCanvasElement | null> {
-  let p = artCache.get(src);
-  if (p) return p.then((cv) => (cv ? copyCanvas(cv) : null));
-  p = new Promise<HTMLCanvasElement | null>((resolve) => {
+const artCache = new Map<string, Promise<string | null>>();
+function blurredArt(src: string): Promise<string | null> {
+  const hit = artCache.get(src);
+  if (hit) return hit;
+  const p = new Promise<string | null>((resolve) => {
     const im = new Image();
+    im.decoding = 'async';
     im.onload = () => {
-      const W = 216;
-      const H = 82;
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const g = cv.getContext('2d');
-      if (!g) return resolve(null);
-      // 枠いっぱいに（はみ出す所は切る）
-      const k = Math.max(W / im.width, H / im.height);
-      g.drawImage(im, (W - im.width * k) / 2, (H - im.height * k) / 2, im.width * k, im.height * k);
-      const d = g.getImageData(0, 0, W, H);
-      boxBlur(d.data, W, H, 5);
-      boxBlur(d.data, W, H, 5);
-      boxBlur(d.data, W, H, 4);
-      // 色を濃く（1.35 倍）・暗く（0.62 倍）
-      const a = d.data;
-      for (let i = 0; i < a.length; i += 4) {
-        const l = 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2];
-        for (let c = 0; c < 3; c++) a[i + c] = Math.max(0, Math.min(255, (l + (a[i + c] - l) * 1.35) * 0.62));
+      try {
+        const W = 216;
+        const H = 82;
+        const cv = document.createElement('canvas');
+        cv.width = W;
+        cv.height = H;
+        const g = cv.getContext('2d', { willReadFrequently: true });
+        if (!g || !im.naturalWidth) return resolve(null);
+        // 枠いっぱいに（はみ出す所は切る）
+        const k = Math.max(W / im.naturalWidth, H / im.naturalHeight);
+        g.drawImage(im, (W - im.naturalWidth * k) / 2, (H - im.naturalHeight * k) / 2, im.naturalWidth * k, im.naturalHeight * k);
+        const d = g.getImageData(0, 0, W, H);
+        boxBlur(d.data, W, H, 5);
+        boxBlur(d.data, W, H, 5);
+        boxBlur(d.data, W, H, 4);
+        // 色を濃く（1.35 倍）・暗く（0.62 倍）
+        const a = d.data;
+        for (let i = 0; i < a.length; i += 4) {
+          const l = 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2];
+          for (let c = 0; c < 3; c++) a[i + c] = Math.max(0, Math.min(255, (l + (a[i + c] - l) * 1.35) * 0.62));
+          a[i + 3] = 255;
+        }
+        g.putImageData(d, 0, 0);
+        resolve(cv.toDataURL('image/png'));
+      } catch {
+        resolve(null);
       }
-      g.putImageData(d, 0, 0);
-      resolve(cv);
     };
     im.onerror = () => resolve(null);
     im.src = src;
   });
   artCache.set(src, p);
   if (artCache.size > 8) artCache.delete(artCache.keys().next().value!);
-  return p.then((cv) => (cv ? copyCanvas(cv) : null));
-}
-function copyCanvas(src: HTMLCanvasElement) {
-  const cv = document.createElement('canvas');
-  cv.width = src.width;
-  cv.height = src.height;
-  cv.getContext('2d')?.drawImage(src, 0, 0);
-  return cv;
+  return p;
 }
 /** 横と縦の箱ぼかし（半径 r） */
 function boxBlur(a: Uint8ClampedArray, W: number, H: number, r: number) {
@@ -211,7 +210,18 @@ export class Broadcast {
     tl.replaceChildren(this.base, this.onWrap);
     this.seekOn = this.inner.querySelector('.bc-seek-on');
     const artEl = this.inner.querySelector<HTMLElement>('.bc-art');
-    if (artEl && info.jacket) void blurredArt(info.jacket).then((cv) => { if (cv && artEl.isConnected) artEl.replaceChildren(cv); });
+    if (artEl && info.jacket) {
+      const src = info.jacket;
+      void blurredArt(src).then((url) => {
+        if (!artEl.isConnected) return;
+        // 計算できなかったときは、これまでどおり画面側でぼかす
+        if (url) artEl.style.backgroundImage = `url("${url}")`;
+        else {
+          artEl.style.backgroundImage = `url("${src}")`;
+          artEl.classList.add('bc-art-css');
+        }
+      });
+    }
     this.knob = this.inner.querySelector('.bc-knob');
     this.shown = '';
     this.el.classList.remove('hidden');
