@@ -671,6 +671,7 @@ export class PlayMode {
     }
     const mode = vmode || (img ? 'full' : '');
     const R = this.renderer;
+    R.movie = !!vmode;
     const v = this.video;
     if (v) {
       v.classList.toggle('hidden', !vmode);

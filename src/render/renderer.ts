@@ -314,6 +314,9 @@ export class Renderer {
   /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
   spectate = false;
 
+  /** 背景の動画（BGMOVIE）を流している。ゴーゴーの上の点滅と舞う塵を出さない（花火は出す） */
+  movie = false;
+
   /** エディタのプレビュー（レーンの帯だけを幅いっぱいに出す）。変えたら resize() */
   preview = false;
 
@@ -810,7 +813,7 @@ export class Renderer {
     }
     // オンライン対戦では下は相手のレーンなので、花びら・花火は描かない
     if (!this.opponents.length && !bc && !pv) {
-      this.drawBottom(V, wall, now, bars);
+      if (!this.movie) this.drawBottom(V, wall, now, bars);
       this.drawFireworks(wall);
     }
     this.drawLane(V, game, bars, now, gogo, wall);
@@ -872,7 +875,7 @@ export class Renderer {
       ctx.fillStyle = this.topPattern ?? '#e43b55';
       ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - V.y0);
     }
-    if (gogo) {
+    if (gogo && !this.movie) {
       ctx.fillStyle = `rgba(120,200,235,${0.14 + 0.07 * Math.sin(wall / 120)})`;
       // レーンの黒い枠（背景の canvas に描いてある）には重ねない
       ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, LANE_TOP - 8 - V.y0);

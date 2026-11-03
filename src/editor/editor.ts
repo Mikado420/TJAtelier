@@ -366,7 +366,7 @@ export class Editor {
     if (tool === 'gogo') return this.tapGogo(tick);
     if (tool === 'scroll') return this.tapScroll(tick);
     if (tool === 'bpm') return { point: { kind: 'bpm', tick } };
-    if (tool === 'measure') return { point: { kind: 'measure', tick: this.measureOf(tick).start } };
+    if (tool === 'measure') return { point: { kind: 'measure', tick } };
 
     // 置いてあるノーツ（連打・風船はその範囲のどこでも）をタップしたら、選んでいる音符に関係なく消す
     // （風船の打数は長押しで変える）
@@ -719,7 +719,20 @@ export class Editor {
   // ---------- イベント ----------
 
   addEvent(ev: EEvent) {
-    if (ev.kind === 'measure') ev = { ...ev, tick: this.measureOf(ev.tick).start };
+    // 小節の途中に置いた #MEASURE: そこから新しい小節が始まるように、前の小節の長さ（#MEASURE）をそこまでにする
+    if (ev.kind === 'measure') {
+      const m = this.measureOf(ev.tick);
+      if (ev.tick > m.start) {
+        const head = { tick: m.start, kind: 'measure' as const, ...measureFrac(ev.tick - m.start, m.den) };
+        const ev2 = ev;
+        this.mutate(() => {
+          this.course.events = this.course.events.filter((e) => !(e.kind === 'measure' && (e.tick === m.start || e.tick === ev2.tick)));
+          this.course.events.push(head, ev2);
+        });
+        return;
+      }
+      ev = { ...ev, tick: m.start };
+    }
     // グラデの範囲（始点・終点を含む）に置く #SCROLL は、その位置のグラデの値の代わりにする（グラデを置き直しても消さない）
     if (ev.kind === 'scroll') {
       const t = ev.tick;
@@ -767,4 +780,20 @@ export class Editor {
       this.courseIndex = Math.min(this.courseIndex, this.chart.courses.length - 1);
     });
   }
+}
+
+/**
+ * 長さ len（tick）の小節を表す #MEASURE の分数（分子・分母は整数）。
+ * 分母はなるべく元の小節の分母（den）やその倍にする（4/4 の途中なら 2/4・3/8 など）
+ */
+export function measureFrac(len: number, den: number): { num: number; den: number } {
+  const whole = TPB * 4;
+  const tries = [den, den * 2, den * 4, den * 8, den * 16, 4, 8, 16, 32, 64, 12, 24, 48, 96, 192];
+  for (const d of tries) {
+    const n = (len * d) / whole;
+    if (d > 0 && Math.abs(n - Math.round(n)) < 1e-9 && Math.round(n) > 0) return { num: Math.round(n), den: d };
+  }
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+  const g = gcd(Math.round(len), whole);
+  return { num: Math.round(len) / g, den: whole / g };
 }
