@@ -103,7 +103,8 @@ export class Broadcast {
     this.course = null;
   }
 
-  show(course: Course, info: PlayInfo, buf: AudioBuffer | null, musicDur: number) {
+  /** backdrop = 背景の動画・画像を全面に出している（そのときはジャケットの背景を敷かず、後ろが透けて見える） */
+  show(course: Course, info: PlayInfo, buf: AudioBuffer | null, musicDur: number, backdrop = false) {
     this.course = course;
     const last = Math.max(0, ...course.notes.map((n) => n.endTime ?? n.time));
     this.dur = Math.max(1, musicDur > 0 ? musicDur : last + 2);
@@ -114,7 +115,10 @@ export class Broadcast {
     const sub = (info.sub ?? '').replace(/^(--|\+\+)/, '').trim();
     const genre = info.genre?.trim();
     this.el.style.setProperty('--cc', col);
-    this.inner.innerHTML = `
+    // 上半分の背景: ジャケットを大きくぼかして敷く（ジャケットが無ければ難易度の色）
+    const art = backdrop ? '' : `<div class="bc-art${info.jacket ? '' : ' bc-art-none'}"${info.jacket ? ` style="background-image:url('${info.jacket}')"` : ''}></div><div class="bc-shade"></div>`;
+    this.el.classList.toggle('bc-backdrop', backdrop);
+    this.inner.innerHTML = `${art}
       <div class="bc-title bc-pnl"><i class="bc-bar"></i>
         <div class="bc-meta"><span class="bc-chip">${esc(label)}</span><b class="bc-lv">★${course.level}</b>${info.maker ? `<span class="bc-maker">${esc(info.maker)}</span>` : ''}</div>
         <div class="bc-name">${esc(info.title)}</div>

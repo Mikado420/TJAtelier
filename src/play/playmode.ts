@@ -633,7 +633,8 @@ export class PlayMode {
   /** 動画用の画面の、レーン以外の部分を出す・消す */
   private showBroadcast(course: Course, info: PlayInfo) {
     if (!this.renderer.broadcast) { this.bc.hide(); return; }
-    this.bc.show(course, info, this.audio.buffer, this.audio.musicDuration);
+    const backdrop = !!this.videoMode || (!!this.bgImgUrl && !this.calibrating);
+    this.bc.show(course, info, this.audio.buffer, this.audio.musicDuration, backdrop);
     this.bc.place(this.renderer.frame);
   }
 
