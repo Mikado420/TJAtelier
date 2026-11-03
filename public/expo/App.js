@@ -89,7 +89,7 @@ async function saveAndShare(name, mime, b64) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 5;
+const APP_VERSION = 6;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -136,8 +136,21 @@ export default function App() {
         return;
       }
       if (m.type === 'orient') {
-        // TJA の画面は縦、ほかは横
-        ScreenOrientation.lockAsync(m.portrait ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+        // TJA の画面は縦、ほかは横。固定できなかったら、縦のときは固定を外して（端末を回せば縦になる）、結果を Web 版へ知らせる
+        const O = ScreenOrientation.OrientationLock;
+        (async () => {
+          try {
+            await ScreenOrientation.lockAsync(m.portrait ? O.PORTRAIT_UP : O.LANDSCAPE);
+            return 'ok';
+          } catch (err) {
+            if (m.portrait) {
+              try { await ScreenOrientation.unlockAsync(); } catch { /* 外せない */ }
+            }
+            return String((err && err.message) || err);
+          }
+        })().then((r) => {
+          web.current?.injectJavaScript(`window.__orientResult&&window.__orientResult(${JSON.stringify(r)},${m.portrait ? 1 : 0});true;`);
+        });
         return;
       }
       if (m.type === 'play') {

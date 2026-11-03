@@ -1502,6 +1502,10 @@ new MutationObserver((recs) => { for (const r of recs) r.removedNodes.forEach(re
  * 固定できなかったら、そのまま今の向き（横画面）で出す（画面を回して出すと、キーボードの向きと合わなくなる）
  */
 const touchDevice = () => matchMedia('(pointer: coarse)').matches;
+// アプリが向きを固定できなかったとき
+(window as unknown as { __orientResult?: (r: string, portrait: number) => void }).__orientResult = (r, portrait) => {
+  if (r !== 'ok' && portrait) toast(`縦に固定できませんでした（${r}）`);
+};
 function setTjaPortrait(on: boolean) {
   const rn = (window as unknown as { ReactNativeWebView?: { postMessage(s: string): void } }).ReactNativeWebView;
   rn?.postMessage(JSON.stringify({ type: 'orient', portrait: on }));
@@ -1663,6 +1667,8 @@ function renderSheet() {
     const ta = body.querySelector<HTMLTextAreaElement>('#tjaText')!;
     ta.value = text;
     ta.addEventListener('scroll', scheduleTjaHl, { passive: true });
+    // 文字を打ったときだけ、カーソルの行がキーボードの上に見えるようにする
+    ta.addEventListener('input', () => fitTjaSoon());
     tjaHl.text = '';
     tjaHl.lh = 0;
     tjaSync.last = text;
@@ -1691,7 +1697,7 @@ window.visualViewport?.addEventListener('resize', scheduleTjaHl);
  * 画面の大きさは変えずに、キーボードが重なっている高さ（--tja-kb）だけテキストの下に余白を足して
  * 最後の行までキーボードの上にスクロールできるようにし、カーソルのある行がキーボードの上に見えるようにスクロールする
  */
-function fitTjaKeyboard() {
+function fitTjaKeyboard(scroll = true) {
   const ta = document.getElementById('tjaText') as HTMLTextAreaElement | null;
   const sh = $('sheet');
   if (!ta || document.activeElement !== ta) {
@@ -1704,6 +1710,8 @@ function fitTjaKeyboard() {
   const visBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
   const cover = Math.max(0, Math.round(r.bottom - visBottom));
   sh.style.setProperty('--tja-kb', `${cover}px`);
+  // 文字を選んでいる間・カーソルを動かしている間は、こちらでスクロールしない（指の動きと取り合いになって飛ぶ）
+  if (!scroll || ta.selectionStart !== ta.selectionEnd) return;
   // カーソルのある行が、キーボードの上の見えている所に入るように
   const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
   const padTop = parseFloat(getComputedStyle(ta).paddingTop) || 0;
@@ -1714,10 +1722,10 @@ function fitTjaKeyboard() {
   if (y + lh + margin > ta.scrollTop + visH) ta.scrollTop = y + lh + margin - visH;
   else if (y - lh < ta.scrollTop) ta.scrollTop = Math.max(0, y - lh);
 }
-const fitTjaSoon = () => requestAnimationFrame(fitTjaKeyboard);
+const fitTjaSoon = (scroll = true) => requestAnimationFrame(() => fitTjaKeyboard(scroll));
 window.visualViewport?.addEventListener('resize', () => { fitTjaSoon(); setTimeout(fitTjaKeyboard, 300); });
-window.visualViewport?.addEventListener('scroll', fitTjaSoon);
-document.addEventListener('selectionchange', () => { if (document.activeElement?.id === 'tjaText') fitTjaSoon(); });
+window.visualViewport?.addEventListener('scroll', () => fitTjaSoon(false));
+document.addEventListener('selectionchange', () => { if (document.activeElement?.id === 'tjaText') fitTjaSoon(false); });
 $('sheet').addEventListener('focusin', (e) => {
   if ((e.target as HTMLElement).id !== 'tjaText') return;
   // キーボードが出きってからもう一度（出る途中は高さが変わっていく）
