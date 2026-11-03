@@ -43,8 +43,8 @@ const R = {
   laneGap: 50,
 };
 
-/** 上のタイムラインに見せる長さ（拍）。4/4 で 3 小節 */
-const TL_BEATS = 12;
+/** プレビュー（プレイ画面のレーンの帯: 幅 2000・高さ 271。renderer.ts の PV_TOP〜PV_BOTTOM）の高さ ÷ 幅 */
+const PREVIEW_ASPECT = 271 / 2000;
 
 /** 斜めの形の傾き（CSS の --tan = tan(8°) と同じ） */
 const TILT_TAN = 0;
@@ -360,7 +360,7 @@ export class EditorView {
     if (!this.lanesCache || this.lanesCache.timing !== t) this.lanesCache = { timing: t, lanes: new DelayLanes(this.ed.course, t) };
     return this.lanesCache.lanes;
   }
-  private dirty = true;
+  dirty = true;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly ed: Editor) {
     this.ctx = canvas.getContext('2d')!;
@@ -427,13 +427,18 @@ export class EditorView {
       const laneGap = R.laneGap * s;
       // 譜面の境目: 下の譜面の名前の帯
       const lgap = laneGap;
-      // 1 段目はいつも縦の真ん中（下の命令とツールが入らない画面だけ上へ）。2 段目以降はその下に続ける。
-      // 上のタイムラインの大きさは段の数で変えない
-      const laneY = Math.min((this.h - laneH) / 2, this.h - this.toolsH - evH - 8 * s - laneH);
-      // 段が 2 つ以上なら、レーンから画面の下までを上下にスクロールする所にする
-      const blockH = this.totalRows > 1 ? this.h - laneY : laneH;
+      const colW = R.laneX * s;
+      // 上から: プレビュー（プレイ画面のレーンの帯をそのまま縮小。幅はレーンと同じ）→ レーン → 命令 → 波形 → ツール
+      const waveBot = this.h - this.toolsH - 2;
+      const minWave = Math.max(44, 110 * s);
+      const pvW = Math.max(0, this.w - colW);
+      const below = laneH + evH + 14 * s;
+      const pvH = Math.max(0, Math.min(pvW * PREVIEW_ASPECT, waveBot - minWave - below - 6 * s));
+      const laneY = pvH + 6 * s;
+      const tlTop = laneY + below;
+      // 段が 2 つ以上なら、レーンから波形の上までを上下にスクロールする所にする
+      const blockH = this.totalRows > 1 ? Math.max(laneH, tlTop - 8 * s - laneY) : laneH;
       const cy = laneY + laneH / 2;
-      const tlTop = 8 * s;
       // 自分のレーンの命令の段: 自分のレーンの最後の段のすぐ下（スクロールといっしょに動く）
       const ownBottom = laneY + this.rowOffWith(this.lanes.rows - 1, laneH, subGap, lgap) - this.rowOffWith(this.vrow, laneH, subGap, lgap) + laneH;
       const headH = Math.max(18, 44 * s);
@@ -446,26 +451,28 @@ export class EditorView {
         laneGap,
         lgap,
         s,
-        colW: R.laneX * s,
+        colW,
         colLine1: R.colLine1 * s,
         laneY,
         laneH,
         evY: ownBottom,
         evH,
         evTop: ownBottom + 6 * s,
-        /** 拡大率のボタンの位置（タイムラインの右上） */
+        /** 拡大率のボタンの位置（波形の右上） */
         ctlTop: tlTop + headH + 4,
         cy,
         playX: R.judgeX * s,
         r: R.noteR * s,
         bigR: R.bigR * s,
-        waveX: R.laneX * s + 4 * s,
+        waveX: colW + 4 * s,
         waveY: tlTop,
         waveH: 0,
         play: { x: R.play.x * s, y: cy, r: R.play.r * s },
-        tlX: R.laneX * s + 4 * s,
+        tlX: colW + 4 * s,
         tlTop,
-        tlBottom: laneY - 8 * s,
+        tlBottom: Math.max(tlTop + 30, waveBot),
+        /** プレビュー（プレイ画面のレーン）を置く所 */
+        pv: { x: colW, y: 0, w: pvW, h: pvH },
       };
     }
     const laneY = R.laneTop * s;
@@ -499,6 +506,7 @@ export class EditorView {
       waveY: R.waveTop * s,
       waveH: (R.waveBottom - R.waveTop) * s,
       play: box(R.play),
+      pv: { x: 0, y: 0, w: 0, h: 0 },
     };
   }
 
@@ -539,9 +547,7 @@ export class EditorView {
    * 拡大率 100% で判定枠の x から右端までが 3 小節。レーンを拡大・縮小すると同じ割合で変わる
    */
   get tlScale() {
-    const L = this.L;
-    const base = Math.max(8, (this.w - L.playX - 6 * L.s) / TL_BEATS);
-    return base / this.defaultZoom;
+    return 1;
   }
   /** タイムラインの 1 拍の px */
   get tlZoom() {
@@ -1360,7 +1366,8 @@ export class EditorView {
     const font = (w: number, px: number) => `${w} ${Math.round(px)}px 'Makinas 4 Flat', sans-serif`;
 
     const headH = Math.max(18, 44 * s);
-    const noteH = Math.min(Math.max(26, 76 * s), (bot - top - headH) * 0.42);
+    // 波形はレーンと同じ縮尺（音符はレーンにあるので、ここには出さない）
+    const noteH = 0;
     const notesTop = bot - noteH;
     const ny = notesTop + noteH / 2;
     const waveTop = top + headH + 2;
@@ -1489,6 +1496,7 @@ export class EditorView {
     if (!this.fullGhosts.length) this.drawGhosts(L, { top: waveTop + 2 * s, bottom: waveBot - 2 * s });
 
     // 音符の段（後ろから）
+    if (noteH > 0) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(x0, notesTop - noteH, x1 - x0, noteH * 2);
@@ -1527,7 +1535,7 @@ export class EditorView {
       }
     }
     ctx.restore();
-
+    }
 
     // 再生位置（判定枠と同じ x）
     const px = L.playX;

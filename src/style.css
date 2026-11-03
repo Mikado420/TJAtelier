@@ -3114,3 +3114,12 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .hits-pop button { height: 40px; min-width: 44px; padding: 0 8px; border: 0; border-radius: 0; background: var(--btn); color: #fff; font: 800 20px var(--fd); }
 .hits-pop .hp-v { min-width: 64px; background: transparent; font-size: 26px; font-variant-numeric: tabular-nums; }
 .hits-pop .hp-in { width: 64px; height: 40px; padding: 0 4px; border: 0; border-radius: 0; background: var(--inp); color: #fff; font: 800 24px var(--fd); text-align: center; }
+/* エディタのプレビュー（プレイ画面のレーンの帯） */
+.ed-preview { position: absolute; z-index: 1; pointer-events: none; overflow: hidden; }
+.ed-preview.hidden { display: none; }
+.ed-preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* 波形（レーンの下）の中: 拡大・縮小と分岐の切り替えは横に並べて、波形の段の縦の真ん中に */
+.stage.stack .zoom-ctl { flex-direction: row-reverse; --zh: max(24px, min(34px, calc(var(--tl-h) - 8px))); top: calc(var(--ev-top) + (var(--tl-h) - var(--zh)) / 2); }
+.stage.stack .zoom-ctl #zoomReset { width: 52px; }
+.stage .br-ctl { flex-direction: row; --bh: max(22px, min(30px, calc(var(--tl-h, 60px) - 8px))); top: calc(var(--ev-top, 30px) + (var(--tl-h, 60px) - var(--bh)) / 2); }
+.stage .br-ctl .br-stack { margin-top: 0; margin-left: 3px; }

@@ -9,7 +9,9 @@ import { branchPath, COURSE_NAMES, contentEnd, newChart, parseScroll, type Branc
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
-import type { Note } from './chart/types';
+import type { Course, Note } from './chart/types';
+import { Renderer } from './render/renderer';
+import { Game } from './engine/game';
 import { DEMO_TJA } from './demo';
 import { buildAutoEvents, type AutoEvent } from './play/auto';
 import { bindTimeline, bindValueBoxes, drawPlayhead, drawRuler, inlineInput, PLAYHEAD, valueBoxHtml, type ValueBox } from './ui/daw';
@@ -452,6 +454,69 @@ function tickPlayback() {
   view.invalidate();
 }
 
+// ---------- プレビュー（エディタの上: プレイ画面のレーンの帯を、そのまま縮小して出す） ----------
+const pvBox = $('edPreview');
+const pvRenderer = new Renderer($<HTMLCanvasElement>('edPreviewCv'));
+pvRenderer.preview = true;
+pvRenderer.touch = false;
+/** プレビューの譜面とオートの状態（譜面が変わったら・前へ戻ったら作り直す） */
+let pv: { course: Course; game: Game; events: AutoEvent[]; idx: number; t: number } | null = null;
+let pvDirty = true;
+let pvRect = '';
+/** 最後にプレビューを描き直した時刻（叩いた演出が終わるまでは描き続ける） */
+let pvActiveUntil = 0;
+function pvSync() {
+  const r = view.L.pv;
+  const key = `${r.x}|${r.y}|${r.w}|${r.h}`;
+  if (key === pvRect) return;
+  pvRect = key;
+  pvBox.style.left = `${r.x}px`;
+  pvBox.style.top = `${r.y}px`;
+  pvBox.style.width = `${r.w}px`;
+  pvBox.style.height = `${r.h}px`;
+  pvBox.classList.toggle('hidden', r.h < 8);
+  pvRenderer.resize();
+}
+function pvBuild(now: number) {
+  const course = toPlayable(ed.chart, ed.course);
+  const game = new Game(course.notes, { ...course, fixed: ed.branch });
+  const events = buildAutoEvents(course.notes);
+  // 今の位置までは、オートで叩いた状態にしておく（演出は出さない）
+  let idx = 0;
+  for (; idx < events.length && events[idx].t < now; idx++) {
+    const e = events[idx];
+    game.update(e.t);
+    if (e.note && !game.active(e.note)) continue;
+    game.hit(e.kind, e.t);
+  }
+  game.update(now);
+  game.onJudge = (e) => { pvRenderer.pushJudge(e); pvActiveUntil = performance.now() + 700; };
+  pv = { course, game, events, idx, t: now };
+  pvDirty = false;
+}
+function pvFrame(force: boolean) {
+  pvSync();
+  if (pvBox.classList.contains('hidden')) return;
+  const now = playing && view.posTime !== null ? view.posTime : ed.timing.tickToTime(view.pos);
+  if (!pv || pvDirty || now < pv.t - 1e-4) pvBuild(now);
+  else if (now > pv.t) {
+    const p = pv;
+    for (; p.idx < p.events.length && p.events[p.idx].t <= now; p.idx++) {
+      const e = p.events[p.idx];
+      p.game.update(e.t);
+      if (e.note && !p.game.active(e.note)) continue;
+      p.game.hit(e.kind, e.t);
+    }
+    p.game.update(now);
+    p.t = now;
+    force = true;
+  }
+  if (!force && performance.now() > pvActiveUntil) return;
+  pvRenderer.speed = settings.speed;
+  pvRenderer.draw(pv!.game, pv!.course, now, { title: ed.chart.title, course: ed.course.name, level: ed.course.level });
+}
+ed.onChange(() => { pvDirty = true; });
+
 function loop() {
   if (playing && !play.isActive) tickPlayback();
   if (collab.active && !play.isActive) collab.frame(playing);
@@ -459,7 +524,9 @@ function loop() {
   if (arrPlay.on) tickArrPlay();
   // プレイ画面を出している間は、隠れているエディタを描き直さない
   if (!document.body.classList.contains('playing')) {
+    const redraw = view.dirty || pvDirty;
     view.frame();
+    pvFrame(redraw);
     updateHud();
   }
   requestAnimationFrame(loop);

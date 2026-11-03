@@ -19,6 +19,9 @@ const LANE_X = 515; // レーン左端（左パネルの右端）
 const LANE_TOP = 299;
 const LANE_BOTTOM = 506;
 const TEXT_BOTTOM = 550; // 音符文字の帯の下端
+/** エディタのプレビューに出す帯（左のパネルの上の端〜音符文字の帯の下） */
+const PV_TOP = 284;
+const PV_BOTTOM = 555;
 const JX = 634; // 判定枠の中心
 const JY = 402;
 const NR = 54; // 通常ノーツの半径（黒縁を含む）
@@ -259,9 +262,17 @@ export class Renderer {
     this.s = Math.min(w / REF_W, h / REF_H);
     this.ox = (w - REF_W * this.s) / 2;
     this.oy = (h - REF_H * this.s) / 2;
-    const s = this.s;
     this.vis = { x0: 0, y0: 0, x1: REF_W, y1: REF_H };
-    this.frame = { x: this.ox, y: this.oy, s };
+    this.frame = { x: this.ox, y: this.oy, s: this.s };
+    if (this.preview) {
+      // エディタのプレビュー: レーンの帯（左のパネル〜右端）だけを、幅いっぱいに縮小して出す
+      this.s = w / REF_W;
+      this.ox = 0;
+      this.oy = -PV_TOP * this.s;
+      this.vis = { x0: 0, y0: PV_TOP, x1: REF_W, y1: PV_BOTTOM };
+      this.frame = { x: 0, y: this.oy, s: this.s };
+    }
+    const s = this.s;
     if (this.broadcast) {
       // 動画用の画面: 描く座標はそのままで、全体を下へずらす（レーンより上は -BC_DY まで使える）
       this.oy += BC_DY * s;
@@ -302,6 +313,9 @@ export class Renderer {
 
   /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
   spectate = false;
+
+  /** エディタのプレビュー（レーンの帯だけを幅いっぱいに出す）。変えたら resize() */
+  preview = false;
 
   /** 動画用の画面（レーンを下に寄せ、上の曲の情報などは別に重ねる）。変えたら resize() */
   broadcast = false;
@@ -778,7 +792,8 @@ export class Renderer {
     ctx.clip();
     const bc = this.broadcast;
 
-    if (!bc) {
+    const pv = this.preview;
+    if (!bc && !pv) {
       this.drawTop(V, gogo, wall);
       this.drawTitle(info);
     }
@@ -794,7 +809,7 @@ export class Renderer {
       return;
     }
     // オンライン対戦では下は相手のレーンなので、花びら・花火は描かない
-    if (!this.opponents.length && !bc) {
+    if (!this.opponents.length && !bc && !pv) {
       this.drawBottom(V, wall, now, bars);
       this.drawFireworks(wall);
     }
@@ -808,7 +823,7 @@ export class Renderer {
     if (this.opponents.length) {
       this.drawLayer('own-counts', `${st.good}|${st.ok}|${st.bad}`, 150, LANE_TOP + 60, 190, 116, () => this.paintCounts(st.good, st.ok, st.bad));
     }
-    if (!bc) this.drawGauge(st.gauge, wall);
+    if (!bc && !pv) this.drawGauge(st.gauge, wall);
     this.drawRollBubble(wall, bc);
     this.drawJudgeText(wall);
     this.drawTiming(wall);
@@ -817,13 +832,13 @@ export class Renderer {
       this.drawSparkles(wall);
       this.drawRainbow(wall);
     }
-    if (!bc) {
+    if (!bc && !pv) {
       this.drawBanner(wall);
       this.drawLyric(V, course, now);
     }
-    this.drawEnd(V, wall);
+    if (!pv) this.drawEnd(V, wall);
     ctx.restore();
-    if (this.touch && !bc) {
+    if (this.touch && !bc && !pv) {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawPad(wall);
     }
