@@ -32,6 +32,72 @@ const mmss = (t: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
+/**
+ * 上半分の背景にするジャケットの絵: 小さく縮めてぼかし・色の濃さ・暗さを一度だけ計算した canvas（2160×820 の 1/10）。
+ * 表示のたびにぼかしを計算しないように
+ */
+const artCache = new Map<string, Promise<HTMLCanvasElement | null>>();
+function blurredArt(src: string): Promise<HTMLCanvasElement | null> {
+  let p = artCache.get(src);
+  if (p) return p.then((cv) => (cv ? copyCanvas(cv) : null));
+  p = new Promise<HTMLCanvasElement | null>((resolve) => {
+    const im = new Image();
+    im.onload = () => {
+      const W = 216;
+      const H = 82;
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const g = cv.getContext('2d');
+      if (!g) return resolve(null);
+      // 枠いっぱいに（はみ出す所は切る）
+      const k = Math.max(W / im.width, H / im.height);
+      g.drawImage(im, (W - im.width * k) / 2, (H - im.height * k) / 2, im.width * k, im.height * k);
+      const d = g.getImageData(0, 0, W, H);
+      boxBlur(d.data, W, H, 5);
+      boxBlur(d.data, W, H, 5);
+      boxBlur(d.data, W, H, 4);
+      // 色を濃く（1.35 倍）・暗く（0.62 倍）
+      const a = d.data;
+      for (let i = 0; i < a.length; i += 4) {
+        const l = 0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2];
+        for (let c = 0; c < 3; c++) a[i + c] = Math.max(0, Math.min(255, (l + (a[i + c] - l) * 1.35) * 0.62));
+      }
+      g.putImageData(d, 0, 0);
+      resolve(cv);
+    };
+    im.onerror = () => resolve(null);
+    im.src = src;
+  });
+  artCache.set(src, p);
+  if (artCache.size > 8) artCache.delete(artCache.keys().next().value!);
+  return p.then((cv) => (cv ? copyCanvas(cv) : null));
+}
+function copyCanvas(src: HTMLCanvasElement) {
+  const cv = document.createElement('canvas');
+  cv.width = src.width;
+  cv.height = src.height;
+  cv.getContext('2d')?.drawImage(src, 0, 0);
+  return cv;
+}
+/** 横と縦の箱ぼかし（半径 r） */
+function boxBlur(a: Uint8ClampedArray, W: number, H: number, r: number) {
+  const tmp = new Float32Array(Math.max(W, H) * 4);
+  const pass = (n: number, m: number, at: (i: number, j: number) => number) => {
+    for (let j = 0; j < m; j++) {
+      for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) tmp[i * 4 + c] = a[at(i, j) + c];
+      for (let i = 0; i < n; i++) {
+        let s0 = 0, s1 = 0, s2 = 0, s3 = 0, cnt = 0;
+        for (let k = Math.max(0, i - r); k <= Math.min(n - 1, i + r); k++) { s0 += tmp[k * 4]; s1 += tmp[k * 4 + 1]; s2 += tmp[k * 4 + 2]; s3 += tmp[k * 4 + 3]; cnt++; }
+        const o = at(i, j);
+        a[o] = s0 / cnt; a[o + 1] = s1 / cnt; a[o + 2] = s2 / cnt; a[o + 3] = s3 / cnt;
+      }
+    }
+  };
+  pass(W, H, (i, j) => (j * W + i) * 4);
+  pass(H, W, (i, j) => (i * W + j) * 4);
+}
+
 /** 音源の波形の山（BARS 本。0〜1） */
 const peakCache = new WeakMap<AudioBuffer, Float32Array>();
 function peaksOf(buf: AudioBuffer | null, dur: number): Float32Array | null {
@@ -116,7 +182,7 @@ export class Broadcast {
     const genre = info.genre?.trim();
     this.el.style.setProperty('--cc', col);
     // 上半分の背景: ジャケットを大きくぼかして敷く（ジャケットが無ければ難易度の色）
-    const art = backdrop ? '' : `<div class="bc-art${info.jacket ? '' : ' bc-art-none'}"${info.jacket ? ` style="background-image:url('${info.jacket}')"` : ''}></div><div class="bc-shade"></div>`;
+    const art = backdrop ? '' : `<div class="bc-art${info.jacket ? '' : ' bc-art-none'}"></div><div class="bc-shade"></div>`;
     this.el.classList.toggle('bc-backdrop', backdrop);
     this.inner.innerHTML = `${art}
       <div class="bc-title bc-pnl"><i class="bc-bar"></i>
@@ -132,7 +198,7 @@ export class Broadcast {
         <div class="bc-pnl bc-cell"><i>BAR</i><b><span data-k="bar"></span><small>/ ${course.measures?.length ?? course.bars.length}</small></b></div>
       </div>
       <div class="bc-tl"></div>
-      <div class="bc-seek"><i class="bc-seek-on"></i><i class="bc-knob"></i></div>
+      <div class="bc-seek"><i class="bc-seek-on"><i></i></i><i class="bc-knob"></i></div>
       <div class="bc-foot bc-pnl">
         <div class="bc-cell"><i>NOTES</i><b>${notes.toLocaleString('en-US')}</b></div>
         ${genre ? `<div class="bc-cell bc-genre"><i>GENRE</i><b>${esc(genre)}</b></div>` : ''}
@@ -144,6 +210,8 @@ export class Broadcast {
     this.onWrap.replaceChildren(this.on);
     tl.replaceChildren(this.base, this.onWrap);
     this.seekOn = this.inner.querySelector('.bc-seek-on');
+    const artEl = this.inner.querySelector<HTMLElement>('.bc-art');
+    if (artEl && info.jacket) void blurredArt(info.jacket).then((cv) => { if (cv && artEl.isConnected) artEl.replaceChildren(cv); });
     this.knob = this.inner.querySelector('.bc-knob');
     this.shown = '';
     this.el.classList.remove('hidden');
@@ -261,8 +329,14 @@ export class Broadcast {
     set('bar', String(now < (ms[0]?.time ?? 0) ? 0 : mi + 1));
     set('time', mmss(now));
     set('lyric', lyric);
-    this.onWrap.style.width = `${px}px`;
-    if (this.seekOn) this.seekOn.style.width = `${px}px`;
+    // 進んだ所は、幅を変えずに位置だけ動かして見せる（画面の配置の計算と描き直しを起こさない）
+    const hide = TL.w - px;
+    this.onWrap.style.transform = `translateX(${-hide}px)`;
+    this.on.style.transform = `translateX(${hide}px)`;
+    if (this.seekOn) {
+      this.seekOn.style.transform = `translateX(${-hide}px)`;
+      (this.seekOn.firstElementChild as HTMLElement | null)?.style.setProperty('transform', `translateX(${hide}px)`);
+    }
     if (this.knob) this.knob.style.transform = `translateX(${px}px)`;
   }
 }

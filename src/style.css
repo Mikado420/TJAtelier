@@ -2740,10 +2740,12 @@ body.playing .br-ctl { display: none; }
 .bc-stats .bc-cell { flex: 1; padding: 14px 0 0 40px; }
 .bc-tl { left: 50px; top: 456px; width: 1347px; height: 92px; }
 .play .bc-tl canvas { left: 0; top: 0; right: auto; bottom: auto; width: 1347px; height: 92px; pointer-events: none; }
-.bc-on { position: absolute; left: 0; top: 0; height: 92px; overflow: hidden; }
+.bc-on { position: absolute; left: 0; top: 0; width: 1347px; height: 92px; overflow: hidden; will-change: transform; }
+.play .bc-on canvas { will-change: transform; }
 .bc-seek { left: 50px; top: 562px; width: 1347px; height: 22px; }
 .bc-seek::before { content: ''; position: absolute; left: 0; right: 0; top: 7px; height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
-.bc-seek-on { position: absolute; left: 0; top: 7px; height: 8px; border-radius: 4px; background: #93cde2; width: 0; }
+.bc-seek-on { position: absolute; left: 0; top: 7px; height: 8px; width: 1347px; overflow: hidden; border-radius: 4px 0 0 4px; will-change: transform; transform: translateX(-1347px); }
+.bc-seek-on > i { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border-radius: 4px; background: #93cde2; will-change: transform; transform: translateX(1347px); }
 .bc-knob { position: absolute; left: -11px; top: 0; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(77, 159, 190, 0.55), 0 2px 8px rgba(0, 0, 0, 0.5); }
 .bc-foot { left: 0; top: 960px; width: 2000px; height: 141px; --sl: 0px; clip-path: none; display: flex; align-items: center; gap: 70px; padding: 0 50px; box-sizing: border-box; }
 .bc-foot .bc-cell b { height: 54px; line-height: 54px; }
@@ -2755,10 +2757,15 @@ body.playing .br-ctl { display: none; }
 .bc-time small { font-size: 28px; font-weight: 700; opacity: 0.55; margin-left: 6px; }
 
 /* 動画用の画面: ジャケットが主役（ぼかしたジャケットを上半分の背景に、板は半透明の白に細い縁） */
-.bc-art { left: -80px; top: -120px; width: 2160px; height: 820px; background: center / cover no-repeat; filter: blur(46px) saturate(1.35) brightness(0.62); }
+.bc-art { left: -80px; top: -120px; width: 2160px; height: 820px; overflow: hidden; }
+.bc-art canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 .bc-art-none { filter: none; background: radial-gradient(ellipse 60% 80% at 30% 20%, color-mix(in srgb, var(--cc) 55%, #0d1014), #0d1014 75%); }
 .bc-shade { left: 0; top: 0; width: 2000px; height: 660px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55) 92%, #0d1014); }
 .bc-backdrop .bc-shade { display: none; }
+/* 動かない部分は 1 つの層にまとめ、変わる所（数字・時間・歌詞・進み具合）は別の層に分ける */
+.bc-art, .bc-shade, .bc-title, .bc-jk { will-change: transform; }
+.bc-stats .bc-cell b, .bc-time, .bc-lyric { will-change: transform; contain: layout paint; }
+.bc-knob { will-change: transform; }
 .bc .bc-pnl { background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.16); }
 .bc-backdrop .bc-pnl { background: rgba(10, 12, 16, 0.55); }
 .bc .bc-title { background: linear-gradient(90deg, rgba(0, 0, 0, 0.28), rgba(255, 255, 255, 0.05)); }
@@ -2768,7 +2775,7 @@ body.playing .br-ctl { display: none; }
 .bc .bc-cell i { color: rgba(255, 255, 255, 0.7); }
 .bc .bc-jk { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55), 0 0 0 2px rgba(255, 255, 255, 0.2); }
 .bc .bc-seek::before { background: rgba(255, 255, 255, 0.22); }
-.bc .bc-seek-on { background: #fff; }
+.bc .bc-seek-on > i { background: #fff; }
 .bc .bc-knob { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.3), 0 4px 12px rgba(0, 0, 0, 0.5); }
 .bc .bc-tl canvas { filter: grayscale(0.2) brightness(1.15); }
 .bc .bc-foot { background: rgba(10, 12, 16, 0.78); box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.14); }
