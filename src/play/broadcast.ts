@@ -212,15 +212,19 @@ export class Broadcast {
     const artEl = this.inner.querySelector<HTMLElement>('.bc-art');
     if (artEl && info.jacket) {
       const src = info.jacket;
-      void blurredArt(src).then((url) => {
-        if (!artEl.isConnected) return;
-        // 計算できなかったときは、これまでどおり画面側でぼかす
+      let done = false;
+      const put = (url: string | null) => {
+        if (done || !artEl.isConnected) return;
+        done = true;
+        // 計算できなかったとき・間に合わないときは、これまでどおり画面側でぼかす
         if (url) artEl.style.backgroundImage = `url("${url}")`;
         else {
           artEl.style.backgroundImage = `url("${src}")`;
           artEl.classList.add('bc-art-css');
         }
-      });
+      };
+      void blurredArt(src).then(put, () => put(null));
+      setTimeout(() => put(null), 1500);
     }
     this.knob = this.inner.querySelector('.bc-knob');
     this.shown = '';
