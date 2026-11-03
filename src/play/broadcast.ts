@@ -43,7 +43,7 @@ function blurredArt(src: string): Promise<string | null> {
   const p = new Promise<string | null>((resolve) => {
     const im = new Image();
     im.decoding = 'async';
-    im.onload = () => {
+    const run = (tries: number) => {
       try {
         const W = 216;
         const H = 82;
@@ -56,6 +56,13 @@ function blurredArt(src: string): Promise<string | null> {
         const k = Math.max(W / im.naturalWidth, H / im.naturalHeight);
         g.drawImage(im, (W - im.naturalWidth * k) / 2, (H - im.naturalHeight * k) / 2, im.naturalWidth * k, im.naturalHeight * k);
         const d = g.getImageData(0, 0, W, H);
+        // 描けていない（透明のまま）ときは少し待ってやり直し、だめなら画面側でぼかす
+        let seen = 0;
+        for (let i = 3; i < d.data.length; i += 4) if (d.data[i] > 8) seen++;
+        if (seen < (W * H) / 4) {
+          if (tries > 0) return void setTimeout(() => run(tries - 1), 120);
+          return resolve(null);
+        }
         boxBlur(d.data, W, H, 5);
         boxBlur(d.data, W, H, 5);
         boxBlur(d.data, W, H, 4);
@@ -71,6 +78,10 @@ function blurredArt(src: string): Promise<string | null> {
       } catch {
         resolve(null);
       }
+    };
+    im.onload = () => {
+      if (im.decode) im.decode().then(() => run(3), () => run(3));
+      else run(3);
     };
     im.onerror = () => resolve(null);
     im.src = src;
@@ -224,7 +235,7 @@ export class Broadcast {
         }
       };
       void blurredArt(src).then(put, () => put(null));
-      setTimeout(() => put(null), 1500);
+      setTimeout(() => put(null), 1200);
     }
     this.knob = this.inner.querySelector('.bc-knob');
     this.shown = '';
