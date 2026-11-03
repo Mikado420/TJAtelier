@@ -228,6 +228,9 @@ export class EditorView {
 
   /** tol: そのあたりのノーツとみなす幅（tick。音符の半径ぶん） */
   onTap: (tick: number, tol: number) => void = () => {};
+  /** レーンを 0.3 秒押したまま（動かさない）。true を返したら、離してもタップにしない（x, y は画面の位置） */
+  onLongPress: (tick: number, tol: number, x: number, y: number) => boolean = () => false;
+  private pressTimer = 0;
   /** レーンの下のイベントの文字をタップしたとき（重なってまとめたものは全部） */
   onEventTap: (items: EventItem[]) => void = () => {};
   /** レーンの下に出す種類 */
@@ -257,7 +260,7 @@ export class EditorView {
   onResize: () => void = () => {};
 
   private pointers = new Map<number, { x: number; y: number }>();
-  private drag: { startX: number; startY: number; lastX: number; lastY: number; moved: boolean; scrub?: boolean; v?: boolean; tl?: boolean } | null = null;
+  private drag: { startX: number; startY: number; lastX: number; lastY: number; moved: boolean; scrub?: boolean; v?: boolean; tl?: boolean; long?: boolean } | null = null;
   private pinch: { d0: number; z0: number } | null = null;
   private hoverX: number | null = null;
   private hoverY = 0;
@@ -683,6 +686,16 @@ export class EditorView {
       } else if (this.pointers.size === 1) {
         cancelAnimationFrame(this.vAnim);
         this.drag = { startX: pt.x, startY: pt.y, lastX: pt.x, lastY: pt.y, moved: false };
+        // 長押し（0.3 秒）
+        clearTimeout(this.pressTimer);
+        const d0 = this.drag;
+        const cx = e.clientX;
+        const cy = e.clientY;
+        this.pressTimer = window.setTimeout(() => {
+          if (this.drag !== d0 || d0.moved || this.pointers.size !== 1) return;
+          const at = this.laneTickAt(pt.x, pt.y);
+          if (at && this.onLongPress(at.tick, at.tol, cx, cy)) d0.long = true;
+        }, 300);
         // 密度推移の列を押したら、上下に動かしてその位置へ移動する
         const L = this.L;
         if (pt.x >= L.colLine1 && pt.x <= L.colW && !this.inBox(L.play, pt.x, pt.y)) {
@@ -746,8 +759,13 @@ export class EditorView {
     const end = (e: PointerEvent) => {
       if (!this.pointers.has(e.pointerId)) return;
       this.pointers.delete(e.pointerId);
+      clearTimeout(this.pressTimer);
       if (this.pinch) {
         if (this.pointers.size === 0) this.pinch = null;
+        return;
+      }
+      if (this.drag?.long) {
+        this.drag = null;
         return;
       }
       if (e.type === 'pointerup' && this.drag && !this.drag.moved) {
@@ -838,6 +856,18 @@ export class EditorView {
     }
     const t = this.tickOf(x, row);
     if (t !== null && t > -this.ed.step / 2) this.onTap(t, (this.rowGeom(row).r / this.zoom) * TPB);
+  }
+
+  /** レーンの上の位置なら、その tick と当たりの幅（長押し用。曲の頭より前・ほかのレーンは null） */
+  private laneTickAt(x: number, y: number): { tick: number; tol: number } | null {
+    const L = this.L;
+    if (x <= L.colW || x < L.play.x || this.inBox(L.play, x, y)) return null;
+    if (y >= L.waveY && y <= L.waveY + L.waveH) return null;
+    if (this.stack && y >= L.tlTop && y <= L.tlBottom) return null;
+    const row = this.rowAtY(y);
+    if (row < 0 || row > L.sub) return null;
+    const t = this.tickOf(x, row);
+    return t !== null && t > -this.ed.step / 2 ? { tick: t, tol: (this.rowGeom(row).r / this.zoom) * TPB } : null;
   }
 
   // ---------- 描画 ----------

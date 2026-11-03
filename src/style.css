@@ -3107,3 +3107,10 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .home-diff .hdf-left .hdf-best { font-size: 20px; }
 .home .home-diff .hdf-left .hdf-acts button { height: 50px; padding: 4px 2px; gap: 2px; }
 .home .home-diff .hdf-left .hdf-acts svg { width: 20px; height: 20px; }
+/* 風船の打数（長押しで出る吹き出し） */
+.hits-pop { position: absolute; z-index: 40; display: flex; align-items: center; gap: 6px; padding: 6px; background: #1d2023; box-shadow: 0 0 0 2px var(--accent), 0 8px 24px rgba(0, 0, 0, 0.55); }
+.hits-pop::after { content: ''; position: absolute; left: var(--ax, 50%); bottom: -9px; margin-left: -8px; border: 8px solid transparent; border-bottom: 0; border-top-color: var(--accent); }
+.hits-pop.below::after { bottom: auto; top: -9px; border-top: 0; border-bottom: 8px solid var(--accent); }
+.hits-pop button { height: 40px; min-width: 44px; padding: 0 8px; border: 0; border-radius: 0; background: var(--btn); color: #fff; font: 800 20px var(--fd); }
+.hits-pop .hp-v { min-width: 64px; background: transparent; font-size: 26px; font-variant-numeric: tabular-nums; }
+.hits-pop .hp-in { width: 64px; height: 40px; padding: 0 4px; border: 0; border-radius: 0; background: var(--inp); color: #fff; font: 800 24px var(--fd); text-align: center; }

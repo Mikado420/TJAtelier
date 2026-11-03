@@ -789,17 +789,86 @@ view.onPlayToggle = () => (playing ? stopPlayback() : void startPlayback());
 
 // ---------- 編集 ----------
 
-view.onUserScroll = () => stopPlayback();
+view.onUserScroll = () => { stopPlayback(); closeHitsPop(); };
+
+// ---------- 風船の打数（風船を長押し: 上に − 打数 ＋。打数を押すと数字を入力） ----------
+let hitsPop: HTMLElement | null = null;
+function closeHitsPop() {
+  hitsPop?.remove();
+  hitsPop = null;
+}
+function openHitsPop(n: ENote, cx: number, cy: number) {
+  closeHitsPop();
+  const stage = document.querySelector<HTMLElement>('.stage')!;
+  const el = document.createElement('div');
+  el.className = 'hits-pop';
+  el.innerHTML = '<button data-h="-1" aria-label="打数を減らす">−</button><button data-h="v" class="hp-v" aria-label="打数"></button><button data-h="1" aria-label="打数を増やす">＋</button>';
+  stage.appendChild(el);
+  hitsPop = el;
+  const vBtn = el.querySelector<HTMLButtonElement>('.hp-v')!;
+  const show = () => { vBtn.textContent = String(n.hits ?? 5); };
+  show();
+  // 押した所の上（上が足りなければ下）。端からはみ出さないように
+  const p = localPoint({ clientX: cx, clientY: cy }, stage);
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const below = p.y - h - 22 < 4;
+  el.classList.toggle('below', below);
+  const left = Math.max(4, Math.min(stage.clientWidth - w - 4, p.x - w / 2));
+  el.style.left = `${left}px`;
+  el.style.top = `${below ? p.y + 22 : p.y - h - 22}px`;
+  el.style.setProperty('--ax', `${Math.max(10, Math.min(w - 10, p.x - left))}px`);
+  const set = (v: number) => {
+    if (!(v >= 1)) return;
+    ed.setBalloonHits(n, Math.min(9999, Math.round(v)));
+    show();
+  };
+  el.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-h]');
+    if (!b) return;
+    if (b.dataset.h !== 'v') { set((n.hits ?? 5) + Number(b.dataset.h)); return; }
+    // 打数を押したら、その場で数字を入力
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.inputMode = 'numeric';
+    inp.className = 'hp-in';
+    inp.value = String(n.hits ?? 5);
+    vBtn.replaceWith(inp);
+    inp.focus();
+    inp.select();
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const v = Number(inp.value.trim());
+      if (Number.isFinite(v) && v >= 1) set(v);
+      if (inp.isConnected) inp.replaceWith(vBtn);
+      show();
+    };
+    inp.addEventListener('keydown', (k) => {
+      if (k.key === 'Enter') { k.preventDefault(); commit(); }
+      if (k.key === 'Escape') { k.preventDefault(); done = true; inp.replaceWith(vBtn); }
+    });
+    inp.addEventListener('blur', commit);
+  });
+}
+// 吹き出しの外を押したら閉じる
+document.addEventListener('pointerdown', (e) => {
+  if (hitsPop && !hitsPop.contains(e.target as Node)) closeHitsPop();
+}, true);
+view.onLongPress = (tick, tol, cx, cy) => {
+  if (collab.active && !collab.canTap(tick)) return false;
+  const n = ed.balloonAt(tick, tol);
+  if (!n) return false;
+  openHitsPop(n, cx, cy);
+  return true;
+};
 view.onTap = (tick, tol) => {
   // 合作: 編集できない所（担当範囲の外など）は、タップしても何もしない
   if (collab.active && !collab.canTap(tick)) return;
   const r = ed.tap(tick, tol);
   if (r.message) toast(r.message);
   updateSelBar();
-  if (r.editBalloon) {
-    const v = prompt('風船の打数', String(r.editBalloon.hits ?? 5));
-    if (v !== null) ed.setBalloonHits(r.editBalloon, Number(v));
-  }
   if (r.newGrad || r.editGrad || r.point || r.gradPick) $('toast').classList.remove('show');
   if (r.gradPick) {
     gradPick = r.gradPick;

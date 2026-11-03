@@ -15,8 +15,6 @@ export const DIVISORS = [8, 12, 16, 24, 32, 48, 64];
 
 export interface TapResult {
   message?: string;
-  /** UI 側で打数を聞く風船 */
-  editBalloon?: ENote;
   /** UI 側で設定を聞くグラデ（新しく作る範囲） */
   newGrad?: { start: number; end: number };
   /** UI 側で設定を変えるグラデ */
@@ -370,11 +368,10 @@ export class Editor {
     if (tool === 'bpm') return { point: { kind: 'bpm', tick } };
     if (tool === 'measure') return { point: { kind: 'measure', tick: this.measureOf(tick).start } };
 
-    // 置いてあるノーツ（連打・風船はその範囲のどこでも）をタップしたら、選んでいる音符に関係なく消す。
-    // ただし風船を選んでいて風船の始点をタップしたときは、打数を変える
+    // 置いてあるノーツ（連打・風船はその範囲のどこでも）をタップしたら、選んでいる音符に関係なく消す
+    // （風船の打数は長押しで変える）
     const target = exact ?? covering;
     if (this.pendingLong === null && target) {
-      if (tool === 'balloon' && target === exact && exact.type === 'balloon') return { editBalloon: exact };
       this.mutate(() => this.remove(target));
       return {};
     }
@@ -407,7 +404,7 @@ export class Editor {
         return nEnd < start || n.tick > end;
       });
       const note: ENote = { tick: start, type: tool, endTick: end };
-      if (tool === 'balloon') note.hits = Math.max(3, Math.round(((end - start) / TPB) * 2));
+      if (tool === 'balloon') note.hits = this.balloonHits(start, end);
       this.course.notes.push(note);
     });
     return {};
@@ -699,6 +696,19 @@ export class Editor {
         for (const m of plan.measures ?? []) c.events.push({ tick: m.tick, kind: 'measure', num: m.num, den: m.den });
       }
     });
+  }
+
+  /** 風船の打数の目安: 1 秒に 15 打（切り上げ） */
+  balloonHits(start: number, end: number) {
+    const sec = this.timing.tickToTime(end) - this.timing.tickToTime(start);
+    return Math.max(1, Math.ceil(sec * 15 - 1e-9));
+  }
+
+  /** その位置の風船（始点の近く、または連打の範囲の中） */
+  balloonAt(rawTick: number, tol = 0): ENote | undefined {
+    const tick = this.snap(rawTick);
+    const n = this.offGridNear(rawTick, tol) ?? this.noteAt(tick) ?? this.longCovering(tick);
+    return n?.type === 'balloon' ? n : undefined;
   }
 
   setBalloonHits(n: ENote, hits: number) {
