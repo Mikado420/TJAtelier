@@ -3099,3 +3099,11 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .home-diff .hdf-left .hdf-info { position: static; top: auto; left: auto; width: auto; flex: none; }
 .home .home-diff .hdf-left .hdf-acts { position: static; width: auto; margin-top: auto; flex: none; }
 @media (max-width: 640px) { .home-diff .hdf-left { display: none; } }
+/* 左の欄を詰める（ジャケットを小さくしなくても収まるように）。下の端は難易度えらびの枠（外側の 3px の縁）にそろえる */
+.home-diff .hdf-left { bottom: calc(61px + var(--safe-b)); gap: 8px; }
+.home-diff .hdf-left .hdf-info { gap: 1px; padding: 6px 9px 7px; }
+.home-diff .hdf-left .hdf-st { gap: 1px; padding-bottom: 4px; margin-bottom: 3px; }
+.home-diff .hdf-left .hdf-st b { font-size: 16px; }
+.home-diff .hdf-left .hdf-best { font-size: 20px; }
+.home .home-diff .hdf-left .hdf-acts button { height: 50px; padding: 4px 2px; gap: 2px; }
+.home .home-diff .hdf-left .hdf-acts svg { width: 20px; height: 20px; }
