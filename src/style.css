@@ -2718,7 +2718,7 @@ body.playing .br-ctl { display: none; }
 .cd-more button.danger { color: #ff8a80; text-decoration: none; }
 
 /* ---------- 動画用の画面（2000×1125 の枠で作って縮める） ---------- */
-.play .bc { position: absolute; left: 0; top: 0; width: 2000px; height: 1125px; transform-origin: 0 0; pointer-events: none; color: #fff; font-family: var(--fd); --pn: rgba(16, 18, 21, 0.9); --sl: 16px; }
+.play .bc { position: absolute; left: 0; top: 0; width: 2000px; height: 1125px; overflow: hidden; transform-origin: 0 0; pointer-events: none; color: #fff; font-family: var(--fd); --pn: rgba(16, 18, 21, 0.9); --sl: 16px; }
 .play .bc.hidden { display: none; }
 .bc-in > * { position: absolute; }
 .bc-pnl { background: var(--pn); clip-path: none; }
