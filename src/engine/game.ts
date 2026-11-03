@@ -267,23 +267,20 @@ export class Game {
     return r;
   }
 
-  /** 判定前の同じ色の普通ノーツのうち、now にいちばん近いものと、そのずれの大きさ */
+  /**
+   * 判定前の同じ色の普通ノーツのうち、判定幅（±114ms）に入っていて、いちばん先に来たもの（叩き逃して判定枠を過ぎた音符が先）と、
+   * そのずれの大きさ
+   */
   private nearestSame(kind: HitKind, now: number): { st: NoteState; ad: number } | null {
-    let best: { st: NoteState; ad: number } | null = null;
     for (let i = this.cursor; i < this.hitIdx.length; i++) {
       const st = this.states[this.hitIdx[i]];
       const d = now - st.note.time;
       if (d < -WINDOW.bad - EPS) break;
       if (st.done || (kind === 'don') !== isDon(st.note.type)) continue;
       const ad = Math.abs(d);
-      if (ad <= WINDOW.bad + EPS && (!best || ad < best.ad - 1e-9)) best = { st, ad };
+      if (ad <= WINDOW.bad + EPS) return { st, ad };
     }
-    return best;
-  }
-
-  /** 判定前の別の色の普通ノーツのうち、now にいちばん近いもの */
-  private nearestOther(kind: HitKind, now: number): { st: NoteState; ad: number } | null {
-    return this.nearestSame(kind === 'don' ? 'ka' : 'don', now);
+    return null;
   }
 
   private hitInner(kind: HitKind, now: number): HitResult {
@@ -324,16 +321,10 @@ export class Game {
       return { type: 'roll' };
     }
 
-    // 3) 判定幅の中で、叩いた色と同じ色のノーツのうち、叩いた時刻にいちばん近いものを判定する
+    // 3) 判定幅の中の、叩いた色と同じ色のノーツのうち、いちばん先に来たものを判定する
+    //    （判定枠に別の色の音符が来ていても、叩き逃して判定枠を過ぎた同じ色の音符が判定幅に入っていれば、そちらに当てる）
     //    - 色違いのノーツは対象にしない（色違いで叩いても不可にはせず、ノーツは残る。TNDE/TJAPlayer3 と同じ）
-    //    - いちばん古いノーツにすると、1つ見逃しただけで後のノーツが全部「遅い」扱いになってしまう
-    // 叩いた時刻の近く（50ms 以内）に判定前の別の色の音符があり、同じ色の音符よりそちらのほうが近いときは、
-    // 面と縁の境目を叩いて色を取り違えた打撃とみなし、離れた同じ色の音符を横取りして判定しない
-    // （横取りすると、その音符を本当に叩いたときに「近くに音符なし」になり、狙った音符も見逃しになる）
-    const other = this.nearestOther(kind, now);
-    if (other && other.ad <= 0.05 + EPS && (!near || other.ad < near.ad)) {
-      return { type: 'none', nearest: near ? now - near.st.note.time : null, wrongColor: true };
-    }
+    //    - 判定幅に同じ色の音符が無いときは、音が鳴るだけ（近くの別の色の音符は「色の取り違え」として記録する）
 
     const best = near?.st;
     if (!best) {
