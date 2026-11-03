@@ -271,10 +271,6 @@ try {
   const ff = new FontFace('Makinas 4 Flat', 'url(fonts/Makinas-4-Flat.woff)', { display: 'swap' });
   document.fonts.add(ff);
   void ff.load().catch(() => {});
-  // 英字と数字だけは acsfontsquare-sharped01 にする（同じ名前で、文字の範囲を分けて重ねる）
-  const fa = new FontFace('Makinas 4 Flat', 'url(fonts/acsfontsquare-sharped01.otf)', { display: 'swap', unicodeRange: 'U+0030-0039, U+0041-005A, U+0061-007A' });
-  document.fonts.add(fa);
-  void fa.load().catch(() => {});
 } catch { /* FontFace が使えない */ }
 
 let playable: Note[] = [];
