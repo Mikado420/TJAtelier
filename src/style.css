@@ -578,14 +578,6 @@ html, body { overscroll-behavior: none; }
     transform: translateZ(0);
   }
 }
-/* TJA の画面は縦画面に固定する。端末の向きを固定できなかったときは #root を反時計回りに 90° 回す */
-body.tja-open.tja-rot #root {
-  width: var(--vh, 100vh);
-  height: var(--vw, 100vw);
-  transform-origin: top left;
-  transform: translateY(var(--vh, 100vh)) rotate(-90deg);
-}
-body.tja-open.tja-rot.tja-rot2 #root { transform: translateX(var(--vw, 100vw)) rotate(90deg); }
 .sheet.tja #sheetClose { min-width: 48px; height: 48px; font-size: 22px; }
 
 /* TJA の見出しの隣の太字ボタン（TJA の画面のときだけ出す） */

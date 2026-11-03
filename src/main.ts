@@ -1498,19 +1498,10 @@ new MutationObserver((recs) => { for (const r of recs) r.removedNodes.forEach(re
   .observe($('sheetBody'), { childList: true, subtree: true });
 
 /**
- * TJA の画面は縦画面に固定する。
- * アプリの中ではアプリに向きの固定を頼み、ブラウザでは画面の向きの固定を試す。
- * 少し待っても横長のままなら（固定できなかったら）#root を回して縦画面として出す（タッチの端末だけ）
+ * TJA の画面は縦画面にしたい: アプリの中ではアプリに向きの固定を頼み、ブラウザでは画面の向きの固定を試す。
+ * 固定できなかったら、そのまま今の向き（横画面）で出す（画面を回して出すと、キーボードの向きと合わなくなる）
  */
-let tjaRotTimer = 0;
-let tjaOpenAt = 0;
 const touchDevice = () => matchMedia('(pointer: coarse)').matches;
-function checkTjaRot() {
-  const on = document.body.classList.contains('tja-open') && touchDevice() && window.innerWidth > window.innerHeight;
-  document.body.classList.toggle('tja-rot', on);
-  // 端末を逆向きの横にしているときは逆に回す
-  document.body.classList.toggle('tja-rot2', on && screen.orientation?.type === 'landscape-secondary');
-}
 function setTjaPortrait(on: boolean) {
   const rn = (window as unknown as { ReactNativeWebView?: { postMessage(s: string): void } }).ReactNativeWebView;
   rn?.postMessage(JSON.stringify({ type: 'orient', portrait: on }));
@@ -1519,12 +1510,7 @@ function setTjaPortrait(on: boolean) {
     if (on) so?.lock?.('portrait').catch(() => {});
     else try { so?.unlock?.(); } catch { /* 固定できない */ }
   }
-  clearTimeout(tjaRotTimer);
-  tjaOpenAt = Date.now();
-  if (on) tjaRotTimer = window.setTimeout(checkTjaRot, 900);
-  else document.body.classList.remove('tja-rot', 'tja-rot2');
 }
-window.addEventListener('resize', () => { if (document.body.classList.contains('tja-open') && Date.now() - tjaOpenAt > 900) checkTjaRot(); });
 
 function closeSheet() {
   settingsShownTab = null;
@@ -1708,7 +1694,7 @@ window.visualViewport?.addEventListener('resize', scheduleTjaHl);
 function fitTjaKeyboard() {
   const ta = document.getElementById('tjaText') as HTMLTextAreaElement | null;
   const sh = $('sheet');
-  if (!ta || document.activeElement !== ta || document.body.classList.contains('tja-rot')) {
+  if (!ta || document.activeElement !== ta) {
     sh.style.removeProperty('--tja-kb');
     return;
   }
