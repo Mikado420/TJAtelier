@@ -4,6 +4,7 @@ import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
 import { BUILD_ID } from '../update';
+import { isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
 import { Broadcast, type PlayInfo } from './broadcast';
@@ -17,6 +18,13 @@ export function isNativeHost() {
 function postNative(msg: object) {
   const rn = (window as unknown as { ReactNativeWebView?: { postMessage(s: string): void } }).ReactNativeWebView;
   rn?.postMessage(JSON.stringify(msg));
+}
+
+function base64(buf: ArrayBuffer): string {
+  const u = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 export interface PlaySettings {
@@ -74,6 +82,13 @@ export interface OnlineHooks {
  */
 export class PlayMode {
   private readonly renderer: Renderer;
+  private readonly canvasEl: HTMLCanvasElement;
+  /** アプリ（Expo Go）へ最後に送った、打音を鳴らす場所・鳴らすかどうか */
+  private nativeGeo = '';
+  /** アプリへ最後に送った打音の版 */
+  private nativeHitVer = -1;
+  private nativeOn = false;
+  private nativeGeoAt = 0;
   private readonly bc: Broadcast;
   private readonly input: { refresh: () => void; dispose: () => void };
   private game: Game | null = null;
@@ -99,6 +114,7 @@ export class PlayMode {
     private readonly settings: PlaySettings,
   ) {
     this.renderer = new Renderer(canvas);
+    this.canvasEl = canvas;
     this.bc = new Broadcast(root);
     // 画面の大きさ・向きが変わったら動画を置き直す（レーンの位置が決まってから）
     new ResizeObserver(() => requestAnimationFrame(() => { this.placeVideo(); this.bc.place(this.renderer.frame); })).observe(root);
@@ -111,11 +127,11 @@ export class PlayMode {
         const pause = this.settings.pauseButton === false || this.renderer.broadcast ? { bottom: L.laneY, half: L.w * 0.2, go: () => this.pause() } : undefined;
         return { x: L.drumX, half: L.drumHalf, y: L.drumY, ry: L.drumRY, restBottom: L.restBottom, pause };
       },
-      (kind, side, at, pt) => {
+      (kind, side, at, pt, silent) => {
         // オートのときは叩いた入力を受け付けない
         if (!this.active || this.paused || !this.game || this.auto || this.spectating) return;
-        // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）
-        if (this.hitOn) this.audio.playHit(kind);
+        // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）。アプリが鳴らしたときは鳴らさない
+        if (this.hitOn && !silent) this.audio.playHit(kind);
         this.renderer.pushHit(kind, side);
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
@@ -197,6 +213,8 @@ export class PlayMode {
     };
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
+    // 打音を前もって用意（最初の一打が遅れないように）
+    this.audio.prewarmHits();
     this.renderer.spectate = !!hooks.spectate;
     this.renderer.setOpponents(hooks.opponents);
     this.renderer.donWidth = this.settings.donWidth ?? 0.6;
@@ -271,6 +289,9 @@ export class PlayMode {
     this.hidePause();
     this.active = false;
     postNative({ type: 'play', active: false });
+    this.nativeGeo = '';
+    this.nativeOn = false;
+    postNative({ type: 'hitgeo', on: false });
     cancelAnimationFrame(this.raf);
     this.audio.stop();
     this.renderer.spectate = false;
@@ -287,6 +308,50 @@ export class PlayMode {
     this.root.classList.remove('online');
     document.body.classList.remove('playing');
     this.result.classList.add('hidden');
+  }
+
+  /**
+   * アプリ（Expo Go）が指に触れた瞬間に自分で打音を鳴らせるように、太鼓の位置（画面に対する割合）と、
+   * 今鳴らしてよいか、打音の音そのものを送る（変わったときだけ）。アプリが鳴らした打音は、こちらでは鳴らさない
+   */
+  private syncNativeHit() {
+    if (!isNativeHost()) return;
+    const on = this.active && !this.paused && !this.auto && !this.spectating && this.hitOn && !isRotated();
+    // 位置を測るのは 0.3 秒ごと（鳴らすかどうかが変わったときはすぐ）
+    const t = performance.now();
+    if (on === this.nativeOn && t - this.nativeGeoAt < 300) return;
+    this.nativeOn = on;
+    this.nativeGeoAt = t;
+    if (on && this.nativeHitVer !== this.audio.hitVersion) {
+      this.nativeHitVer = this.audio.hitVersion;
+      postNative({ type: 'hitsound', don: base64(this.audio.hitWav('don')), ka: base64(this.audio.hitWav('ka')) });
+    }
+    const W = window.innerWidth || 1;
+    const H = window.innerHeight || 1;
+    const L = this.renderer.layout;
+    const r = this.canvasEl.getBoundingClientRect();
+    const q = (v: number) => Math.round(v * 10000) / 10000;
+    const pauseZone = this.settings.pauseButton === false || this.renderer.broadcast;
+    const btn = Array.from(this.root.querySelectorAll<HTMLElement>(':scope > button'))
+      .map((b) => b.getBoundingClientRect())
+      .filter((b) => b.width > 0)
+      .map((b) => [q(b.left / W), q(b.top / H), q(b.right / W), q(b.bottom / H)]);
+    const geo = on
+      ? {
+          on: true,
+          x: q((r.left + L.drumX) / W),
+          half: q(L.drumHalf / W),
+          y: q((r.top + L.drumY) / H),
+          ry: q(L.drumRY / H),
+          rest: L.restBottom ? q((r.top + L.restBottom) / H) : 0,
+          pause: pauseZone ? { bottom: q((r.top + L.laneY) / H), half: q((L.w * 0.2) / W) } : null,
+          btn,
+        }
+      : { on: false };
+    const key = JSON.stringify(geo);
+    if (key === this.nativeGeo) return;
+    this.nativeGeo = key;
+    postNative({ type: 'hitgeo', ...geo });
   }
 
   /** プレイで打音を鳴らすか */
@@ -350,6 +415,8 @@ export class PlayMode {
     game.onJudge = (e) => this.renderer.pushJudge(e);
     game.onRoll = (st) => this.renderer.pushRoll(st);
     this.renderer.reset();
+    // 打音を前もって用意（最初の一打が遅れないように）
+    this.audio.prewarmHits();
     this.renderer.donWidth = this.settings.donWidth ?? 0.6;
     // 合作の見比べ: ほかのレーンを下に並べる（タイミング調整のときは出さない）
     const cmp = !this.calibrating && this.compare.length > 0;
@@ -450,6 +517,7 @@ export class PlayMode {
     };
     const step = () => {
       if (!this.active || this.paused) return;
+      this.syncNativeHit();
       const t0 = performance.now();
       const P = this.perf;
       if (P.last) {
@@ -786,6 +854,9 @@ export class PlayMode {
       this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
       // メニューの間は、アプリ（Expo Go）が指を横取りしないようにする（スライダーなどを触れるように）
       postNative({ type: 'play', active: false });
+      this.nativeGeo = '';
+      this.nativeOn = false;
+      postNative({ type: 'hitgeo', on: false });
       return;
     }
     this.paused = true;
@@ -796,6 +867,9 @@ export class PlayMode {
     this.audio.stop();
     // メニューの間は、アプリ（Expo Go）が指を横取りしないようにする（スライダー・数字の欄・スイッチを触れるように）
     postNative({ type: 'play', active: false });
+    this.nativeGeo = '';
+    this.nativeOn = false;
+    postNative({ type: 'hitgeo', on: false });
     this.onPauseOpen();
     this.paintPauseMode();
     this.root.querySelector('#pauseMenu')?.classList.remove('hidden');
@@ -942,6 +1016,9 @@ export class PlayMode {
     this.hidePause();
     this.active = false;
     postNative({ type: 'play', active: false });
+    this.nativeGeo = '';
+    this.nativeOn = false;
+    postNative({ type: 'hitgeo', on: false });
     cancelAnimationFrame(this.raf);
     this.audio.stop();
     const g = this.game;
@@ -1227,6 +1304,9 @@ export class PlayMode {
     this.hidePause();
     this.active = false;
     postNative({ type: 'play', active: false });
+    this.nativeGeo = '';
+    this.nativeOn = false;
+    postNative({ type: 'hitgeo', on: false });
     cancelAnimationFrame(this.raf);
     this.audio.stop();
   }

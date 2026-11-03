@@ -2,7 +2,8 @@ import type { HitKind } from './engine/game';
 import { localPoint } from './orient';
 
 /** at = 叩いた瞬間（performance.now() 基準の ms）、pt = タッチした場所（キーボードのときはなし） */
-export type HitHandler = (kind: HitKind, side: 'L' | 'R', at: number, pt?: { x: number; y: number; ring: number }) => void;
+/** silent = 打音はもうアプリが鳴らした（こちらでは鳴らさない） */
+export type HitHandler = (kind: HitKind, side: 'L' | 'R', at: number, pt?: { x: number; y: number; ring: number }, silent?: boolean) => void;
 
 /** イベントの timeStamp を performance.now() 基準の時刻として使う（古いブラウザの別基準の値は捨てる） */
 function eventTime(ts: number): number {
@@ -83,7 +84,7 @@ export function bindInput(
     onHit(k.kind, k.side, eventTime(e.timeStamp));
   };
 
-  const hitAt = (clientX: number, clientY: number, at: number) => {
+  const hitAt = (clientX: number, clientY: number, at: number, silent = false) => {
     const { x: px, y: py } = localPoint({ clientX, clientY }, canvas);
     const d = getDrum();
     // ポーズボタンを出さないとき: 上の真ん中に触れたらポーズ
@@ -100,7 +101,7 @@ export function bindInput(
     // ring = 面の中心からの楕円の距離（1 が面と縁の境目）
     const side = px < d.x ? 'L' : 'R';
     const ring = Math.hypot((px - d.x) / Math.max(1, d.half), (py - d.y) / Math.max(1, d.ry));
-    onHit(ring <= 1 ? 'don' : 'ka', side, at, { x: px, y: py, ring });
+    onHit(ring <= 1 ? 'don' : 'ka', side, at, { x: px, y: py, ring }, silent);
   };
 
   /** いま画面に触れている（叩いたとして処理済みの）指 */
@@ -251,17 +252,19 @@ export function bindInput(
   // x, y は画面に対する割合、ts はアプリ側の時刻（ms）。アプリ側の時刻とこちらの時刻の差の最小値を
   // 「届くまでの遅れがいちばん少なかったとき」とみなして、叩いた瞬間の時刻に直す
   let nativeOffset = Infinity;
-  (window as unknown as { __nativeHit?: unknown }).__nativeHit = (nx: number, ny: number, ts?: number, tag?: string, seq?: number) => {
+  // ボタン（ポーズなど）の位置は、画面の大きさが変わったときだけ測り直す（叩くたびに測ると、配置の計算で打音が遅れる）
+  let btnRects: DOMRect[] | null = null;
+  window.addEventListener('resize', () => { btnRects = null; });
+  new ResizeObserver(() => { btnRects = null; }).observe(root);
+  const buttonRects = () => (btnRects ??= Array.from(root.querySelectorAll<HTMLElement>(':scope > button')).map((b) => b.getBoundingClientRect()).filter((r) => r.width > 0));
+  (window as unknown as { __nativeHit?: unknown }).__nativeHit = (nx: number, ny: number, ts?: number, tag?: string, seq?: number, played?: number) => {
     const now = performance.now();
     const cx = nx * window.innerWidth;
     const cy = ny * window.innerHeight;
     // ボタン（ポーズなど）の上なら押す。ボタンの探索（elementFromPoint）は画面の配置の計算を伴って遅くなることがあるので、
     // ポーズのメニューなどが出ているときと、ボタンの上のときだけにする（ふだんは打音をすぐ鳴らす）
     const overlay = root.querySelector('.pause-menu:not(.hidden)');
-    const onButton = Array.from(root.querySelectorAll<HTMLElement>(':scope > button')).some((b) => {
-      const r = b.getBoundingClientRect();
-      return r.width > 0 && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
-    });
+    const onButton = buttonRects().some((r) => cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom);
     if (overlay || onButton) {
       const el = document.elementFromPoint(cx, cy);
       const btn = el instanceof Element ? el.closest('button') : null;
@@ -280,7 +283,7 @@ export function bindInput(
     }
     touchStats.native++;
     // 先に叩いた処理（打音）をして、記録は後で
-    hitAt(cx, cy, at);
+    hitAt(cx, cy, at, !!played);
     onRaw(`n-${tag ?? 'start'} #${seq ?? '?'} @${nx.toFixed(2)},${ny.toFixed(2)} lag=${Math.round(now - at)}`, at);
   };
   root.addEventListener('contextmenu', block);

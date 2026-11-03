@@ -22,6 +22,20 @@ import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 
 const { GestureDetector, GestureHandlerRootView } = GH;
+
+/**
+ * 打音はアプリで鳴らす（指に触れた瞬間に。Web 版へ指を渡す時間を待たない）。
+ * 音は Web 版が鳴らすのと同じもの（頭の無音を削り、大きさを揃え、打音の音量を掛けた WAV）を Web 版から受け取る。
+ * expo-audio が使えないときは、これまでどおり Web 版が鳴らす
+ */
+let EA = null;
+try {
+  EA = require('expo-audio');
+} catch {
+  EA = null;
+}
+/** 同じ音を重ねて鳴らせるように、1 つの音につき何個の再生器を順に使うか */
+const HIT_VOICES = 6;
 /** gesture-handler 3 系の書き方（useManualGesture）が使えるか。なければ 2 系の Gesture.Manual() */
 const HAS_V3 = typeof GH.useManualGesture === 'function';
 const HAS_V2 = !!(GH.Gesture && typeof GH.Gesture.Manual === 'function');
@@ -89,7 +103,7 @@ async function saveAndShare(name, mime, b64) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 6;
+const APP_VERSION = 7;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -101,12 +115,80 @@ export default function App() {
   const { width, height } = useWindowDimensions();
 
   useEffect(() => {
+    // 曲（Web 版の音）と打音（アプリの音）を一緒に鳴らす。消音スイッチがオンでも鳴らす
+    try {
+      EA?.setAudioModeAsync?.({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' })?.catch?.(() => {});
+    } catch {
+      // 設定できない
+    }
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
     // Expo Go の右下に浮かぶ歯車（開発用のツールボタン）を隠す。使えない環境では何もしない
     try {
       require('expo-dev-menu').setToolsButtonVisible(false);
     } catch {
       // expo-dev-menu が無い
+    }
+  }, []);
+
+  /** 打音を鳴らす場所（Web 版の太鼓の位置。画面に対する割合）と、今鳴らしてよいか */
+  const hitGeo = useRef({ on: false });
+  /** 打音の再生器（音ごとに HIT_VOICES 個）と、次に使う番号 */
+  const hitPool = useRef({ don: [], ka: [] });
+  const hitIdx = useRef({ don: 0, ka: 0 });
+  const hitGen = useRef(0);
+
+  /** Web 版から届いた打音（base64 の WAV）を、ファイルにして再生器を作り直す */
+  const loadHits = useCallback((m) => {
+    if (!EA || typeof EA.createAudioPlayer !== 'function') return;
+    const gen = ++hitGen.current;
+    for (const kind of ['don', 'ka']) {
+      if (!m[kind]) continue;
+      try {
+        const f = new File(Paths.cache, `hit-${kind}-${gen}.wav`);
+        try { if (f.exists) f.delete(); } catch { /* 上書き */ }
+        f.create();
+        f.write(fromBase64(m[kind]));
+        const old = hitPool.current[kind];
+        const pool = [];
+        for (let i = 0; i < HIT_VOICES; i++) {
+          const p = EA.createAudioPlayer({ uri: f.uri });
+          // 鳴り終わったら頭に戻しておく（次に使うとき、すぐ鳴らせるように）
+          try { p.addListener?.('playbackStatusUpdate', (st) => { if (st && st.didJustFinish) p.seekTo(0).catch?.(() => {}); }); } catch { /* 知らせが無い */ }
+          pool.push(p);
+        }
+        hitPool.current[kind] = pool;
+        hitIdx.current[kind] = 0;
+        for (const p of old) { try { p.remove(); } catch { /* 外せない */ } }
+      } catch {
+        hitPool.current[kind] = [];
+      }
+    }
+  }, []);
+
+  /** その位置（画面に対する割合）を叩いたときの音（ドン・カッ）。鳴らさない所なら null */
+  const kindAt = useCallback((nx, ny) => {
+    const g = hitGeo.current;
+    if (!g || !g.on) return null;
+    for (const b of g.btn || []) if (nx >= b[0] && nx <= b[2] && ny >= b[1] && ny <= b[3]) return null;
+    if (g.pause && ny < g.pause.bottom && Math.abs(nx - g.x) < g.pause.half) return null;
+    if (g.rest && ny < g.rest) return null;
+    const ring = Math.hypot((nx - g.x) / Math.max(1e-4, g.half), (ny - g.y) / Math.max(1e-4, g.ry));
+    return ring <= 1 ? 'don' : 'ka';
+  }, []);
+
+  /** 打音を鳴らす（鳴らせたら true） */
+  const playHit = useCallback((kind) => {
+    const pool = hitPool.current[kind];
+    if (!pool || !pool.length) return false;
+    const i = hitIdx.current[kind];
+    hitIdx.current[kind] = (i + 1) % pool.length;
+    const p = pool[i];
+    try {
+      if (p.playing || p.currentTime > 0.001) p.seekTo(0);
+      p.play();
+      return true;
+    } catch {
+      return false;
     }
   }, []);
 
@@ -153,6 +235,14 @@ export default function App() {
         });
         return;
       }
+      if (m.type === 'hitsound') {
+        loadHits(m);
+        return;
+      }
+      if (m.type === 'hitgeo') {
+        hitGeo.current = m;
+        return;
+      }
       if (m.type === 'play') {
         setPlaying(!!m.active);
         if (m.active) seq.current = 0;
@@ -169,7 +259,7 @@ export default function App() {
       for (const p of points) {
         seq.current += 1;
         const ts = Number(p.ts);
-        js += `window.__nativeHit&&window.__nativeHit(${(p.x / width).toFixed(4)},${(p.y / height).toFixed(4)},${isFinite(ts) && ts > 0 ? ts : 'undefined'},"${tag}",${seq.current});`;
+        js += `window.__nativeHit&&window.__nativeHit(${(p.x / width).toFixed(4)},${(p.y / height).toFixed(4)},${isFinite(ts) && ts > 0 ? ts : 'undefined'},"${tag}",${seq.current},${p.played ? 1 : 0});`;
       }
       if (js) web.current?.injectJavaScript(js + 'true;');
     },
@@ -180,9 +270,14 @@ export default function App() {
   const onDown = useCallback(
     (touches) => {
       const now = Date.now();
-      send(touches.map((t) => ({ x: t.absoluteX, y: t.absoluteY, ts: now })), 'gh');
+      // 先に打音を鳴らしてから、Web 版へ渡す
+      const pts = touches.map((t) => {
+        const k = kindAt(t.absoluteX / width, t.absoluteY / height);
+        return { x: t.absoluteX, y: t.absoluteY, ts: now, played: k ? playHit(k) : false };
+      });
+      send(pts, 'gh');
     },
-    [send],
+    [send, kindAt, playHit, width, height],
   );
 
   return (

@@ -69,6 +69,7 @@ export class AudioEngine {
 
   /** 音量の比率（音源・打音・メトロノーム）を変える */
   setMix(m: { music: number; hit: number; metro: number; ui?: number }) {
+    if (m.hit !== this.mix.hit) this.hitVersion++;
     this.mix = { ...m, ui: m.ui ?? this.mix.ui };
     this.applyMix();
   }
@@ -447,6 +448,7 @@ export class AudioEngine {
   async setCustomHit(kind: HitSound, data: ArrayBuffer | null) {
     this.customHit[kind] = data ? trimLead(this.ctx, await this.ctx.decodeAudioData(data.slice(0))) : null;
     this.measureHit(kind);
+    this.hitVersion++;
   }
 
   hasCustomHit(kind: HitSound) {
@@ -531,6 +533,59 @@ export class AudioEngine {
       src.disconnect();
       g.disconnect();
     };
+  }
+
+  /**
+   * 打音を前もって用意しておく（プレイを始めるとき）。初めて叩いたときに音を作ったり大きさを測ったりして遅れないように、
+   * また止まっていた音の出口を起こしておくために、聞こえない大きさで一度ずつ鳴らす
+   */
+  prewarmHits() {
+    const ctx = this.ctx;
+    if (ctx.state !== 'running') void ctx.resume();
+    for (const kind of ['don', 'ka'] as const) {
+      if (!this.hitLevel[kind]) this.measureHit(kind);
+      const src = ctx.createBufferSource();
+      src.buffer = this.customHit[kind] ?? this.builtinHit(kind);
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      src.connect(g).connect(this.sfxGain);
+      src.start();
+      src.stop(ctx.currentTime + 0.05);
+      src.onended = () => { src.disconnect(); g.disconnect(); };
+    }
+  }
+
+  /** 打音の版（音や音量を変えたら変わる。アプリへ打音を送り直すかの判断に使う） */
+  hitVersion = 0;
+
+  /**
+   * アプリ（Expo Go）で鳴らす打音: こちらで鳴らすのと同じ音（頭の無音を削った音 × 大きさを揃える倍率 × 打音の音量）を
+   * 16bit の WAV にする
+   */
+  hitWav(kind: 'don' | 'ka'): ArrayBuffer {
+    if (!this.hitLevel[kind]) this.measureHit(kind);
+    const buf = this.customHit[kind] ?? this.builtinHit(kind);
+    const gain = this.hitNorm(kind) * this.mix.hit;
+    const ch = Math.min(2, buf.numberOfChannels);
+    const n = buf.length;
+    const rate = buf.sampleRate;
+    const out = new ArrayBuffer(44 + n * ch * 2);
+    const dv = new DataView(out);
+    const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) dv.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + n * ch * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true);
+    dv.setUint32(24, rate, true); dv.setUint32(28, rate * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true);
+    str(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+    const data = Array.from({ length: ch }, (_, k) => buf.getChannelData(k));
+    let o = 44;
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < ch; k++) {
+        const v = Math.max(-1, Math.min(1, data[k][i] * gain));
+        dv.setInt16(o, Math.round(v * 32767), true);
+        o += 2;
+      }
+    }
+    return out;
   }
 
   /** 叩いた音。同じ種類の音は同時に 4 つまで（古いものから素早く消す） */
