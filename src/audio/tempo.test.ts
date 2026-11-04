@@ -175,4 +175,17 @@ describe('BPM・OFFSET の自動測定', () => {
     expect(plan.bpm).toBe(230);
     expect(plan.changes.length).toBe(0);
   });
+
+  it('区間ごとのずらし（lead）は、前の区間の長さを半端な拍数だけ伸び縮みさせて譜面にする', () => {
+    const r = {
+      segments: [
+        { startBeat: 0, endBeat: 16, start: 0, end: 6.4, bpm: 150, rawBpm: 150, beats: 16, matched: 16, jitterMs: 0 },
+        { startBeat: 16, endBeat: 48, start: 6.4, end: 16, bpm: 200, rawBpm: 200, beats: 32, matched: 32, jitterMs: 0, lead: 0.2 },
+      ],
+      t0: 0, downbeat: 0, duration: 16,
+    };
+    const plan = tempoPlan(r, TPB)!;
+    // 0.2 秒 = 150 BPM で 0.5 拍 → 2 つ目の区間は 16.5 拍目から
+    expect(plan.changes).toEqual([{ tick: Math.round(16.5 * TPB), bpm: 200 }]);
+  });
 });

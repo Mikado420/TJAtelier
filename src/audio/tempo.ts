@@ -30,6 +30,11 @@ export interface TempoSegment {
   jitterMs: number;
   /** 区間の頭が小節の頭だと分かっている */
   barStart?: boolean;
+  /**
+   * この区間の拍の線を、区間どうしを「ちょうど何拍」でつないだ位置から何秒ずらすか（最初の区間からの差）。
+   * 譜面にするときは、前の区間の長さを半端な拍数だけ伸び縮みさせて表す（BPM の変わり目の 0.5 拍・3.75 拍の小節など）
+   */
+  lead?: number;
 }
 
 export interface TempoResult {
@@ -233,6 +238,53 @@ function onsetIn(env: Envelope, t: number, radius: number): { t: number; clear: 
   let start = best;
   while (start > s0 && e(start - 1, w1) > th) start--;
   return { t: start / sr, clear };
+}
+
+/**
+ * t の近く（±radius 秒）の、音が大きくなり始めた所をすべて（約 3ms の音の大きさが 2 倍以上に増えた所の山ごとに、
+ * 鳴り始めまで戻した時刻）。窓の位置によって拾う音が変わらないよう、いちばん強いものだけでなく全部を返す
+ */
+function onsetCands(env: Envelope, t: number, radius: number): { t: number; w: number }[] {
+  const { x, sr } = env;
+  const n = x.length;
+  const c = Math.round(t * sr);
+  const r = Math.round(radius * sr);
+  const W = Math.max(8, Math.round(sr * 0.003));
+  const lo = Math.max(W * 2, c - r - W * 4);
+  const hi = Math.min(n - W * 2, c + r + W * 2);
+  if (hi <= lo) return [];
+  const cum = new Float64Array(hi - lo + W * 4 + 1);
+  const base = lo - W * 2;
+  for (let i = 0; i < cum.length - 1; i++) {
+    const v = x[base + i] ?? 0;
+    cum[i + 1] = cum[i] + v * v;
+  }
+  const e = (i: number, w: number) => (cum[i - base + w] - cum[i - base]) / w + 1e-10;
+  const a = Math.max(lo, c - r);
+  const b = Math.min(hi, c + r);
+  const step = Math.max(1, Math.round(sr * 0.0005));
+  const d: number[] = [];
+  for (let i = a; i <= b; i += step) d.push(Math.log(e(i, W)) - Math.log(e(i - W, W)));
+  const out: { t: number; w: number }[] = [];
+  const w1 = Math.max(4, Math.round(sr * 0.001));
+  for (let k = 1; k + 1 < d.length; k++) {
+    if (d[k] < Math.LN2 || d[k] < d[k - 1] || d[k] < d[k + 1]) continue;
+    // 近くにもっと強い山があれば、そちらの一部
+    let top = true;
+    for (let q = Math.max(0, k - Math.round(W / step)); q <= Math.min(d.length - 1, k + Math.round(W / step)); q++) if (d[q] > d[k]) top = false;
+    if (!top) continue;
+    const best = a + k * step;
+    const s0 = Math.max(lo, best - W);
+    let floor = Infinity;
+    for (let i = s0; i <= best; i++) floor = Math.min(floor, e(i, w1));
+    let peak = 0;
+    for (let i = best; i <= Math.min(hi - w1, best + Math.round(sr * 0.012)); i++) peak = Math.max(peak, e(i, w1));
+    const th = floor + (peak - floor) * 0.1;
+    let st = best;
+    while (st > s0 && e(st - 1, w1) > th) st--;
+    out.push({ t: st / sr, w: d[k] });
+  }
+  return out;
 }
 
 // ---------- テンポの流れ ----------
@@ -2075,33 +2127,6 @@ function alignScore(env: Envelope, r: TempoResult, phaseFree = false): number {
  * 区間ごとの、拍の位置と音のずれ（秒、＋は音が後ろ）。BPM は譜面に書けるように整数などに丸め、区間の拍数も整数にするので、
  * 曲によっては区間ごとに音の位置が数十 ms ずつずれる（変わり目の前後で音源の拍の間がわずかに違うなど）
  */
-function segResiduals(env: Envelope, r: TempoResult): { e: number; w: number }[] {
-  const at = (t: number) => {
-    const x = (t - env.t0) * env.fr;
-    const i = Math.floor(x);
-    const a = env.all[i] ?? 0;
-    const b = env.all[i + 1] ?? 0;
-    return a + (b - a) * (x - i);
-  };
-  const out: { e: number; w: number }[] = [];
-  let ts = r.t0;
-  for (const s of r.segments) {
-    const P = 60 / s.bpm;
-    const nb = s.endBeat - s.startBeat;
-    if (nb >= 32) {
-      let best = -Infinity;
-      let be = 0;
-      for (let e = -0.045; e <= 0.0451; e += 0.001) {
-        let y = 0;
-        for (let j = 0; j < nb; j++) y += at(ts + j * P + e) + 0.5 * at(ts + (j + 0.5) * P + e);
-        if (y > best) { best = y; be = e; }
-      }
-      out.push({ e: be, w: nb * P });
-    }
-    ts += nb * P;
-  }
-  return out;
-}
 
 /**
  * 曲の BPM（途中の変化も）と、小節の頭を測る。
@@ -2126,6 +2151,90 @@ export function analyzeTempo(mono: Float32Array, sr: number, progress?: (p: numb
   } finally {
     curAnchors = [];
   }
+}
+
+/**
+ * 区間ごとに、拍の線を音の立ち上がりに合わせ直す。
+ * これまでは区間どうしを「ちょうど何拍」でつないでいたので、BPM の変わり目に半端な長さの小節がある曲
+ * （0.5 拍・3.75 拍の小節など）では、つなぐために拍の線が区間ごとに数十 ms ずつずれていた。
+ * 区間ごとに、拍の線と実際の音の立ち上がりのずれ（はっきり立ち上がっている拍ほど重く見た真ん中の値）を測り、
+ * 最初の区間は OFFSET を、それ以降は前の区間の長さを半端な拍数だけ伸び縮みさせて、そのずれをなくす
+ */
+/**
+ * 拍の線（t0 から P 秒ごとに nb 拍）と、実際の音の立ち上がりとのずれ（秒）。
+ * 楽器によって鳴る時刻が少し違う（数十 ms 早い装飾音など）ので、平均ではなく、いちばん多くの拍がそろうずれ
+ * （1ms ごとに数え、前後 2ms をならした山）にする。そろう拍が少ないときは null
+ */
+function onsetMode(env: Envelope, t0: number, P: number, nb: number, duration: number, lim = 30): number | null {
+  const R = 60;
+  const h = new Float64Array(R * 2 + 1);
+  const ds: number[] = [];
+  let n = 0;
+  for (let k = 0; k < Math.floor(nb); k++) {
+    const t = t0 + k * P;
+    if (t < 0.05 || t > duration - 0.05) continue;
+    n++;
+    for (const o of onsetCands(env, t, Math.min((lim + 10) / 1000, P * 0.22))) {
+      const d = (o.t - t) * 1000;
+      const bi = Math.round(d) + R;
+      if (bi < 0 || bi > R * 2) continue;
+      h[bi] += o.w;
+      ds.push(d);
+    }
+  }
+  let best = -1;
+  let bv = 0;
+  // 探す範囲の端（±lim ms より外）の山は、拍の隣の別の音を拾ったものなので使わない
+  for (let i = R - lim; i <= R + lim; i++) {
+    let v = 0;
+    for (let j = i - 2; j <= i + 2; j++) v += h[j] ?? 0;
+    if (v > bv) {
+      bv = v;
+      best = i;
+    }
+  }
+  if (best < 0 || bv < Math.max(4, n * 0.15) * Math.LN2 * 2) return null;
+  const c = best - R;
+  const near = ds.filter((d) => Math.abs(d - c) <= 3);
+  return near.reduce((p, v) => p + v, 0) / near.length / 1000;
+}
+
+function alignSegments(env: Envelope, r: TempoResult): TempoResult {
+  if (!r.segments.length) return r;
+  const segs = r.segments.map((x) => ({ ...x }));
+  // 区間ごとのずれ（今の拍の線から）。測れなかった区間は null
+  const measure = (t0: number, lim: number) => {
+    const off: (number | null)[] = [];
+    let ts = t0;
+    for (const sg of segs) {
+      const nb = sg.endBeat - sg.startBeat;
+      off.push(onsetMode(env, ts + (sg.lead ?? 0), 60 / sg.bpm, nb, r.duration, lim));
+      ts += nb * (60 / sg.bpm);
+    }
+    return off;
+  };
+  let t0 = r.t0;
+  // 測るのは 1 回（±30ms）。測れなかった区間は前（無ければ後ろ）の区間と同じだけ動かし、動かした所でもう 1 回だけ測る。
+  // （測って動かすことを何度も繰り返すと、隣の別の楽器の音へ少しずつずれていってしまう）
+  let pending = segs.map(() => true);
+  for (let pass = 0; pass < 2 && pending.some((x) => x); pass++) {
+    const off = measure(t0, 30);
+    const got = off.map((v, i) => pending[i] && v !== null);
+    const e = off.map((v, i) => (pending[i] ? v : 0));
+    for (let i = 0; i < e.length; i++) if (e[i] === null) e[i] = i > 0 ? e[i - 1] : null;
+    for (let i = e.length - 1; i >= 0; i--) if (e[i] === null) e[i] = e[i + 1] ?? 0;
+    const ee = e as number[];
+    // 最初の区間は OFFSET で、それ以降は区間ごとのずらし（lead）で合わせる
+    const e0 = pending[0] ? ee[0] : 0;
+    t0 += e0;
+    segs.forEach((sg, j) => {
+      const d = (sg.lead ?? 0) + (pending[j] ? ee[j] : 0) - e0;
+      if (Math.abs(d) >= 0.0005) sg.lead = d;
+      else delete sg.lead;
+    });
+    pending = pending.map((p, i) => p && !got[i]);
+  }
+  return { ...r, t0, segments: segs };
 }
 
 function analyzeInner(env: Envelope, duration: number, progress: ((p: number) => void) | undefined, opts: TempoOptions): TempoResult {
@@ -2214,7 +2323,9 @@ function analyzeInner(env: Envelope, duration: number, progress: ((p: number) =>
   let best = single;
   let bs = ss;
   // 1 つの BPM と区間ごとのどちらにするかは、拍の位置（1/4 拍のずれ）を問わずに、BPM が合っているかで比べる
-  if (coarse.segments.length > 1 && alignScore(env, coarse, true) > alignScore(env, single, true) * 1.04) {
+  // ただし、拍の位置まで含めた合い方で 1 つの BPM のほうが 1 割以上よいときは、1 つの BPM のまま
+  // （BPM がだんだん変わっていくように見えても、拍の位置まで合うのは 1 つの BPM、という曲がある）
+  if (coarse.segments.length > 1 && alignScore(env, coarse, true) > alignScore(env, single, true) * 1.04 && !(ss > sc * 1.1)) {
     best = coarse;
     bs = sc;
   }
@@ -2233,17 +2344,12 @@ function analyzeInner(env: Envelope, duration: number, progress: ((p: number) =>
   if (!curAnchors.length) best = halveIfSlow(env, best);
   // 拍の AI が見つけた小節の頭（拍子と小節の頭を決めるときに使う。手で決めた 1 拍目があるときはそちらに従う）
   if (!curAnchors.length && opts.ai?.downbeats.length) best.aiDowns = [...opts.ai.downbeats].sort((x, y) => x - y);
+  const name = best === single ? '1 つの BPM' : best === coarse ? '区間ごと' : '1 拍ずつ';
+  // 区間ごとに、拍の線を音の立ち上がりに合わせ直す（区間の境目では、拍の線が半端な長さだけずれてよい）
+  if (!curAnchors.length) best = alignSegments(env, best);
   // 拍子と小節の頭（途中で 1 小節だけ短い・長い小節も）
   best.beatAcc = beatAccents(env, best);
   computeMeters(best, opts.meters ?? [], curAnchors);
-  // 区間ごとに音と拍の位置が少しずつずれる曲では、ずれのいちばん大きい区間が目立たないよう、OFFSET を真ん中に合わせる
-  // （例: 150 の区間で合わせると 200 の区間で 30ms 遅れるとき、両方 15ms ずつにする。手で決めた 1 拍目があるときはそこに合わせたままにする）
-  if (!curAnchors.length) {
-    const res = segResiduals(env, best);
-    // ずれは最初の区間からの差で見る（音の立ち上がりの山の出方で、ずれの値そのものは数十 ms かたよるため。最初の区間の位置はもう合わせてある）
-    if (res.length > 1) best.t0 += (Math.max(...res.map((x) => x.e)) + Math.min(...res.map((x) => x.e))) / 2 - res[0].e;
-  }
-  const name = best === single ? '1 つの BPM' : best === coarse ? '区間ごと' : '1 拍ずつ';
   const bpms = (r: TempoResult) => r.segments.map((x) => x.bpm).join('→');
   best.info = `大まかな区間 ${rawInfo}／区間ごと ${bpms(coarse)}${bridgeFail ? `（つなぎ失敗 ${bridgeFail}）` : ''}／合い方 1 つ ${ss.toFixed(3)}・区間 ${sc.toFixed(3)}・1 拍ずつ ${sf.toFixed(3)}／採用 ${name}${best.aiDowns ? `／AI の小節の頭 ${best.aiDowns.length}` : ''}`;
   return best;
@@ -2270,6 +2376,11 @@ export function tempoPlan(r: TempoResult, tpb: number, mul: number | number[] = 
   const m = (i: number) => (Array.isArray(mul) ? mul[i] ?? 1 : mul);
   // 区間ごとの拍の長さと拍数（倍率を掛けた後）
   const segs = r.segments.map((s, i) => ({ bpm: Number((s.bpm * m(i)).toFixed(3)), beats: (s.endBeat - s.startBeat) * m(i), start: s.startBeat }));
+  // 区間ごとのずらし（lead）: 前の区間の長さを、その秒数ぶん伸び縮みさせる
+  for (let i = 0; i + 1 < segs.length; i++) {
+    const d = (r.segments[i + 1].lead ?? 0) - (r.segments[i].lead ?? 0);
+    if (d) segs[i].beats += (d * segs[i].bpm) / 60;
+  }
   // 拍の番号（測ったときの数え方）→ 倍率を掛けた後の拍の番号
   const sStart: number[] = [];
   {
@@ -2369,4 +2480,3 @@ export function planBeatTimes(plan: TempoPlan, tpb: number, untilSec: number): {
   }
   return out;
 }
-
