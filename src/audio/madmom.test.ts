@@ -5,7 +5,7 @@ import { activations, dbnDownbeats, features, parseModel } from './madmom';
 const fsName = 'fs';
 const { readFileSync } = (await import(/* @vite-ignore */ fsName)) as { readFileSync(p: URL): Uint8Array };
 const buf = readFileSync(new URL('../../public/ai/madmom-downbeats.bin', import.meta.url));
-const model = parseModel(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+const model = parseModel(new Uint8Array(buf).buffer as ArrayBuffer);
 
 describe('拍の AI（madmom）', () => {
   it('モデルのファイルを読む（3 つの窓、8 個のモデル、特徴は 314 個）', () => {
