@@ -2070,6 +2070,11 @@ export function computeMeters(r: TempoResult, override: (Meter | null)[] = [], a
     }
   }
   if (!downs.length) return;
+  // 拍の AI の小節の頭の間隔で小節の長さを決める（7/4・5/4・2/4 のような小節も）
+  if (r.aiDowns?.length && !anchorTimes.length) {
+    const ai = aiBarLines(r, ranges, downs);
+    if (ai) downs.splice(0, downs.length, ...ai);
+  }
   const out: { beat: number; num: number; den: number }[] = [];
   let curLen = -1;
   downs.forEach((d, i) => {
@@ -2082,6 +2087,95 @@ export function computeMeters(r: TempoResult, override: (Meter | null)[] = [], a
   });
   r.meters = out;
   r.downbeat = downs[0].beat;
+}
+
+/** 小節の頭の余りを変えるときの減点（AI の小節の頭が 4 つ以上続けて新しい余りを示したときだけ変わる） */
+const AI_PHASE_SWITCH = 4;
+/**
+ * 拍の AI の小節の頭から、小節の並びの「ずれ」を読み取り、半端な長さの小節（3 拍・5 拍・7 拍など）を入れる。
+ * 小節の長さ L ごとに、小節の頭が「何拍目にあるか」（L で割った余り）を状態にして、
+ * AI の小節の頭に合うほど良く、余りを変えるほど悪い（K）、として並びを決める（1 つだけ外れた AI の印には引っぱられない）。
+ * 余りが変わる所の小節は、その分だけ短い・長い小節になる
+ */
+function aiBarLines(r: TempoResult, ranges: { n: number; t: number; P: number; base: number }[], downs: { beat: number; si: number }[]) {
+  const pts: { beat: number; si: number }[] = [];
+  for (const d of r.aiDowns ?? []) {
+    const si = ranges.findIndex((R, i) => d >= R.t - R.P / 2 && (i === ranges.length - 1 || d < ranges[i + 1].t - ranges[i + 1].P / 2));
+    if (si < 0) continue;
+    const R = ranges[si];
+    const k = Math.round((d - R.t) / R.P);
+    if (k < 0 || k * 2 >= R.n || Math.abs(R.t + k * R.P - d) > 0.06) continue;
+    const beat = R.base + k;
+    if (pts.length && beat <= pts[pts.length - 1].beat) continue;
+    pts.push({ beat, si });
+  }
+  if (pts.length < Math.max(4, downs.length * 0.5) || downs.length < 2) return null;
+  // ふだんの小節の長さ（これまでの決め方の小節の頭の間隔の、いちばん多いもの）
+  const cnt = new Map<number, number>();
+  for (let i = 1; i < downs.length; i++) {
+    const g = Math.round(downs[i].beat - downs[i - 1].beat);
+    cnt.set(g, (cnt.get(g) ?? 0) + 1);
+  }
+  const L = [...cnt].sort((a, b) => b[1] - a[1])[0][0];
+  if (L < 2 || L > 8) return null;
+  // 状態 = 小節の頭の余り（0..L-1）。はじめは、これまでの決め方の余り
+  const phase0 = ((Math.round(downs[0].beat) % L) + L) % L;
+  const n = pts.length;
+  const cost = Array.from({ length: n }, () => new Float64Array(L));
+  const back = Array.from({ length: n }, () => new Int8Array(L));
+  for (let i = 0; i < n; i++) {
+    const m = ((Math.round(pts[i].beat) % L) + L) % L;
+    for (let ph = 0; ph < L; ph++) {
+      const em = ph === m ? 0 : 1;
+      if (i === 0) {
+        cost[i][ph] = em + (ph === phase0 ? 0 : AI_PHASE_SWITCH);
+        continue;
+      }
+      let best = Infinity;
+      let bp = 0;
+      for (let q = 0; q < L; q++) {
+        const c = cost[i - 1][q] + (q === ph ? 0 : AI_PHASE_SWITCH);
+        if (c < best) {
+          best = c;
+          bp = q;
+        }
+      }
+      cost[i][ph] = best + em;
+      back[i][ph] = bp;
+    }
+  }
+  const ph = new Int8Array(n);
+  let bi = 0;
+  for (let q = 1; q < L; q++) if (cost[n - 1][q] < cost[n - 1][bi]) bi = q;
+  for (let i = n - 1; i >= 0; i--) {
+    ph[i] = bi;
+    bi = back[i][bi];
+  }
+  // 余りが同じ所ごとに小節の頭を並べる（余りが変わる所の小節が、半端な長さになる）
+  const out: { beat: number; si: number }[] = [];
+  const siOf = (b: number) => {
+    let s = 0;
+    for (let i = 0; i < ranges.length; i++) if (b >= ranges[i].base - 1e-9) s = i;
+    return s;
+  };
+  // AI の印より前と後ろは、これまでの決め方のまま
+  for (const d of downs) if (d.beat < pts[0].beat - 0.5) out.push(d);
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j + 1 < n && ph[j + 1] === ph[i]) j++;
+    const a = Math.round(pts[i].beat);
+    const end = j + 1 < n ? Math.round(pts[j + 1].beat) : Math.round(pts[n - 1].beat) + L;
+    // この並びの最初の小節の頭: 余りが合う最初の拍（a 以降）
+    let b = a + ((((ph[i] - a) % L) + L) % L);
+    if (out.length && b <= out[out.length - 1].beat) b += L;
+    for (; b < end; b += L) out.push({ beat: b, si: siOf(b) });
+    i = j + 1;
+  }
+  const lastAi = Math.round(pts[n - 1].beat) + L;
+  for (const d of downs) if (d.beat >= lastAi) out.push(d);
+  out.sort((x, y) => x.beat - y.beat);
+  return out.filter((d, k) => k === 0 || d.beat > out[k - 1].beat);
 }
 
 function alignScore(env: Envelope, r: TempoResult, phaseFree = false): number {
