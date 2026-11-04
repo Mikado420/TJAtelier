@@ -10,6 +10,8 @@ export default defineConfig(({ command }) => ({
   define: {
     __BUILD_ID__: JSON.stringify(command === 'serve' ? 'dev' : buildId),
   },
+  // 別のスレッド（BPM の測定）は ES モジュールにする（拍の AI の実行環境をあとから import するため）
+  worker: { format: 'es' },
   build: {
     // ファイル名に公開ごとの印（ハッシュ）を付けない。
     // 付けると、端末に残っていた古い index.html が、公開し直して消えた古い名前のファイルを読みに行き、

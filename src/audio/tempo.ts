@@ -51,6 +51,8 @@ export interface TempoResult {
   meterAuto?: Meter[];
   /** 半拍ごとの音の強さ（区間の頭から順に。拍子を決め直すのに使う） */
   beatAcc?: number[];
+  /** 拍の AI が見つけた小節の頭の時刻（秒）。拍子と小節の頭を決めるときに、音の強さより重く見る */
+  aiDowns?: number[];
 }
 
 /** 拍子（num/den。4/4 なら 1 小節 = 4 拍） */
@@ -1847,8 +1849,32 @@ export function computeMeters(r: TempoResult, override: (Meter | null)[] = [], a
     }
   }
   const a = (si: number, h: number) => acc[ranges[si].off + h] ?? 0;
+  // 拍の AI の小節の頭: 区間ごとに、拍の線から 60ms 以内にあるものの半拍の番号
+  const aiH: number[][] = ranges.map(() => []);
+  for (const d of r.aiDowns ?? []) {
+    const si = ranges.findIndex((R, i) => d >= R.t - R.P / 2 && (i === ranges.length - 1 || d < ranges[i + 1].t - ranges[i + 1].P / 2));
+    if (si < 0) continue;
+    const R = ranges[si];
+    const h = Math.round((d - R.t) / (R.P / 2));
+    if (h < 0 || h >= R.n || Math.abs(R.t + (h * R.P) / 2 - d) > 0.06) continue;
+    aiH[si].push(h);
+  }
+  /** 拍の AI の小節の頭の間隔（拍）から決めた拍子（8 小節以上あって、7 割以上が同じ長さのとき） */
+  const aiMeter = (si: number): Meter | null => {
+    const hs = aiH[si];
+    if (hs.length < 9) return null;
+    const cnt = new Map<number, number>();
+    for (let i = 1; i < hs.length; i++) {
+      const L = (hs[i] - hs[i - 1]) / 2;
+      if (L === 3 || L === 4) cnt.set(L, (cnt.get(L) ?? 0) + 1);
+    }
+    for (const [L, c] of cnt) if (c >= (hs.length - 1) * 0.7) return { num: L, den: 4 };
+    return null;
+  };
   // 1. 拍子（自動）
   const auto: (Meter | null)[] = segs.map((_, si) => {
+    const am = aiMeter(si);
+    if (am) return am;
     const R = ranges[si];
     const beats = Math.floor(R.n / 2);
     if (beats < 24) return null;
@@ -1892,6 +1918,13 @@ export function computeMeters(r: TempoResult, override: (Meter | null)[] = [], a
       }
       // BPM の変わり目（区間の頭）は小節の頭であることが多い。小節の頭で変わると分かっている区間は、そこを小節の頭にする
       if (si > 0 && h0 === 0 && score[0] !== -Infinity) score[0] += 3;
+      // 拍の AI の小節の頭がこの単位に 3 つ以上あれば、それがそろう位置を重く見る
+      {
+        const v = new Array(L2).fill(0);
+        let tot = 0;
+        for (const h of aiH[si]) if (h >= h0 && h < h1) { v[h % L2]++; tot++; }
+        if (tot >= 3) for (let o = 0; o < L2; o++) if (score[o] !== -Infinity) score[o] += (6 * v[o]) / tot;
+      }
       units.push({ si, h0, h1, L2, score, force: si > 0 && h0 === 0 && segs[si].barStart ? 0 : -1 });
     }
   });
@@ -2077,6 +2110,8 @@ function segResiduals(env: Envelope, r: TempoResult): { e: number; w: number }[]
 export interface TempoOptions {
   /** 手で決めた 1 拍目（小節の頭）の時刻（秒） */
   anchors?: number[];
+  /** 拍の AI（Beat This!）が見つけた拍と小節の頭の時刻（秒） */
+  ai?: { beats: number[]; downbeats: number[] };
   /** 区間ごとに手で決めた拍子（null は自動） */
   meters?: (Meter | null)[];
 }
@@ -2196,6 +2231,8 @@ function analyzeInner(env: Envelope, duration: number, progress: ((p: number) =>
   }
   // 1 拍おきに強い音が来る曲は、半分の BPM で書く
   if (!curAnchors.length) best = halveIfSlow(env, best);
+  // 拍の AI が見つけた小節の頭（拍子と小節の頭を決めるときに使う。手で決めた 1 拍目があるときはそちらに従う）
+  if (!curAnchors.length && opts.ai?.downbeats.length) best.aiDowns = [...opts.ai.downbeats].sort((x, y) => x - y);
   // 拍子と小節の頭（途中で 1 小節だけ短い・長い小節も）
   best.beatAcc = beatAccents(env, best);
   computeMeters(best, opts.meters ?? [], curAnchors);
@@ -2208,7 +2245,7 @@ function analyzeInner(env: Envelope, duration: number, progress: ((p: number) =>
   }
   const name = best === single ? '1 つの BPM' : best === coarse ? '区間ごと' : '1 拍ずつ';
   const bpms = (r: TempoResult) => r.segments.map((x) => x.bpm).join('→');
-  best.info = `大まかな区間 ${rawInfo}／区間ごと ${bpms(coarse)}${bridgeFail ? `（つなぎ失敗 ${bridgeFail}）` : ''}／合い方 1 つ ${ss.toFixed(3)}・区間 ${sc.toFixed(3)}・1 拍ずつ ${sf.toFixed(3)}／採用 ${name}`;
+  best.info = `大まかな区間 ${rawInfo}／区間ごと ${bpms(coarse)}${bridgeFail ? `（つなぎ失敗 ${bridgeFail}）` : ''}／合い方 1 つ ${ss.toFixed(3)}・区間 ${sc.toFixed(3)}・1 拍ずつ ${sf.toFixed(3)}／採用 ${name}${best.aiDowns ? `／AI の小節の頭 ${best.aiDowns.length}` : ''}`;
   return best;
 }
 

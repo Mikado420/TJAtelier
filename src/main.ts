@@ -16,6 +16,7 @@ import { DEMO_TJA } from './demo';
 import { buildAutoEvents, type AutoEvent } from './play/auto';
 import { bindTimeline, bindValueBoxes, drawPlayhead, drawRuler, inlineInput, PLAYHEAD, valueBoxHtml, type ValueBox } from './ui/daw';
 import { addFadeIn, addFadeOut, arrangeLength, arrangeStart, bringToTop, clipAt, clipEnd, envAt, mapTime, MIN_LEN, refShift, renderClips, renderSize, snapTo, sortEnv, splitClip, trimEnd, trimStart, type Clip, type EnvPoint } from './audio/arrange';
+import type { BeatAI } from './audio/beatThis';
 import { analyzeTempo, computeMeters, planBars, planBeatTimes, planTimeAt, tempoPlan, type Meter, type TempoOptions, type TempoPlan, type TempoResult } from './audio/tempo';
 import { meterAt as meterAtTick, moveBoundary, nudge, removeSection, sectionAtTime, sections as editSections, setBpm, setEnd, setMeter, setStart, shiftDownbeat, splitAt, tickAtTime } from './editor/tempoEdit';
 import { applyGrad, gradValid, type Grad } from './editor/grad';
@@ -3331,7 +3332,9 @@ function startTempo(again = false) {
   // 測り直し（again）のときは、手で決めた 1 拍目・拍子・表示の位置をそのまま使う
   const keep = again ? { viewAt: tempoState.viewAt, span: tempoState.span } : { viewAt: -1, span: 2, anchors: [], meterSel: [] };
   Object.assign(tempoState, { running: true, progress: 0, result: null, error: '', mul: [], shift: 0, fine: 0, plan: null, undo: [], redo: [], sel: 0, cursor: -1, ...keep });
-  const opts: TempoOptions = { anchors: [...tempoState.anchors], meters: [...tempoState.meterSel] };
+  // 拍の AI の結果は同じ音源なら使い回す（測り直しのたびに AI を動かさない）
+  const aiHit = tempoAI && tempoAI.buf === buf ? tempoAI.ai : undefined;
+  const opts: TempoOptions = { anchors: [...tempoState.anchors], meters: [...tempoState.meterSel], ...(aiHit ? { ai: aiHit } : {}) };
   if (again) renderSheet();
   else openSheet('tempo');
   const done = (r: TempoResult) => {
@@ -3360,7 +3363,7 @@ function startTempo(again = false) {
     return;
   }
   let started = false;
-  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string }>) => {
+  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string; ai?: BeatAI }>) => {
     started = true;
     const m = e.data;
     if (m.type === 'progress') {
@@ -3369,6 +3372,7 @@ function startTempo(again = false) {
       if (bar) bar.style.width = `${Math.round(tempoState.progress * 100)}%`;
     } else if (m.type === 'done' && m.result) {
       worker.terminate();
+      if (m.ai) tempoAI = { buf, ai: m.ai };
       done(m.result);
     } else if (m.type === 'error') {
       worker.terminate();
@@ -3381,8 +3385,10 @@ function startTempo(again = false) {
     else fail('測れませんでした');
   };
   // 測れなかったときにこの画面で測り直せるよう、データは渡さずに写す（transfer しない）
-  worker.postMessage({ mono, sr: buf.sampleRate, opts });
+  worker.postMessage({ mono, sr: buf.sampleRate, opts, aiBase: new URL('./', location.href).href });
 }
+/** 拍の AI の結果（音源ごと） */
+let tempoAI: { buf: AudioBuffer; ai: BeatAI } | null = null;
 
 const fmtSec = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
