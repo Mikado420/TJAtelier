@@ -34,7 +34,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           ( cd /tmp && npm pack onnxruntime-web@1.21.0 --silent && tar -xzf onnxruntime-web-1.21.0.tgz ) || { echo "::warning::onnxruntime-web を取れませんでした"; exit 0; }
-          cp /tmp/package/dist/ort.webgpu.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.wasm dist/ai/
+          cp /tmp/package/dist/ort.wasm.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.mjs /tmp/package/dist/ort-wasm-simd-threaded.wasm dist/ai/
           cp /tmp/package/LICENSE* dist/ai/LICENSE-onnxruntime.txt 2>/dev/null || curl -fsSL -o dist/ai/LICENSE-onnxruntime.txt "https://raw.githubusercontent.com/microsoft/onnxruntime/main/LICENSE" || true
           ls -la dist/ai
       - uses: actions/upload-pages-artifact@v4

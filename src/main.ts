@@ -3362,6 +3362,44 @@ function startTempo(again = false) {
   const hit = tempoAI && tempoAI.buf === buf ? tempoAI.ai : null;
   if (hit) opts.ai = hit;
   const run = ++tempoRun;
+  const AI = hit ? 0 : 0.7;
+  // 1. 拍の AI を別のスレッドで動かし、終わったらそのスレッドを閉じる（AI の使ったメモリを返してから測る）
+  //    AI が動かせないときは、これまでの測り方だけで測る
+  if (!hit) {
+    let bw: Worker | null = null;
+    try {
+      bw = new Worker(new URL('./audio/beatWorker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      bw = null;
+    }
+    if (bw) {
+      const w = bw;
+      const next = (ai?: BeatAI) => {
+        w.terminate();
+        if (run !== tempoRun || !tempoState.running) return;
+        if (ai) {
+          tempoAI = { buf, ai };
+          opts.ai = ai;
+        }
+        measure();
+      };
+      w.onmessage = (e: MessageEvent<{ type: string; p?: number; ai?: BeatAI; message?: string }>) => {
+        if (e.data.type === 'progress') setBar((e.data.p ?? 0) * AI);
+        else if (e.data.type === 'done') next(e.data.ai);
+        else {
+          console.warn('拍の AI を使えませんでした', e.data.message);
+          next();
+        }
+      };
+      w.onerror = () => next();
+      w.postMessage({ mono, sr: buf.sampleRate, base: new URL('./', location.href).href });
+      return;
+    }
+  }
+  measure();
+  // 2. BPM・OFFSET を測る
+  function measure() {
+  if (!buf) return;
   let worker: Worker;
   try {
     worker = new Worker(new URL('./audio/tempoWorker.ts', import.meta.url), { type: 'module' });
@@ -3370,15 +3408,14 @@ function startTempo(again = false) {
     return;
   }
   let started = false;
-  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string; ai?: BeatAI }>) => {
+  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string }>) => {
     started = true;
     const m = e.data;
     if (m.type === 'progress') {
-      setBar(m.p ?? 0);
+      setBar(AI + (m.p ?? 0) * (1 - AI));
     } else if (m.type === 'done' && m.result) {
       worker.terminate();
       if (run !== tempoRun) return;
-      if (m.ai) tempoAI = { buf, ai: m.ai };
       done(m.result);
     } else if (m.type === 'error') {
       worker.terminate();
@@ -3391,7 +3428,8 @@ function startTempo(again = false) {
     else fail('測れませんでした');
   };
   // 測れなかったときにこの画面で測り直せるよう、データは渡さずに写す（transfer しない）
-  worker.postMessage({ mono, sr: buf.sampleRate, opts, aiBase: hit ? undefined : new URL('./', location.href).href });
+  worker.postMessage({ mono, sr: buf.sampleRate, opts });
+  }
 }
 /** 測るたびに増える番号 */
 let tempoRun = 0;

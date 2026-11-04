@@ -2,7 +2,6 @@
  * 拍の AI（Beat This!、CPJKU・MIT ライセンス）で、拍と小節の頭（1 拍目）の時刻を求める。
  *
  * - モデル（軽い small0 を ONNX にしたもの、約 10MB）はサイトの ai/ に置いてある。実行環境（onnxruntime-web）は公開するときに ai/ へ入れる
- * - GPU（WebGPU）が使える端末ではそちらで、使えなければ CPU（wasm）で計算する
  * - モデルは 1 度読んだら端末に取っておく（Cache Storage）
  * - 入力は 22050Hz の音の対数メルスペクトログラム（1 フレーム 20ms、128 段）。Beat This! の LogMelSpect と同じ作り方
  * - 長い曲は 1500 フレーム（30 秒）ずつに分けて、つなぎ目の 6 フレームは捨てて重ねる（元の実装と同じ）
@@ -23,7 +22,9 @@ const HOP = 441;
 const MELS = 128;
 const FPS = SR / HOP; // 50
 const BINS = NFFT / 2 + 1;
-const CHUNK = 1500;
+// 10 秒ずつ（元は 30 秒）。AI の使うメモリはほぼ区切りの長さに比例し、30 秒では 1GB 近くになって
+// iPhone のアプリが落ちる（10 秒で半分ほど）。小節の頭の決め方は、AI の印が続けてそろった所しか使わないので、結果は変わらない
+const CHUNK = 500;
 const BORDER = 6;
 
 export const MODEL_FILE = 'beat-this-small0.onnx';
@@ -297,14 +298,6 @@ async function loadModel(url: string, progress?: (p: number) => void): Promise<A
 
 let session: { url: string; ort: Ort; s: OrtSession } | null = null;
 
-async function hasGpu(): Promise<boolean> {
-  try {
-    const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-    return !!gpu && !!(await gpu.requestAdapter());
-  } catch {
-    return false;
-  }
-}
 
 /**
  * 拍の AI で拍と小節の頭を求める。base = サイトの頭の URL（ai/ がある所）。
@@ -314,23 +307,15 @@ export async function runBeatThis(mono: Float32Array, sr: number, base: string, 
   const dir = new URL('ai/', base).href;
   const modelUrl = dir + MODEL_FILE;
   if (!session || session.url !== modelUrl) {
-    const ort = (await import(/* @vite-ignore */ dir + 'ort.webgpu.min.mjs')) as Ort;
+    // CPU（wasm）で計算する。GPU（WebGPU）版の実行環境は大きく、iPhone のアプリではメモリが足りなくなる
+    const ort = (await import(/* @vite-ignore */ dir + 'ort.wasm.min.mjs')) as Ort;
     ort.env.wasm.wasmPaths = dir;
     // 複数のスレッドは、ページが cross-origin isolated のときしか使えない
     const iso = (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated;
     ort.env.wasm.numThreads = iso ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
     const model = new Uint8Array(await loadModel(modelUrl, (p) => progress?.(p * 0.35)));
     progress?.(0.36);
-    // GPU（WebGPU）が使えればそちらで（ずっと速い）。使えなければ CPU（wasm）で
-    let s: OrtSession | null = null;
-    if (await hasGpu()) {
-      try {
-        s = await ort.InferenceSession.create(model, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' });
-      } catch {
-        s = null;
-      }
-    }
-    s ??= await ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    const s = await ort.InferenceSession.create(model, { executionProviders: ['wasm'], graphOptimizationLevel: 'all', enableCpuMemArena: false });
     session = { url: modelUrl, ort, s };
   }
   progress?.(0.4);
