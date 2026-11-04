@@ -1,7 +1,9 @@
-import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 import { activations, dbnDownbeats, features, parseModel } from './madmom';
 
+// node の fs（型の定義は入れていないので、ここで形だけ決める）
+const fsName = 'fs';
+const { readFileSync } = (await import(/* @vite-ignore */ fsName)) as { readFileSync(p: URL): Uint8Array };
 const buf = readFileSync(new URL('../../public/ai/madmom-downbeats.bin', import.meta.url));
 const model = parseModel(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 
