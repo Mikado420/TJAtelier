@@ -27,6 +27,8 @@ const JY = 402;
 const NR = 54; // 通常ノーツの半径（黒縁を含む）
 const MEASURE_PX = 1470; // ハイスピード 1.0 で 1 小節が流れる距離
 /** 譜面分岐のレーンの色（普通・玄人・達人） */
+/** 譜面分岐の塗り替え（上から下へ）にかける時間（ms） */
+const BRANCH_WIPE = 200;
 const BRANCH_TINT = ['', 'rgba(58,150,210,0.36)', 'rgba(200,70,190,0.36)'];
 const BRANCH_NAME = ['NORMAL', 'EXPERT', 'MASTER'];
 
@@ -971,35 +973,55 @@ export class Renderer {
 
     // 譜面分岐: 玄人は青、達人は紫にレーンを染める
     if (!opp) {
-      const fx = this.branchFx;
       const top = LANE_TOP;
       const bot = LANE_BOTTOM;
-      const tint = (b: number, x1 = LANE_X, x2 = right) => {
+      const tint = (b: number, y1 = top, y2 = bot) => {
         const c = BRANCH_TINT[b];
-        if (!c || x2 <= x1) return;
+        if (!c || y2 <= y1) return;
         ctx.fillStyle = c;
-        ctx.fillRect(x1, top, x2 - x1, bot - top);
+        ctx.fillRect(LANE_X, y1, right - LANE_X, y2 - y1);
       };
-      // 判定枠から右へ 0.11 秒で塗り替える（境目に線は描かない）
+      // 区間の始まりの小節線が判定枠に来たら、上から下へ塗り替える
+      let fx = this.branchFx;
+      // 終わったとき・大きく巻き戻したときは片づける
+      if (fx && (now - fx.at > BRANCH_WIPE / 1000 || game.branch !== fx.to)) fx = this.branchFx = null;
       let p = 1;
-      const shown = game.branch;
-      if (fx) {
-        p = Math.min(1, (wall - fx.t) / 110);
-        const cut = this.jx + (right - this.jx) * (1 - (1 - p) ** 2);
-        if (p < 1) {
-          tint(fx.from, Math.max(LANE_X, cut), right);
-          tint(fx.to, LANE_X, Math.min(right, cut));
-        } else tint(game.branch);
-      } else tint(game.branch);
+      if (fx) p = Math.max(0, Math.min(1, ((now - fx.at) * 1000) / BRANCH_WIPE));
+      const e = 1 - (1 - p) ** 2;
+      const h = bot - top;
+      if (!fx || p >= 1) tint(game.branch);
+      else if (p <= 0) tint(fx.from);
+      else {
+        // 境目を 80px でぼかす
+        const F = 40;
+        const y = top - F + (h + F * 2) * e;
+        tint(fx.to, top, Math.min(bot, y - F));
+        tint(fx.from, Math.max(top, y + F), bot);
+        const n = 10;
+        for (let i = 0; i < n; i++) {
+          const y1 = Math.max(top, y - F + (2 * F * i) / n);
+          const y2 = Math.min(bot, y - F + (2 * F * (i + 1)) / n);
+          if (y2 <= y1) continue;
+          const k = (i + 0.5) / n;
+          ctx.globalAlpha = 1 - k;
+          tint(fx.to, y1, y2);
+          ctx.globalAlpha = k;
+          tint(fx.from, y1, y2);
+        }
+        ctx.globalAlpha = 1;
+      }
       // 分岐のある譜面: レーンの右に今の分岐の名前
       if (this.hasBranch) {
+        const tx = Math.min(right, V.x1) - 36;
+        const ty = (top + bot) / 2 + 4;
         ctx.save();
-        ctx.globalAlpha = 0.45 + (p < 1 ? 0.4 * (1 - p) : 0);
         ctx.font = `900 76px ${FONT}`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#fff';
-        ctx.fillText(BRANCH_NAME[shown], Math.min(right, V.x1) - 36, (top + bot) / 2 + 4);
+        const moving = !!fx && p > 0 && p < 1;
+        ctx.globalAlpha = 0.45 + (moving ? 0.4 * (1 - p) : 0);
+        ctx.fillText(BRANCH_NAME[fx && p <= 0 ? fx.from : game.branch], tx, ty);
         ctx.restore();
       }
     }
