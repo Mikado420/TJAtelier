@@ -28,27 +28,6 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
-      # 拍の AI（Beat This! final0、MIT）のモデルと、それを動かす onnxruntime-web を、公開するサイトの ai/ に入れる。
-      # 大きい（約 80MB）のでリポジトリには入れず、公開するたびに取ってくる。取れなかったときは AI なしで公開する
-      - name: 拍の AI を入れる
-        if: github.ref == 'refs/heads/main'
-        run: |
-          set -u
-          mkdir -p dist/ai
-          M=dist/ai/beat-this-final0.onnx
-          for u in \
-            "https://huggingface.co/aaatmy/beat-this-onnx/resolve/main/beat-this-final0.onnx" \
-            "https://github.com/shiwano/beat-this-onnx/releases/latest/download/beat-this-final0.onnx"; do
-            curl -fsSL --retry 3 -o "$M" "$u" && [ "$(stat -c%s "$M")" -gt 70000000 ] && break
-            rm -f "$M"
-          done
-          if [ ! -f "$M" ]; then echo "::warning::拍の AI のモデルを取れませんでした"; rm -rf dist/ai; exit 0; fi
-          sha256sum "$M"
-          curl -fsSL --retry 3 -o dist/ai/LICENSE-beat-this.txt "https://raw.githubusercontent.com/CPJKU/beat_this/main/LICENSE" || true
-          ( cd /tmp && npm pack onnxruntime-web@1.21.0 --silent && tar -xzf onnxruntime-web-1.21.0.tgz )
-          cp /tmp/package/dist/ort.webgpu.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.wasm dist/ai/
-          cp /tmp/package/LICENSE* dist/ai/LICENSE-onnxruntime.txt 2>/dev/null || curl -fsSL -o dist/ai/LICENSE-onnxruntime.txt "https://raw.githubusercontent.com/microsoft/onnxruntime/main/LICENSE" || true
-          ls -la dist/ai
       - uses: actions/upload-pages-artifact@v4
         if: github.ref == 'refs/heads/main'
         with:
