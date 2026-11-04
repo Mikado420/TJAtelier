@@ -1,11 +1,7 @@
-madmom-downbeats.bin
+beat-this-small0.onnx
 
-The pretrained downbeat tracking models of madmom (models/downbeats/2016/downbeats_blstm_[1-8].pkl,
-https://github.com/CPJKU/madmom_models), converted to a flat float32 file together with the
-spectrogram filterbanks used by madmom's RNNDownBeatProcessor.
+The "small0" checkpoint of Beat This! (CPJKU, ISMIR 2024, MIT license, see LICENSE-beat-this.txt),
+exported to ONNX. Input: log-mel spectrogram [1, frames, 128] (22050 Hz, hop 441).
+Outputs: beat / downbeat logits [1, frames].
 
-S. Böck, F. Krebs and G. Widmer, "Joint Beat and Downbeat Tracking with Recurrent Neural Networks",
-Proceedings of the 17th International Society for Music Information Retrieval Conference (ISMIR), 2016.
-
-License: Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (see LICENSE-madmom-models.txt).
-Non-commercial use only.
+F. Foscarin, J. Schlüter, G. Widmer, "Beat this! Accurate beat tracking without DBN postprocessing", ISMIR 2024.

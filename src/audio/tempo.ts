@@ -2110,7 +2110,7 @@ function segResiduals(env: Envelope, r: TempoResult): { e: number; w: number }[]
 export interface TempoOptions {
   /** 手で決めた 1 拍目（小節の頭）の時刻（秒） */
   anchors?: number[];
-  /** 拍の AI（madmom）が見つけた拍と小節の頭の時刻（秒） */
+  /** 拍の AI（Beat This!）が見つけた拍と小節の頭の時刻（秒） */
   ai?: { beats: number[]; downbeats: number[] };
   /** 区間ごとに手で決めた拍子（null は自動） */
   meters?: (Meter | null)[];

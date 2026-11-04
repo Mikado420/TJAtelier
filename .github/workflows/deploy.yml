@@ -28,6 +28,15 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
+      # 拍の AI（Beat This! small0）を動かす onnxruntime-web（MIT）を、公開するサイトの ai/ に入れる（モデルは public/ai にある）。
+      # 取れなかったときは AI なしで公開する（測るときは、これまでの測り方だけになる）
+      - name: 拍の AI の実行環境を入れる
+        if: github.ref == 'refs/heads/main'
+        run: |
+          ( cd /tmp && npm pack onnxruntime-web@1.21.0 --silent && tar -xzf onnxruntime-web-1.21.0.tgz ) || { echo "::warning::onnxruntime-web を取れませんでした"; exit 0; }
+          cp /tmp/package/dist/ort.webgpu.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.wasm dist/ai/
+          cp /tmp/package/LICENSE* dist/ai/LICENSE-onnxruntime.txt 2>/dev/null || curl -fsSL -o dist/ai/LICENSE-onnxruntime.txt "https://raw.githubusercontent.com/microsoft/onnxruntime/main/LICENSE" || true
+          ls -la dist/ai
       - uses: actions/upload-pages-artifact@v4
         if: github.ref == 'refs/heads/main'
         with:

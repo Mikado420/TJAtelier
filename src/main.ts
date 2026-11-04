@@ -16,8 +16,7 @@ import { DEMO_TJA } from './demo';
 import { buildAutoEvents, type AutoEvent } from './play/auto';
 import { bindTimeline, bindValueBoxes, drawPlayhead, drawRuler, inlineInput, PLAYHEAD, valueBoxHtml, type ValueBox } from './ui/daw';
 import { addFadeIn, addFadeOut, arrangeLength, arrangeStart, bringToTop, clipAt, clipEnd, envAt, mapTime, MIN_LEN, refShift, renderClips, renderSize, snapTo, sortEnv, splitClip, trimEnd, trimStart, type Clip, type EnvPoint } from './audio/arrange';
-import { runMadmomParallel } from './audio/madmomRun';
-import type { MadmomResult } from './audio/madmom';
+import type { BeatAI } from './audio/beatThis';
 import { analyzeTempo, computeMeters, planBars, planBeatTimes, planTimeAt, tempoPlan, type Meter, type TempoOptions, type TempoPlan, type TempoResult } from './audio/tempo';
 import { meterAt as meterAtTick, moveBoundary, nudge, removeSection, sectionAtTime, sections as editSections, setBpm, setEnd, setMeter, setStart, shiftDownbeat, splitAt, tickAtTime } from './editor/tempoEdit';
 import { applyGrad, gradValid, type Grad } from './editor/grad';
@@ -3359,30 +3358,10 @@ function startTempo(again = false) {
     const bar = document.getElementById('tempoBar');
     if (bar) bar.style.width = `${Math.round(p * 100)}%`;
   };
-  // 拍の AI（madmom）で拍と小節の頭を求めてから測る（同じ音源の 2 回目からは使い回す）。
-  // AI が動かせないときは、これまでの測り方だけで測る
+  // 拍の AI（Beat This!）の結果は、同じ音源なら使い回す（測り直しのたびに AI を動かさない）
   const hit = tempoAI && tempoAI.buf === buf ? tempoAI.ai : null;
-  const AI = hit ? 0 : 0.7;
-  const ai: Promise<MadmomResult | null> = hit
-    ? Promise.resolve(hit)
-    : runMadmomParallel(mono, buf.sampleRate, (p) => setBar(p * AI)).then(
-        (r) => {
-          tempoAI = { buf, ai: r };
-          return r;
-        },
-        (err) => {
-          console.warn('拍の AI を使えませんでした', err);
-          return null;
-        },
-      );
+  if (hit) opts.ai = hit;
   const run = ++tempoRun;
-  void ai.then((r) => {
-    // 待っている間に測り直した・閉じたときは、古いほうは使わない
-    if (!tempoState.running || run !== tempoRun) return;
-    if (r) opts.ai = { beats: r.beats, downbeats: r.downbeats };
-    measure();
-  });
-  const measure = () => {
   let worker: Worker;
   try {
     worker = new Worker(new URL('./audio/tempoWorker.ts', import.meta.url), { type: 'module' });
@@ -3391,13 +3370,15 @@ function startTempo(again = false) {
     return;
   }
   let started = false;
-  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string }>) => {
+  worker.onmessage = (e: MessageEvent<{ type: string; p?: number; result?: TempoResult; message?: string; ai?: BeatAI }>) => {
     started = true;
     const m = e.data;
     if (m.type === 'progress') {
-      setBar(AI + (m.p ?? 0) * (1 - AI));
+      setBar(m.p ?? 0);
     } else if (m.type === 'done' && m.result) {
       worker.terminate();
+      if (run !== tempoRun) return;
+      if (m.ai) tempoAI = { buf, ai: m.ai };
       done(m.result);
     } else if (m.type === 'error') {
       worker.terminate();
@@ -3410,13 +3391,12 @@ function startTempo(again = false) {
     else fail('測れませんでした');
   };
   // 測れなかったときにこの画面で測り直せるよう、データは渡さずに写す（transfer しない）
-  worker.postMessage({ mono, sr: buf.sampleRate, opts });
-  };
+  worker.postMessage({ mono, sr: buf.sampleRate, opts, aiBase: hit ? undefined : new URL('./', location.href).href });
 }
 /** 測るたびに増える番号 */
 let tempoRun = 0;
 /** 拍の AI の結果（音源ごと。測り直しのたびに AI を動かさない） */
-let tempoAI: { buf: AudioBuffer; ai: MadmomResult } | null = null;
+let tempoAI: { buf: AudioBuffer; ai: BeatAI } | null = null;
 
 const fmtSec = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
