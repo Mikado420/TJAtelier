@@ -106,9 +106,9 @@ interface Envelope {
   fr: number;
   /** フレーム i の時刻 = t0 + i / fr */
   t0: number;
-  /** 音の大きさの累積和（約 11kHz の音の 2 乗の和）。立ち上がりの時刻を 1ms 単位で求めるのに使う */
-  cum: Float64Array;
-  srD: number;
+  /** 元の音（立ち上がりの時刻を元の細かさで求めるのに使う） */
+  x: Float32Array;
+  sr: number;
 }
 
 const N = 1024;
@@ -176,32 +176,61 @@ function envelope(mono: Float32Array, sr: number, progress?: (p: number) => void
     for (let i = 0; i < out.length; i++) out[i] /= sd;
     return out;
   };
-  const cum = new Float64Array(len + 1);
-  for (let i = 0; i < len; i++) cum[i + 1] = cum[i] + x[i] * x[i];
-  return { all: norm(all), low: norm(low), fr: srD / HOP, t0: N / 2 / srD, cum, srD };
+  return { all: norm(all), low: norm(low), fr: srD / HOP, t0: N / 2 / srD, x: mono, sr };
+}
+
+/** 拍の時刻を合わせるときの、音の立ち上がり */
+function fineOnset(env: Envelope, t: number, radius: number): number {
+  return onsetIn(env, t, radius).t;
 }
 
 /**
- * t の近く（±radius 秒）で、音が急に大きくなった瞬間（立ち上がり）の時刻を細かく求める。
- * 約 3ms ずつの音の大きさを前後で比べ、いちばん増えた所
+ * t の近く（±radius 秒）で、音が鳴り始めた時刻を元の細かさで求める。
+ * 3. 約 3ms ずつの音の大きさを前後で比べ、いちばん増えた所を、元の音（44.1kHz など）の 1 サンプル単位で探す
+ * 4. そこから前へたどって、音が大きくなり始めた所（音量の山ではなく始まり）にする
+ * clear: 立ち上がりのはっきりさ（山 ÷ 底）
  */
-function fineOnset(env: Envelope, t: number, radius: number): number {
-  const { cum, srD } = env;
-  const W = Math.max(8, Math.round(srD * 0.003));
-  const n = cum.length - 1;
-  const e = (i: number) => (cum[Math.min(n, i + W)] - cum[Math.max(0, i)]) / W + 1e-10;
-  const c = Math.round(t * srD);
-  const r = Math.round(radius * srD);
+function onsetIn(env: Envelope, t: number, radius: number): { t: number; clear: number } {
+  const { x, sr } = env;
+  const n = x.length;
+  const c = Math.round(t * sr);
+  const r = Math.round(radius * sr);
+  const W = Math.max(8, Math.round(sr * 0.003));
+  const lo = Math.max(W * 2, c - r - W * 4);
+  const hi = Math.min(n - W * 2, c + r + W * 2);
+  if (hi <= lo) return { t, clear: 0 };
+  // 区間の中だけ、音の大きさの累積和をとる
+  const cum = new Float64Array(hi - lo + W * 4 + 1);
+  const base = lo - W * 2;
+  for (let i = 0; i < cum.length - 1; i++) {
+    const v = x[base + i] ?? 0;
+    cum[i + 1] = cum[i] + v * v;
+  }
+  const e = (i: number, w: number) => (cum[i - base + w] - cum[i - base]) / w + 1e-10;
   let best = c;
   let bv = -Infinity;
-  for (let i = Math.max(W, c - r); i <= Math.min(n - W, c + r); i++) {
-    const d = Math.log(e(i)) - Math.log(e(i - W));
+  for (let i = Math.max(lo, c - r); i <= Math.min(hi, c + r); i++) {
+    const d = Math.log(e(i, W)) - Math.log(e(i - W, W));
     if (d > bv) {
       bv = d;
       best = i;
     }
   }
-  return best / srD;
+  // 始まり: いちばん増えた所の前 3ms〜後 12ms で、音の大きさ（約 1ms ごと）の底と山を見て、
+  // いちばん増えた所から前へ、底から山までの 10% を下回る所まで戻る（底より前・後ろへは動かさない）
+  const w1 = Math.max(4, Math.round(sr * 0.001));
+  const s0 = Math.max(lo, best - W);
+  const s1 = Math.min(hi - w1, best + Math.round(sr * 0.012));
+  let floor = Infinity;
+  for (let i = s0; i <= best; i++) floor = Math.min(floor, e(i, w1));
+  let peak = 0;
+  for (let i = best; i <= s1; i++) peak = Math.max(peak, e(i, w1));
+  const clear = peak / floor;
+  if (!(clear > 1.5)) return { t: best / sr, clear };
+  const th = floor + (peak - floor) * 0.1;
+  let start = best;
+  while (start > s0 && e(start - 1, w1) > th) start--;
+  return { t: start / sr, clear };
 }
 
 // ---------- テンポの流れ ----------
