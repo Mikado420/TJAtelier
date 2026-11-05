@@ -140,6 +140,9 @@ def to_fp16(src, dst, x):
                 for a2 in n.attribute:
                     if a2.name == 'to':
                         a2.i = onnx.TensorProto.FLOAT
+                for vi in mdl16.graph.value_info:
+                    if vi.name in n.output:
+                        vi.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
                 fixed += 1
     print('fp16 cast fixed', fixed)
     onnx.save(mdl16, dst)
@@ -159,14 +162,16 @@ def to_fp16(src, dst, x):
         tmp = dst + '.probe.onnx'
         onnx.save(pr, tmp)
         del pr
-        sess = ort.InferenceSession(tmp, so)
+        try:
+            sess = ort.InferenceSession(tmp, so)
+        finally:
+            os.remove(tmp)
         for o, v in zip([o.name for o in sess.get_outputs()], sess.run(None, feeds)):
             if isinstance(v, np.ndarray) and v.dtype.kind == 'f' and v.size:
                 vf = v.astype(np.float32)
                 bad[o] = bool(~np.isfinite(vf).all())
                 vals[o] = float(np.nanmax(np.abs(np.where(np.isfinite(vf), vf, 0))))
         del sess
-        os.remove(tmp)
     shown = 0
     for name, op, ins, os_ in order:
         if any(bad.get(o) for o in os_) and not any(bad.get(i) for i in ins):
