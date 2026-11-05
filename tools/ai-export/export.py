@@ -6,6 +6,7 @@ import torch
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'out'
 os.makedirs(OUT, exist_ok=True)
 torch.set_grad_enabled(False)
+torch.backends.mha.set_fastpath_enabled(False)
 
 # ---------- Beat This! final0 ----------
 from beat_this.inference import load_model
@@ -19,13 +20,20 @@ class BT(torch.nn.Module):
         return o['beat'], o['downbeat']
 
 mel = torch.randn(1, 1500, 128)
+r0b, r0d = BT(bt)(mel)
+r1b, r1d = BT(bt)(mel)
+print('beat this torch repeat diff', (r0b - r1b).abs().max().item())
 torch.onnx.export(BT(bt), (mel,), f'{OUT}/beat-this-final0.onnx', input_names=['mel'], output_names=['beat', 'downbeat'],
                   dynamic_axes={'mel': {0: 'batch', 1: 'time'}, 'beat': {0: 'batch', 1: 'time'}, 'downbeat': {0: 'batch', 1: 'time'}}, opset_version=17, dynamo=False)
 import onnxruntime as ort
 s = ort.InferenceSession(f'{OUT}/beat-this-final0.onnx')
 b, d = s.run(None, {'mel': mel.numpy()})
-rb, rd = BT(bt)(mel)
-print('beat this diff', np.abs(b - rb.numpy()).max(), np.abs(d - rd.numpy()).max())
+print('beat this diff (before export ref)', np.abs(b - r0b.numpy()).max(), np.abs(d - r0d.numpy()).max())
+for T in (500, 1500, 3000):
+    x = torch.randn(1, T, 128)
+    b, d = s.run(None, {'mel': x.numpy()})
+    rb, rd = BT(bt)(x)
+    print('beat this diff T', T, np.abs(b - rb.numpy()).max(), np.abs(d - rd.numpy()).max(), 'ref', rb.abs().max().item())
 
 # ---------- HTDemucs ----------
 from demucs.pretrained import get_model
