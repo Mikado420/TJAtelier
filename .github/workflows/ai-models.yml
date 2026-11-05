@@ -1,0 +1,47 @@
+name: AI のモデルを書き出す
+
+on:
+  push:
+    branches: [main]
+    paths: ['tools/ai-export/**', '.github/workflows/ai-models.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: ライブラリを入れる
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1 torchaudio==2.5.1
+          pip install demucs==4.0.1 'git+https://github.com/CPJKU/beat_this.git' onnx==1.17.0 onnxruntime==1.20.1 onnxconverter-common==1.14.0 numpy\<2 soundfile
+      - name: 書き出す
+        run: python tools/ai-export/export.py out
+      - name: 分けて保存する
+        run: |
+          mkdir -p models
+          for f in out/*; do
+            n=$(basename "$f")
+            if [ $(stat -c %s "$f") -gt 90000000 ]; then
+              split -b 45000000 -d -a 1 "$f" "models/$n.part"
+            else
+              cp "$f" "models/$n"
+            fi
+          done
+          ls -la models
+      - name: ai-models の枝に置く
+        run: |
+          cd models
+          git init -q
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git checkout -q -b ai-models
+          git add -A
+          git commit -q -m "AI のモデル（${GITHUB_SHA::7} から書き出し）"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ai-models
