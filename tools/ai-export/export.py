@@ -21,46 +21,19 @@ class BT(torch.nn.Module):
 
 mel = torch.randn(1, 1500, 128)
 import onnxruntime as ort
-def check(path):
-    s = ort.InferenceSession(path)
-    out = []
-    for T in (500, 1500, 3000):
-        x = torch.randn(1, T, 128)
-        b, d = s.run(None, {'mel': x.numpy()})
-        rb, rd = BT(bt)(x)
-        out.append(f'T{T} {np.abs(b - rb.numpy()).max():.2e}/{np.abs(d - rd.numpy()).max():.2e}')
-    return ' '.join(out)
-
-variants = {
-    'legacy': dict(dynamo=False),
-    'legacy-nofold': dict(dynamo=False, do_constant_folding=False),
-    'legacy-op18': dict(dynamo=False, opset_version=18),
-}
-best = None
-for name, kw in variants.items():
-    kw = {'opset_version': 17, **kw}
-    path = f'/tmp/bt-{name}.onnx'
-    try:
-        torch.onnx.export(BT(bt), (mel,), path, input_names=['mel'], output_names=['beat', 'downbeat'],
-                          dynamic_axes={'mel': {0: 'batch', 1: 'time'}, 'beat': {0: 'batch', 1: 'time'}, 'downbeat': {0: 'batch', 1: 'time'}}, **kw)
-        r = check(path)
-        print('beat this', name, r)
-        if best is None and all(float(t.split(' ')[1].split('/')[0]) < 1e-3 for t in r.split(' T')[0:1]) and 'e+' not in r and 'e-01' not in r:
-            best = path
-    except Exception as e:
-        print('beat this', name, 'failed', str(e)[:300])
-# 速い経路を切った素の torch.jit.trace でも試す
-try:
-    tr = torch.jit.trace(BT(bt), (mel,), check_trace=False)
-    for T in (500, 3000):
-        x = torch.randn(1, T, 128)
-        print('jit trace diff T', T, (tr(x)[0] - BT(bt)(x)[0]).abs().max().item())
-except Exception as e:
-    print('jit failed', e)
-import shutil
-if best:
-    shutil.copy(best, f'{OUT}/beat-this-final0.onnx')
-    print('beat this picked', best)
+# 比べる正解は、書き出す前に別のモデルで出しておく（書き出しでモデルの中の覚えが変わるため）
+ref_model = BT(load_model('final0', device='cpu').eval())
+tests = []
+for T in (500, 1500, 3000, 6000):
+    x = torch.randn(1, T, 128)
+    rb, rd = ref_model(x)
+    tests.append((x, rb.numpy(), rd.numpy()))
+torch.onnx.export(BT(bt), (mel,), f'{OUT}/beat-this-final0.onnx', input_names=['mel'], output_names=['beat', 'downbeat'],
+                  dynamic_axes={'mel': {0: 'batch', 1: 'time'}, 'beat': {0: 'batch', 1: 'time'}, 'downbeat': {0: 'batch', 1: 'time'}}, opset_version=17, dynamo=False)
+s = ort.InferenceSession(f'{OUT}/beat-this-final0.onnx')
+for x, rb, rd in tests:
+    b, d = s.run(None, {'mel': x.numpy()})
+    print('beat this diff T', x.shape[1], np.abs(b - rb).max(), np.abs(d - rd).max(), 'ref', np.abs(rb).max())
 
 # ---------- HTDemucs ----------
 from demucs.pretrained import get_model
