@@ -90,6 +90,37 @@ def mag_of(mix):
     z = spec_np(mix[0])  # [2, 2048, T]
     return np.stack([z.real, z.imag], 1).reshape(1, 4, z.shape[1], z.shape[2]).astype(np.float32)
 
+# 半精度（GPU 用）: 32bit で動かして値が半精度の範囲を超える計算と、正規化などの溢れやすい計算だけ 32bit のまま残す
+def to_fp16(src, dst, x):
+    import onnx
+    from onnxconverter_common import float16
+    mdl = onnx.load(src)
+    probe = onnx.load(src)
+    names = [o for n in probe.graph.node for o in n.output if o]
+    have = {o.name for o in probe.graph.output}
+    for n in names:
+        if n not in have:
+            probe.graph.output.append(onnx.ValueInfoProto(name=n))
+    tmp = src + '.probe.onnx'
+    onnx.save(probe, tmp)
+    so = ort.SessionOptions(); so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    sess = ort.InferenceSession(tmp, so)
+    outs = sess.run(None, {'mix': x, 'mag': mag_of(x)})
+    big = {}
+    for o, v in zip([o.name for o in sess.get_outputs()], outs):
+        if isinstance(v, np.ndarray) and v.dtype == np.float32 and v.size:
+            big[o] = float(np.abs(v).max())
+    os.remove(tmp)
+    block = []
+    for n in mdl.graph.node:
+        if any(big.get(o, 0) > 2e4 for o in n.output) or any(big.get(i, 0) > 2e4 for i in n.input):
+            block.append(n.name)
+    print('fp16 block nodes', len(block), 'of', len(mdl.graph.node))
+    mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, node_block_list=block,
+                                             op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'ReduceL2'])
+    onnx.save(mdl16, dst)
+    print('fp16 saved', dst, os.path.getsize(dst))
+
 mg = mag_of(mix)
 print('mag', mg.shape)
 w = HD(m)
@@ -103,6 +134,11 @@ for name, seg in (('s39', Fraction(39, 10)), ('s26', Fraction(13, 5)), ('s20', F
     xs = mix[..., :Ls].copy()
     torch.onnx.export(HD(mm), (torch.from_numpy(xs), torch.from_numpy(mag_of(xs))), f'{OUT}/htdemucs-{name}.onnx', input_names=['mix', 'mag'], output_names=['spec', 'wave'], opset_version=17, dynamo=False)
     print('exported', name, Ls)
+    if name == 's20':
+        try:
+            to_fp16(f'{OUT}/htdemucs-{name}.onnx', f'{OUT}/htdemucs-{name}-fp16.onnx', xs)
+        except Exception as e:
+            print('fp16 failed', name, e)
 
 def combine(spec, wave):
     S = spec.shape[1]
@@ -117,14 +153,8 @@ ref = bag.models[0].__class__.forward  # 元に戻したモデルで比べる
 m2 = get_model('htdemucs').models[0].eval()
 exp = m2(torch.from_numpy(mix)).numpy()
 print('htdemucs diff', np.abs(got - exp).max(), 'ref max', np.abs(exp).max())
-
-# 半精度（GPU 用）
 try:
-    import onnx
-    from onnxconverter_common import float16
-    mdl = onnx.load(f'{OUT}/htdemucs.onnx')
-    mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'Div', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'Exp', 'Erf', 'ReduceL2'])
-    onnx.save(mdl16, f'{OUT}/htdemucs-fp16.onnx')
+    to_fp16(f'{OUT}/htdemucs.onnx', f'{OUT}/htdemucs-fp16.onnx', mix)
 except Exception as e:
     print('fp16 failed', e)
 
