@@ -116,9 +116,6 @@ try:
     mdl = onnx.load(f'{OUT}/htdemucs.onnx')
     mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'Div', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'Exp', 'Erf', 'ReduceL2'])
     onnx.save(mdl16, f'{OUT}/htdemucs-fp16.onnx')
-    s16 = ort.InferenceSession(f'{OUT}/htdemucs-fp16.onnx')
-    sp, wv = s16.run(None, {'mix': mix, 'mag': mg})
-    print('htdemucs fp16 diff', np.abs(combine(sp, wv) - exp).max())
 except Exception as e:
     print('fp16 failed', e)
 
