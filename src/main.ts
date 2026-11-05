@@ -3369,7 +3369,7 @@ function startTempo(again = false) {
   const run = ++tempoRun;
   // 進み具合の割り振り: ドラムの取り出し 0〜DM、拍の AI DM〜AI、測る AI〜1
   const DM = dHit || !USE_DEMUCS ? 0 : 0.6;
-  const AI = DM + (hit ? 0 : dHit ? 0.7 : 0.2);
+  const AI = DM + (hit ? 0 : DM === 0 ? 0.7 : 0.2);
   // 0. 曲からドラムだけを取り出す（別のスレッドで動かし、終わったら閉じてメモリを返す）。できなければ飛ばす
   // 前回の分離の途中でアプリが落ちていたら（印が残っていたら）、GPU → CPU → 分離なし の順に 1 段ずつ控える
   const DM_KEY = 'tjatelier-demucs-try';
