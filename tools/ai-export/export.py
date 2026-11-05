@@ -20,20 +20,47 @@ class BT(torch.nn.Module):
         return o['beat'], o['downbeat']
 
 mel = torch.randn(1, 1500, 128)
-r0b, r0d = BT(bt)(mel)
-r1b, r1d = BT(bt)(mel)
-print('beat this torch repeat diff', (r0b - r1b).abs().max().item())
-torch.onnx.export(BT(bt), (mel,), f'{OUT}/beat-this-final0.onnx', input_names=['mel'], output_names=['beat', 'downbeat'],
-                  dynamic_axes={'mel': {0: 'batch', 1: 'time'}, 'beat': {0: 'batch', 1: 'time'}, 'downbeat': {0: 'batch', 1: 'time'}}, opset_version=17, dynamo=False)
 import onnxruntime as ort
-s = ort.InferenceSession(f'{OUT}/beat-this-final0.onnx')
-b, d = s.run(None, {'mel': mel.numpy()})
-print('beat this diff (before export ref)', np.abs(b - r0b.numpy()).max(), np.abs(d - r0d.numpy()).max())
-for T in (500, 1500, 3000):
-    x = torch.randn(1, T, 128)
-    b, d = s.run(None, {'mel': x.numpy()})
-    rb, rd = BT(bt)(x)
-    print('beat this diff T', T, np.abs(b - rb.numpy()).max(), np.abs(d - rd.numpy()).max(), 'ref', rb.abs().max().item())
+def check(path):
+    s = ort.InferenceSession(path)
+    out = []
+    for T in (500, 1500, 3000):
+        x = torch.randn(1, T, 128)
+        b, d = s.run(None, {'mel': x.numpy()})
+        rb, rd = BT(bt)(x)
+        out.append(f'T{T} {np.abs(b - rb.numpy()).max():.2e}/{np.abs(d - rd.numpy()).max():.2e}')
+    return ' '.join(out)
+
+variants = {
+    'legacy': dict(dynamo=False),
+    'legacy-nofold': dict(dynamo=False, do_constant_folding=False),
+    'legacy-op18': dict(dynamo=False, opset_version=18),
+}
+best = None
+for name, kw in variants.items():
+    kw = {'opset_version': 17, **kw}
+    path = f'/tmp/bt-{name}.onnx'
+    try:
+        torch.onnx.export(BT(bt), (mel,), path, input_names=['mel'], output_names=['beat', 'downbeat'],
+                          dynamic_axes={'mel': {0: 'batch', 1: 'time'}, 'beat': {0: 'batch', 1: 'time'}, 'downbeat': {0: 'batch', 1: 'time'}}, **kw)
+        r = check(path)
+        print('beat this', name, r)
+        if best is None and all(float(t.split(' ')[1].split('/')[0]) < 1e-3 for t in r.split(' T')[0:1]) and 'e+' not in r and 'e-01' not in r:
+            best = path
+    except Exception as e:
+        print('beat this', name, 'failed', str(e)[:300])
+# 速い経路を切った素の torch.jit.trace でも試す
+try:
+    tr = torch.jit.trace(BT(bt), (mel,), check_trace=False)
+    for T in (500, 3000):
+        x = torch.randn(1, T, 128)
+        print('jit trace diff T', T, (tr(x)[0] - BT(bt)(x)[0]).abs().max().item())
+except Exception as e:
+    print('jit failed', e)
+import shutil
+if best:
+    shutil.copy(best, f'{OUT}/beat-this-final0.onnx')
+    print('beat this picked', best)
 
 # ---------- HTDemucs ----------
 from demucs.pretrained import get_model
@@ -114,7 +141,7 @@ try:
     import onnx
     from onnxconverter_common import float16
     mdl = onnx.load(f'{OUT}/htdemucs.onnx')
-    mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True)
+    mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'Div', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'Exp', 'Erf', 'ReduceL2'])
     onnx.save(mdl16, f'{OUT}/htdemucs-fp16.onnx')
     s16 = ort.InferenceSession(f'{OUT}/htdemucs-fp16.onnx')
     sp, wv = s16.run(None, {'mix': mix, 'mag': mg})
