@@ -126,6 +126,37 @@ def to_fp16(src, dst, x):
                                              op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'ReduceL2'])
     onnx.save(mdl16, dst)
     print('fp16 saved', dst, os.path.getsize(dst))
+    # 半精度の版で、どこで値が壊れる（NaN・無限大になる）かを探す
+    m16 = onnx.load(dst)
+    order = [(n.name, n.op_type, list(n.input), [o for o in n.output if o]) for n in m16.graph.node]
+    outs16 = [o for _, _, _, os_ in order for o in os_]
+    bad = {}
+    vals = {}
+    B2 = 800
+    for k in range(0, len(outs16), B2):
+        pr = onnx.load(dst)
+        del pr.graph.output[:]
+        for n in outs16[k:k + B2]:
+            pr.graph.output.append(onnx.ValueInfoProto(name=n))
+        tmp = dst + '.probe.onnx'
+        onnx.save(pr, tmp)
+        del pr
+        sess = ort.InferenceSession(tmp, so)
+        for o, v in zip([o.name for o in sess.get_outputs()], sess.run(None, feeds)):
+            if isinstance(v, np.ndarray) and v.dtype.kind == 'f' and v.size:
+                vf = v.astype(np.float32)
+                bad[o] = bool(~np.isfinite(vf).all())
+                vals[o] = float(np.nanmax(np.abs(np.where(np.isfinite(vf), vf, 0))))
+        del sess
+        os.remove(tmp)
+    shown = 0
+    for name, op, ins, os_ in order:
+        if any(bad.get(o) for o in os_) and not any(bad.get(i) for i in ins):
+            print('fp16 first bad', name, op, 'in', [(i, vals.get(i), big.get(i)) for i in ins], 'out32', [big.get(o) for o in os_])
+            shown += 1
+            if shown >= 8:
+                break
+    print('fp16 bad count', sum(bad.values()))
 
 mg = mag_of(mix)
 print('mag', mg.shape)
