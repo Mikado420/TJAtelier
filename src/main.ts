@@ -3358,13 +3358,82 @@ function startTempo(again = false) {
     const bar = document.getElementById('tempoBar');
     if (bar) bar.style.width = `${Math.round(p * 100)}%`;
   };
-  // 拍の AI（Beat This!）の結果は、同じ音源なら使い回す（測り直しのたびに AI を動かさない）
+  // 音源分離と拍の AI（Beat This!）の結果は、同じ音源なら使い回す（測り直しのたびに AI を動かさない）
   const hit = tempoAI && tempoAI.buf === buf ? tempoAI.ai : null;
   if (hit) opts.ai = hit;
+  const dHit = tempoDrums && tempoDrums.buf === buf ? tempoDrums : null;
+  if (dHit) {
+    opts.drums = dHit.drums;
+    opts.drumsSr = dHit.sr;
+  }
   const run = ++tempoRun;
-  const AI = hit ? 0 : 0.7;
+  // 進み具合の割り振り: ドラムの取り出し 0〜DM、拍の AI DM〜AI、測る AI〜1
+  const DM = dHit ? 0 : 0.6;
+  const AI = DM + (hit ? 0 : dHit ? 0.7 : 0.2);
+  // 0. 曲からドラムだけを取り出す（別のスレッドで動かし、終わったら閉じてメモリを返す）。できなければ飛ばす
+  // 前回の分離の途中でアプリが落ちていたら（印が残っていたら）、GPU → CPU → 分離なし の順に 1 段ずつ控える
+  const DM_KEY = 'tjatelier-demucs-try';
+  let dmLevel = 0;
+  try {
+    const t = localStorage.getItem(DM_KEY);
+    dmLevel = t === 'webgpu' ? 1 : t === 'wasm' ? 2 : Number(localStorage.getItem(DM_KEY + '-level') ?? 0);
+    if (t) localStorage.setItem(DM_KEY + '-level', String(dmLevel));
+    localStorage.removeItem(DM_KEY);
+  } catch {
+    dmLevel = 0;
+  }
+  const dmPrefer = (['webgpu', 'wasm'] as const).slice(dmLevel);
+  if (!dHit && dmPrefer.length) {
+    let dw: Worker | null = null;
+    try {
+      dw = new Worker(new URL('./audio/demucsWorker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      dw = null;
+    }
+    if (dw) {
+      const w = dw;
+      const next = (drums?: Float32Array, sr?: number) => {
+        w.terminate();
+        try {
+          localStorage.removeItem(DM_KEY);
+        } catch {
+          // 印を消せなくても続ける
+        }
+        if (run !== tempoRun || !tempoState.running) return;
+        if (drums && sr) {
+          tempoDrums = { buf, drums, sr };
+          opts.drums = drums;
+          opts.drumsSr = sr;
+        }
+        beatAI();
+      };
+      w.onmessage = (e: MessageEvent<{ type: string; p?: number; drums?: Float32Array; sr?: number; backend?: string; message?: string }>) => {
+        if (e.data.type === 'progress') setBar((e.data.p ?? 0) * DM);
+        else if (e.data.type === 'backend') {
+          try {
+            localStorage.setItem(DM_KEY, e.data.backend ?? '');
+          } catch {
+            // 印を残せなくても続ける
+          }
+        }
+        else if (e.data.type === 'done') {
+          console.info('音源分離', e.data.backend);
+          next(e.data.drums, e.data.sr);
+        } else {
+          console.warn('音源分離を使えませんでした', e.data.message);
+          next();
+        }
+      };
+      w.onerror = () => next();
+      w.postMessage({ mono, sr: buf.sampleRate, base: new URL('./', location.href).href, prefer: dmPrefer });
+      return;
+    }
+  }
+  beatAI();
   // 1. 拍の AI を別のスレッドで動かし、終わったらそのスレッドを閉じる（AI の使ったメモリを返してから測る）
   //    AI が動かせないときは、これまでの測り方だけで測る
+  function beatAI() {
+  if (!buf) return;
   if (!hit) {
     let bw: Worker | null = null;
     try {
@@ -3384,7 +3453,7 @@ function startTempo(again = false) {
         measure();
       };
       w.onmessage = (e: MessageEvent<{ type: string; p?: number; ai?: BeatAI; message?: string }>) => {
-        if (e.data.type === 'progress') setBar((e.data.p ?? 0) * AI);
+        if (e.data.type === 'progress') setBar(DM + (e.data.p ?? 0) * (AI - DM));
         else if (e.data.type === 'done') next(e.data.ai);
         else {
           console.warn('拍の AI を使えませんでした', e.data.message);
@@ -3397,6 +3466,7 @@ function startTempo(again = false) {
     }
   }
   measure();
+  }
   // 2. BPM・OFFSET を測る
   function measure() {
   if (!buf) return;
@@ -3435,6 +3505,8 @@ function startTempo(again = false) {
 let tempoRun = 0;
 /** 拍の AI の結果（音源ごと。測り直しのたびに AI を動かさない） */
 let tempoAI: { buf: AudioBuffer; ai: BeatAI } | null = null;
+/** 曲から取り出したドラムの音（音源ごと） */
+let tempoDrums: { buf: AudioBuffer; drums: Float32Array; sr: number } | null = null;
 
 const fmtSec = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 

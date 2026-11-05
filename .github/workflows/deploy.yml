@@ -35,7 +35,17 @@ jobs:
         run: |
           ( cd /tmp && npm pack onnxruntime-web@1.21.0 --silent && tar -xzf onnxruntime-web-1.21.0.tgz ) || { echo "::warning::onnxruntime-web を取れませんでした"; exit 0; }
           cp /tmp/package/dist/ort.wasm.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.mjs /tmp/package/dist/ort-wasm-simd-threaded.wasm dist/ai/
+          cp /tmp/package/dist/ort.webgpu.min.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.mjs /tmp/package/dist/ort-wasm-simd-threaded.jsep.wasm dist/ai/ || echo "::warning::GPU 用の実行環境を取れませんでした"
           cp /tmp/package/LICENSE* dist/ai/LICENSE-onnxruntime.txt 2>/dev/null || curl -fsSL -o dist/ai/LICENSE-onnxruntime.txt "https://raw.githubusercontent.com/microsoft/onnxruntime/main/LICENSE" || true
+          ls -la dist/ai
+      - name: 音源分離の AI を入れる
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git fetch --depth 1 origin ai-models || { echo "::warning::ai-models の枝を取れませんでした"; exit 0; }
+          for i in 0 1 2 3; do git show "FETCH_HEAD:htdemucs-s20.onnx.part$i" > "dist/ai/htdemucs-s20.onnx.part$i"; done
+          printf '%s\n' 'htdemucs-s20.onnx.part0-3' '' 'HTDemucs (Meta, MIT license, https://github.com/facebookresearch/demucs), 2-second segment,' \
+            'exported to ONNX by tools/ai-export/export.py. Concatenate the parts. Inputs: mix [1,2,88200], mag [1,4,2048,87].' > dist/ai/README-demucs.txt
+          curl -fsSL -o dist/ai/LICENSE-demucs.txt https://raw.githubusercontent.com/facebookresearch/demucs/main/LICENSE || true
           ls -la dist/ai
       - uses: actions/upload-pages-artifact@v4
         if: github.ref == 'refs/heads/main'

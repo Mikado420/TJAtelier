@@ -2233,7 +2233,15 @@ export interface TempoOptions {
   ai?: { beats: number[]; downbeats: number[] };
   /** 区間ごとに手で決めた拍子（null は自動） */
   meters?: (Meter | null)[];
+  /** 曲からドラムだけを取り出した音（同じサンプリング周波数）。拍の線を音の立ち上がりに合わせるときに使う */
+  drums?: Float32Array;
+  /** drums のサンプリング周波数（なければ曲と同じ） */
+  drumsSr?: number;
 }
+
+/** 拍の線を音の立ち上がりに合わせるときに使う音（ドラムだけの音があればそれ） */
+let alignEnv: Envelope | null = null;
+const XENV = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 
 export function analyzeTempo(mono: Float32Array, sr: number, progress?: (p: number) => void, opts: TempoOptions = {}): TempoResult {
   const duration = mono.length / sr;
@@ -2241,8 +2249,24 @@ export function analyzeTempo(mono: Float32Array, sr: number, progress?: (p: numb
   // 手で決めた 1 拍目は、近くの音の立ち上がりに合わせる
   curAnchors = (opts.anchors ?? []).filter((x) => x >= 0 && x < duration).map((x) => fineOnset(env, x, 0.04)).sort((a, b) => a - b);
   try {
-    return analyzeInner(env, duration, progress, opts);
+    if (!opts.drums) return analyzeInner(env, duration, progress, opts);
+    // ドラムだけの音でも測る。全体の音で測ったもの・それをドラムの音で合わせ直したもの・ドラムの音で測ったものの 3 つのうち、
+    // 両方の音の立ち上がりにいちばんよく乗っているもの（拍の線の位置まで見た合い方の積）を使う
+    const denv = envelope(opts.drums, opts.drumsSr ?? sr);
+    const rm = analyzeInner(env, duration, progress, opts);
+    alignEnv = denv;
+    const ra = analyzeInner(env, duration, progress, opts);
+    alignEnv = null;
+    const rd = analyzeInner(denv, duration, progress, opts);
+    const cands: [string, TempoResult][] = [['全体', rm], ['全体＋ドラムで合わせ', ra], ['ドラム', rd]];
+    const sc = (r: TempoResult) => alignScore(env, r) * alignScore(denv, r);
+    let pick = cands[0];
+    for (const c of cands) if (sc(c[1]) > sc(pick[1]) * Number(XENV.DR_TH ?? 1.01)) pick = c;
+    if (XENV.DR_LOG) console.error(cands.map(([n, r]) => `${n} ${sc(r).toFixed(3)} (${r.segments.length})`).join(' / '), '→', pick[0]);
+    pick[1].info = `${pick[0]}で測った／${pick[1].info ?? ''}`;
+    return pick[1];
   } finally {
+    alignEnv = null;
     curAnchors = [];
   }
 }
@@ -2440,7 +2464,7 @@ function analyzeInner(env: Envelope, duration: number, progress: ((p: number) =>
   if (!curAnchors.length && opts.ai?.downbeats.length) best.aiDowns = [...opts.ai.downbeats].sort((x, y) => x - y);
   const name = best === single ? '1 つの BPM' : best === coarse ? '区間ごと' : '1 拍ずつ';
   // 区間ごとに、拍の線を音の立ち上がりに合わせ直す（区間の境目では、拍の線が半端な長さだけずれてよい）
-  if (!curAnchors.length) best = alignSegments(env, best);
+  if (!curAnchors.length) best = alignSegments(alignEnv ?? env, best);
   // 拍子と小節の頭（途中で 1 小節だけ短い・長い小節も）
   best.beatAcc = beatAccents(env, best);
   computeMeters(best, opts.meters ?? [], curAnchors);

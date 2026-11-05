@@ -103,18 +103,6 @@ for name, seg in (('s39', Fraction(39, 10)), ('s26', Fraction(13, 5)), ('s20', F
     xs = mix[..., :Ls].copy()
     torch.onnx.export(HD(mm), (torch.from_numpy(xs), torch.from_numpy(mag_of(xs))), f'{OUT}/htdemucs-{name}.onnx', input_names=['mix', 'mag'], output_names=['spec', 'wave'], opset_version=17, dynamo=False)
     print('exported', name, Ls)
-    if name == 's20':
-        # 重みを 8bit にした版（CPU で動かすときのメモリを減らす）
-        from onnxruntime.quantization import quantize_dynamic, QuantType
-        for tag, ops in (('int8', ['MatMul', 'Gemm']), ('int8c', ['MatMul', 'Gemm', 'Conv'])):
-            q = f'{OUT}/htdemucs-{name}-{tag}.onnx'
-            try:
-                quantize_dynamic(f'{OUT}/htdemucs-{name}.onnx', q, weight_type=QuantType.QInt8, op_types_to_quantize=ops)
-                a = ort.InferenceSession(f'{OUT}/htdemucs-{name}.onnx').run(None, {'mix': xs, 'mag': mag_of(xs)})
-                b = ort.InferenceSession(q).run(None, {'mix': xs, 'mag': mag_of(xs)})
-                print('quant', tag, os.path.getsize(q), 'spec diff', float(np.abs(a[0] - b[0]).max()), 'of', float(np.abs(a[0]).max()), 'wave diff', float(np.abs(a[1] - b[1]).max()), 'of', float(np.abs(a[1]).max()))
-            except Exception as e:
-                print('quant failed', tag, e)
 
 def combine(spec, wave):
     S = spec.shape[1]
