@@ -122,6 +122,10 @@ def to_fp16(src, dst, x):
         if any(big.get(o, 0) > 2e4 for o in n.output) or any(big.get(i, 0) > 2e4 for i in n.input):
             block.append(n.name)
     print('fp16 block nodes', len(block), 'of', len(mdl.graph.node))
+    for b in block:
+        nd = next(n for n in mdl.graph.node if n.name == b)
+        cons = [(n.name, n.op_type, n.name in block) for n in mdl.graph.node if any(o in n.input for o in nd.output)]
+        print('fp16 blocked', b, nd.op_type, [big.get(o) for o in nd.output], 'consumers', cons[:6])
     mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, node_block_list=block,
                                              op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'ReduceL2'])
     onnx.save(mdl16, dst)
