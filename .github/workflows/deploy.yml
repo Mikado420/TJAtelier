@@ -42,9 +42,20 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           git fetch --depth 1 origin ai-models || { echo "::warning::ai-models の枝を取れませんでした"; exit 0; }
-          for i in 0 1 2 3; do git show "FETCH_HEAD:htdemucs-s20.onnx.part$i" > "dist/ai/htdemucs-s20.onnx.part$i"; done
-          printf '%s\n' 'htdemucs-s20.onnx.part0-3' '' 'HTDemucs (Meta, MIT license, https://github.com/facebookresearch/demucs), 2-second segment,' \
-            'exported to ONNX by tools/ai-export/export.py. Concatenate the parts. Inputs: mix [1,2,88200], mag [1,4,2048,87].' > dist/ai/README-demucs.txt
+          for f in $(git ls-tree --name-only FETCH_HEAD | grep -E '^htdemucs-s20(-fp16)?\.onnx(\.part[0-9])?$'); do git show "FETCH_HEAD:$f" > "dist/ai/$f"; done
+          python3 - <<'PY'
+          import json, os, re
+          d = 'dist/ai'
+          out = {}
+          for kind, stem, length in (('fp16', 'htdemucs-s20-fp16.onnx', 88200), ('fp32', 'htdemucs-s20.onnx', 88200)):
+              parts = sorted([f for f in os.listdir(d) if f == stem or re.fullmatch(re.escape(stem) + r'\.part\d', f)])
+              if parts:
+                  out[kind] = {'parts': parts, 'sizes': [os.path.getsize(f'{d}/{f}') for f in parts], 'length': length}
+          json.dump(out, open(f'{d}/demucs.json', 'w'))
+          print(out)
+          PY
+          printf '%s\n' 'htdemucs-s20-fp16.onnx (weights half precision, overflow-prone ops kept in float32), list: demucs.json' '' 'HTDemucs (Meta, MIT license, https://github.com/facebookresearch/demucs), 2-second segment,' \
+            'exported to ONNX by tools/ai-export/export.py. Inputs: mix [1,2,88200], mag [1,4,2048,87].' > dist/ai/README-demucs.txt
           curl -fsSL -o dist/ai/LICENSE-demucs.txt https://raw.githubusercontent.com/facebookresearch/demucs/main/LICENSE || true
           ls -la dist/ai
       - uses: actions/upload-pages-artifact@v4

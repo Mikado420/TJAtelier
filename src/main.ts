@@ -1,4 +1,5 @@
 import { setUiSound } from './ui/curtain';
+import { audioKey, loadDrums, saveDrums } from './audio/drumCache';
 import { mountGridBg } from './ui/gridBg';
 import { OnlineScreen } from './online/online';
 import { loadBest, saveBest } from './home/home';
@@ -3367,24 +3368,41 @@ function startTempo(again = false) {
     opts.drumsSr = dHit.sr;
   }
   const run = ++tempoRun;
-  // 進み具合の割り振り: ドラムの取り出し 0〜DM、拍の AI DM〜AI、測る AI〜1
-  const DM = dHit || !USE_DEMUCS ? 0 : 0.6;
-  const AI = DM + (hit ? 0 : DM === 0 ? 0.7 : 0.2);
   // 0. 曲からドラムだけを取り出す（別のスレッドで動かし、終わったら閉じてメモリを返す）。できなければ飛ばす
-  // 前回の分離の途中でアプリが落ちていたら（印が残っていたら）、GPU → CPU → 分離なし の順に 1 段ずつ控える
-  const DM_KEY = 'tjatelier-demucs-try';
+  // 前回の分離の途中でアプリが落ちていたら（印が残っていたら）、次からは分離しない
+  const DM_KEY = 'tjatelier-demucs-gpu';
   let dmLevel = 0;
   try {
     const t = localStorage.getItem(DM_KEY);
-    dmLevel = t === 'webgpu' ? 1 : t === 'wasm' ? 2 : Number(localStorage.getItem(DM_KEY + '-level') ?? 0);
+    dmLevel = t ? 1 : Number(localStorage.getItem(DM_KEY + '-level') ?? 0);
     if (t) localStorage.setItem(DM_KEY + '-level', String(dmLevel));
     localStorage.removeItem(DM_KEY);
   } catch {
     dmLevel = 0;
   }
-  // iPhone で長く、落ちるため、音源分離はいったん止める
-  const dmPrefer = USE_DEMUCS ? (['webgpu', 'wasm'] as const).slice(dmLevel) : [];
-  if (!dHit && dmPrefer.length) {
+  // 音源分離は GPU でだけ動かす（CPU では iPhone で長く、メモリが足りず落ちるため）
+  const dmPrefer = USE_DEMUCS ? (['webgpu'] as const).slice(dmLevel) : [];
+  const gpuOk = !!(navigator as unknown as { gpu?: unknown }).gpu;
+  // 進み具合の割り振り: ドラムの取り出し 0〜DM、拍の AI DM〜AI、測る AI〜1
+  const DM = dHit || !dmPrefer.length || !gpuOk ? 0 : 0.6;
+  const AI = DM + (hit ? 0 : DM === 0 ? 0.7 : 0.2);
+  if (!dHit && dmPrefer.length && gpuOk) {
+    // 前に同じ曲から取り出したドラムが端末にあれば、それを使う
+    const key = audioKey(mono, buf.sampleRate);
+    void loadDrums(key).then((saved) => {
+      if (run !== tempoRun || !tempoState.running) return;
+      if (saved) {
+        tempoDrums = { buf: buf!, drums: saved.drums, sr: saved.sr };
+        opts.drums = saved.drums;
+        opts.drumsSr = saved.sr;
+        beatAI();
+      } else separate(key);
+    });
+    return;
+  }
+  beatAI();
+  function separate(key: string) {
+    if (!buf) return;
     let dw: Worker | null = null;
     try {
       dw = new Worker(new URL('./audio/demucsWorker.ts', import.meta.url), { type: 'module' });
@@ -3402,7 +3420,8 @@ function startTempo(again = false) {
         }
         if (run !== tempoRun || !tempoState.running) return;
         if (drums && sr) {
-          tempoDrums = { buf, drums, sr };
+          tempoDrums = { buf: buf!, drums, sr };
+          void saveDrums(key, drums, sr);
           opts.drums = drums;
           opts.drumsSr = sr;
         }
@@ -3429,8 +3448,8 @@ function startTempo(again = false) {
       w.postMessage({ mono, sr: buf.sampleRate, base: new URL('./', location.href).href, prefer: dmPrefer });
       return;
     }
+    beatAI();
   }
-  beatAI();
   // 1. 拍の AI を別のスレッドで動かし、終わったらそのスレッドを閉じる（AI の使ったメモリを返してから測る）
   //    AI が動かせないときは、これまでの測り方だけで測る
   function beatAI() {
@@ -3507,7 +3526,7 @@ let tempoRun = 0;
 /** 拍の AI の結果（音源ごと。測り直しのたびに AI を動かさない） */
 let tempoAI: { buf: AudioBuffer; ai: BeatAI } | null = null;
 /** 音源分離でドラムを取り出してから測るか */
-const USE_DEMUCS = false;
+const USE_DEMUCS = true;
 /** 曲から取り出したドラムの音（音源ごと） */
 let tempoDrums: { buf: AudioBuffer; drums: Float32Array; sr: number } | null = null;
 

@@ -5,9 +5,6 @@
 export const SR = 44100;
 const NFFT = 4096;
 const HL = 1024;
-/** モデルを分けて置いたファイル（GitHub Pages の 1 ファイル 100MB の上限のため） */
-export const DEMUCS_MODEL = 'htdemucs-s20.onnx';
-export const DEMUCS_PARTS = 4;
 const CACHE = 'tjatelier-ai-v1';
 
 // ---------- FFT（長さ 4096 の実数） ----------
@@ -170,61 +167,63 @@ interface Ort {
   InferenceSession: { create(model: Uint8Array, opts?: unknown): Promise<OrtSession> };
 }
 
-async function fetchCached(url: string, progress?: (got: number) => void): Promise<Uint8Array> {
-  let cache: Cache | null = null;
-  try {
-    cache = await caches.open(CACHE);
-    const hit = await cache.match(url);
-    if (hit) {
-      const b = new Uint8Array(await hit.arrayBuffer());
-      progress?.(b.length);
-      return b;
-    }
-  } catch {
-    cache = null;
-  }
-  const res = await fetch(url);
-  if (!res.ok || !res.body) throw new Error(`音源分離の AI を読めませんでした（${res.status}）`);
-  const reader = res.body.getReader();
-  const parts: Uint8Array[] = [];
-  let got = 0;
+/** 配信している音源分離のモデルの一覧（ai/demucs.json） */
+interface ModelList {
+  [kind: string]: { parts: string[]; sizes: number[]; length: number };
+}
+
+/** ストリームを、用意した入れ物の off から読み込む（中身を写し直さない） */
+async function readInto(body: ReadableStream<Uint8Array>, buf: Uint8Array, off: number, size: number, progress?: (n: number) => void): Promise<void> {
+  const reader = body.getReader();
+  let o = off;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    parts.push(value);
-    got += value.length;
+    if (o + value.length > off + size) throw new Error('音源分離の AI の大きさが合いません');
+    buf.set(value, o);
+    o += value.length;
     progress?.(value.length);
   }
-  const buf = new Uint8Array(got);
-  let o = 0;
-  for (const p of parts) {
-    buf.set(p, o);
-    o += p.length;
-  }
-  try {
-    await cache?.put(url, new Response(buf, { headers: { 'content-type': 'application/octet-stream' } }));
-  } catch {
-    // 取っておけなくても、今回は使える
-  }
-  return buf;
+  if (o !== off + size) throw new Error('音源分離の AI を最後まで読めませんでした');
 }
 
-/** 分けて置いたモデルを 1 つにつなぐ */
-async function loadParts(dir: string, progress?: (p: number) => void): Promise<Uint8Array> {
-  const urls = Array.from({ length: DEMUCS_PARTS }, (_, i) => `${dir}${DEMUCS_MODEL}.part${i}`);
-  const est = 45_000_000 * DEMUCS_PARTS;
-  let got = 0;
-  const parts: Uint8Array[] = [];
-  for (const u of urls) parts.push(await fetchCached(u, (n) => progress?.(Math.min(1, (got += n) / est))));
-  const total = parts.reduce((a, p) => a + p.length, 0);
+/**
+ * 分けて置いたモデルを 1 つの入れ物に直接読み込む（モデル 1 つ分のメモリしか使わない）。
+ * 読んだ部分は端末に取っておき、次からはそこから読む
+ */
+async function loadModel(dir: string, kind: string, progress?: (p: number) => void): Promise<{ buf: Uint8Array; length: number }> {
+  const list = (await (await fetch(`${dir}demucs.json`, { cache: 'no-cache' })).json()) as ModelList;
+  const m = list[kind];
+  if (!m) throw new Error(`音源分離の AI（${kind}）がありません`);
+  const total = m.sizes.reduce((a, b) => a + b, 0);
   const buf = new Uint8Array(total);
-  let o = 0;
-  for (const p of parts) {
-    buf.set(p, o);
-    o += p.length;
-    p.fill(0);
+  let cache: Cache | null = null;
+  try {
+    cache = await caches.open(CACHE);
+  } catch {
+    cache = null;
   }
-  return buf;
+  let got = 0;
+  const step = (n: number) => progress?.(Math.min(1, (got += n) / total));
+  let off = 0;
+  for (let i = 0; i < m.parts.length; i++) {
+    const url = dir + m.parts[i];
+    let res = cache ? await cache.match(url).catch(() => undefined) : undefined;
+    if (!res) {
+      const r = await fetch(url);
+      if (!r.ok || !r.body) throw new Error(`音源分離の AI を読めませんでした（${r.status}）`);
+      if (cache) {
+        // 端末に取っておく分は、もう一方の流れからそのまま書かせる
+        const keep = r.clone();
+        cache.put(url, keep).catch(() => undefined);
+      }
+      res = r;
+    }
+    if (!res.body) throw new Error('音源分離の AI を読めませんでした');
+    await readInto(res.body, buf, off, m.sizes[i], step);
+    off += m.sizes[i];
+  }
+  return { buf, length: m.length };
 }
 
 /** 44100Hz にする（線形補間） */
@@ -253,20 +252,29 @@ export async function separateDrums(
   sr: number,
   base: string,
   progress?: (p: number) => void,
-  prefer: DemucsBackend[] = ['webgpu', 'wasm'],
+  prefer: DemucsBackend[] = ['webgpu'],
   /** 計算を始める前に、どちらで動かすかを知らせる（途中で落ちたときに次は控えるため） */
   onBackend?: (b: DemucsBackend) => void,
 ): Promise<{ drums: Float32Array; backend: DemucsBackend }> {
   const dir = new URL('ai/', base).href;
-  let model: Uint8Array | null = await loadParts(dir, (p) => progress?.(p * 0.28));
+  let model: Uint8Array | null = null;
+  /** 1 回に分ける長さ（モデルごとに決まっている） */
+  let L = 88200;
   let ort: Ort | null = null;
   let s: OrtSession | null = null;
   let backend: DemucsBackend = 'wasm';
-  const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
+  const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<{ features: Set<string> } | null> } }).gpu;
+  const adapter = gpu ? await gpu.requestAdapter().catch(() => null) : null;
   for (const b of prefer) {
-    if (b === 'webgpu' && !(gpu && (await gpu.requestAdapter().catch(() => null)))) continue;
+    if (b === 'webgpu' && !adapter) continue;
     try {
       onBackend?.(b);
+      model = null;
+      // GPU が半精度を計算できれば、重みを半精度にした版（メモリが半分）
+      const kind = b === 'webgpu' && adapter?.features.has('shader-f16') ? 'fp16' : 'fp32';
+      const lm = await loadModel(dir, kind, (p) => progress?.(p * 0.28));
+      model = lm.buf;
+      L = lm.length;
       ort = (await import(/* @vite-ignore */ dir + (b === 'webgpu' ? 'ort.webgpu.min.mjs' : 'ort.wasm.min.mjs'))) as Ort;
       ort.env.wasm.wasmPaths = dir;
       const iso = (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated;
@@ -289,7 +297,6 @@ export async function separateDrums(
   progress?.(0.3);
   const x = to44k(mono, sr);
   const N = x.length;
-  const L = 88200; // htdemucs-s20 の区切りの長さ（2 秒）
   const stride = Math.floor(0.75 * L);
   // 区切りの重みは三角（demucs の apply_model と同じ）
   const w = new Float64Array(L);
@@ -342,6 +349,12 @@ export async function separateDrums(
   }
   await s.release?.();
   const drums = new Float32Array(N);
-  for (let i = 0; i < N; i++) drums[i] = sw[i] > 0 ? out[i] / sw[i] : 0;
+  let energy = 0;
+  for (let i = 0; i < N; i++) {
+    drums[i] = sw[i] > 0 ? out[i] / sw[i] : 0;
+    energy += drums[i] * drums[i];
+  }
+  // 計算が壊れた（NaN・すべて 0）ときは使わない
+  if (!Number.isFinite(energy) || energy === 0) throw new Error('音源分離の結果が壊れていました');
   return { drums, backend };
 }
