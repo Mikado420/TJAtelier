@@ -22,6 +22,8 @@ const TEXT_BOTTOM = 550; // 音符文字の帯の下端
 /** エディタのプレビューに出す帯（左のパネルの上の端〜音符文字の帯の下） */
 const PV_TOP = 284;
 const PV_BOTTOM = 555;
+/** エディタの見本の下の端（エディタの、見本とレーンの間のすき間と同じ色） */
+const PV_GAP = '#0c0e10';
 const JX = 634; // 判定枠の中心
 const JY = 402;
 const NR = 54; // 通常ノーツの半径（黒縁を含む）
@@ -424,7 +426,8 @@ export class Renderer {
     c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, TEXT_BOTTOM - LANE_TOP + 12);
     c.fillStyle = '#1b2025';
     c.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
-    c.fillStyle = '#5d6f7a';
+    // エディタの見本では、音符文字の帯を目立たない暗い色にする
+    c.fillStyle = this.preview ? '#242a30' : '#5d6f7a';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, TEXT_BOTTOM - LANE_BOTTOM);
     c.fillStyle = '#000';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, 4);
@@ -440,7 +443,7 @@ export class Renderer {
     c.clearRect(0, 0, bg.width, bg.height);
     // 背景の動画を全面に出すときは、後ろの動画が見えるように塗らない
     if (vm !== 'full') {
-      c.fillStyle = '#000';
+      c.fillStyle = this.preview ? PV_GAP : '#000';
       c.fillRect(0, 0, bg.width, bg.height);
     }
     c.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
@@ -455,6 +458,11 @@ export class Renderer {
     if (!this.spectate) {
       // 動画の上では、レーンを少し透かす
       c.globalAlpha = vm === 'full' ? 0.78 : 1;
+      // エディタの見本: レーンの下は、エディタのすき間と同じほぼ黒にする
+      if (this.preview) {
+        c.fillStyle = PV_GAP;
+        c.fillRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
+      }
       this.paintLaneBase(c, V.x1);
       c.globalAlpha = 1;
     }

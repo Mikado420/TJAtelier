@@ -55,6 +55,12 @@ const C = {
   colLine: '#4d9fbe',
   lane: '#22313a',
   laneEdge: '#7fc0d8',
+  /** レーンの下端の細い線（stack の配置） */
+  laneLine: '#3c5a69',
+  /** レーンとタイムラインの間の色（タイムラインの波形の所と同じに見える色でつなぐ） */
+  tlBg: '#0e1114',
+  /** プレビューとレーンの間のすき間 */
+  pvGap: '#0c0e10',
   gogo: 'rgba(255,110,40,0.16)',
   measure: 'rgba(255,255,255,0.8)',
   text: '#f4f4f4',
@@ -916,6 +922,9 @@ export class EditorView {
 
     // 波形（上のタイムライン、またはこれまでのレーンの上の波形）
     if (this.stack) {
+      // レーンとタイムラインを 1 つのまとまりに: 間（命令の段・段の間）もタイムラインの台と同じ色で埋める
+      ctx.fillStyle = C.tlBg;
+      ctx.fillRect(L.colW, L.laneY, this.w - L.colW, L.tlTop - L.laneY);
       this.drawTimeline(L);
     } else {
       ctx.fillStyle = 'rgba(29,32,35,0.9)';
@@ -995,10 +1004,15 @@ export class EditorView {
     });
 
     ctx.save();
-    ctx.fillStyle = C.laneEdge;
-    ctx.shadowColor = 'rgba(30,136,255,0.8)';
-    ctx.shadowBlur = 8 * s;
     const edge = Math.max(1, 2 * s);
+    if (this.stack) {
+      // 段ごとに下端だけ目立たない細い線
+      ctx.fillStyle = C.laneLine;
+    } else {
+      ctx.fillStyle = C.laneEdge;
+      ctx.shadowColor = 'rgba(30,136,255,0.8)';
+      ctx.shadowBlur = 8 * s;
+    }
     // 段ごとに上下の縁（見えている段だけ。スクロール中は枠からはみ出さない）
     ctx.beginPath();
     ctx.rect(L.colW, L.laneY - edge, this.w - L.colW, L.blockH + edge * 2);
@@ -1006,11 +1020,17 @@ export class EditorView {
     for (let r = 0; r <= L.sub; r++) {
       const g = this.rowGeom(r);
       if (g.y > L.laneY + L.blockH + 1 || g.y + g.h < L.laneY - 1) continue;
-      ctx.fillRect(L.colW, g.y - edge / 2, this.w - L.colW, edge);
+      if (!this.stack) ctx.fillRect(L.colW, g.y - edge / 2, this.w - L.colW, edge);
       ctx.fillRect(L.colW, g.y + g.h - edge / 2, this.w - L.colW, edge);
       if (!L.sub) break;
     }
     ctx.restore();
+    if (this.stack) {
+      // プレビューとレーンの間: ほぼ黒のすき間で切り離す
+      const y0 = L.pv.y + L.pv.h;
+      ctx.fillStyle = C.pvGap;
+      ctx.fillRect(L.colW, y0, this.w - L.colW, L.laneY + edge / 2 - y0);
+    }
 
     // 見えていない段に音符がある所: 上下の縁を緑にして知らせる。右の端に、見ている段の印
     if (L.rows > 1) {
@@ -1550,12 +1570,11 @@ export class EditorView {
     ctx.lineTo(px, top + 12 * s + 4);
     ctx.closePath();
     ctx.fill();
-    // 縁（レーンと同じ光る線）
+    // 下の縁（レーンと同じ光る線。上はレーンとつなげるので出さない）
     ctx.fillStyle = C.laneEdge;
     ctx.shadowColor = 'rgba(30,136,255,0.8)';
     ctx.shadowBlur = 8 * s;
     const e = Math.max(1, 2 * s);
-    ctx.fillRect(x0, top - e / 2, x1 - x0, e);
     ctx.fillRect(x0, bot - e / 2, x1 - x0, e);
     ctx.restore();
     // 今の位置の小節・BPM・拍子（見出しの左端。位置は固定で、再生位置の印より手前に描く）
@@ -1840,11 +1859,10 @@ export class EditorView {
           ctx.fill('evenodd');
         }
       }
-      // 縁
-      ctx.fillStyle = C.laneEdge;
+      // 下端の細い線（自分のレーンと同じ）
+      ctx.fillStyle = C.laneLine;
       for (let r = 0; r < ln.rows; r++) {
         const q = rowG(r);
-        ctx.fillRect(x0, q.y - lw / 2, this.w - x0, lw);
         ctx.fillRect(x0, q.y + q.h - lw / 2, this.w - x0, lw);
       }
       // 譜面の下: 命令（GOGO 以外。自分のレーンと同じ形）
