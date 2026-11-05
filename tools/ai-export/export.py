@@ -122,12 +122,17 @@ def to_fp16(src, dst, x):
         if any(big.get(o, 0) > 2e4 for o in n.output) or any(big.get(i, 0) > 2e4 for i in n.input):
             block.append(n.name)
     print('fp16 block nodes', len(block), 'of', len(mdl.graph.node))
-    for b in block:
-        nd = next(n for n in mdl.graph.node if n.name == b)
-        cons = [(n.name, n.op_type, n.name in block) for n in mdl.graph.node if any(o in n.input for o in nd.output)]
-        print('fp16 blocked', b, nd.op_type, [big.get(o) for o in nd.output], 'consumers', cons[:6])
     mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, node_block_list=block,
                                              op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'ReduceL2'])
+    # 型を変える計算（Cast）は残す指定が効かず半精度に変えられるので、32bit に戻す
+    fixed = 0
+    for n in mdl16.graph.node:
+        if n.op_type == 'Cast' and n.name in block:
+            for a in n.attribute:
+                if a.name == 'to' and a.i == onnx.TensorProto.FLOAT16:
+                    a.i = onnx.TensorProto.FLOAT
+                    fixed += 1
+    print('fp16 cast fixed', fixed)
     onnx.save(mdl16, dst)
     print('fp16 saved', dst, os.path.getsize(dst))
     # 半精度の版で、どこで値が壊れる（NaN・無限大になる）かを探す
