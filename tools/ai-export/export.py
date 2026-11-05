@@ -94,6 +94,15 @@ mg = mag_of(mix)
 print('mag', mg.shape)
 w = HD(m)
 torch.onnx.export(w, (torch.from_numpy(mix), torch.from_numpy(mg)), f'{OUT}/htdemucs.onnx', input_names=['mix', 'mag'], output_names=['spec', 'wave'], opset_version=17, dynamo=False)
+# 短い区切りの版（メモリを抑えるため）
+from fractions import Fraction
+for name, seg in (('s39', Fraction(39, 10)), ('s26', Fraction(13, 5)), ('s20', Fraction(2, 1))):
+    mm = get_model('htdemucs').models[0].eval()
+    mm.segment = seg
+    Ls = int(seg * mm.samplerate)
+    xs = mix[..., :Ls].copy()
+    torch.onnx.export(HD(mm), (torch.from_numpy(xs), torch.from_numpy(mag_of(xs))), f'{OUT}/htdemucs-{name}.onnx', input_names=['mix', 'mag'], output_names=['spec', 'wave'], opset_version=17, dynamo=False)
+    print('exported', name, Ls)
 
 def combine(spec, wave):
     S = spec.shape[1]
