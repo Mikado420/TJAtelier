@@ -124,19 +124,24 @@ def to_fp16(src, dst, x):
     print('fp16 block nodes', len(block), 'of', len(mdl.graph.node))
     mdl16 = float16.convert_float_to_float16(mdl, keep_io_types=True, node_block_list=block,
                                              op_block_list=['ReduceMean', 'ReduceSum', 'Pow', 'Sqrt', 'InstanceNormalization', 'LayerNormalization', 'Softmax', 'ReduceL2'])
-    # 型を変える計算（Cast）は残す指定が効かず半精度に変えられるので、32bit に戻す
+    # 32bit に残した計算の出力を、いったん半精度にしてからまた 32bit に戻す無駄な変換があり、そこで値が溢れるので、
+    # 行き先がすべて 32bit に戻す変換なら、半精度にしない
+    cons = {}
+    for n in mdl16.graph.node:
+        for i in n.input:
+            cons.setdefault(i, []).append(n)
+    def to_of(n):
+        return next((a.i for a in n.attribute if a.name == 'to'), None)
     fixed = 0
     for n in mdl16.graph.node:
-        if n.op_type == 'Cast' and n.name in block:
-            for a in n.attribute:
-                if a.name == 'to' and a.i == onnx.TensorProto.FLOAT16:
-                    a.i = onnx.TensorProto.FLOAT
-                    fixed += 1
+        if n.op_type == 'Cast' and to_of(n) == onnx.TensorProto.FLOAT16:
+            cs = [c for o in n.output for c in cons.get(o, [])]
+            if cs and all(c.op_type == 'Cast' and to_of(c) == onnx.TensorProto.FLOAT for c in cs) and not any(o in [g.name for g in mdl16.graph.output] for o in n.output):
+                for a2 in n.attribute:
+                    if a2.name == 'to':
+                        a2.i = onnx.TensorProto.FLOAT
+                fixed += 1
     print('fp16 cast fixed', fixed)
-    for n in mdl16.graph.node:
-        if n.op_type == 'Cast' and ('Cast_1' in n.name or 'Cast_2' in n.name or any('Cast_1' in i or 'Cast_2' in i for i in n.input)):
-            cons = [(c.name, c.op_type) for c in mdl16.graph.node if any(o in c.input for o in n.output)]
-            print('fp16 node', n.name, list(n.input), list(n.output), [(a.name, a.i) for a in n.attribute], 'consumers', cons)
     onnx.save(mdl16, dst)
     print('fp16 saved', dst, os.path.getsize(dst))
     # 半精度の版で、どこで値が壊れる（NaN・無限大になる）かを探す
