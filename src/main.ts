@@ -3368,7 +3368,7 @@ function startTempo(again = false) {
   }
   const run = ++tempoRun;
   // 進み具合の割り振り: ドラムの取り出し 0〜DM、拍の AI DM〜AI、測る AI〜1
-  const DM = dHit ? 0 : 0.6;
+  const DM = dHit || !USE_DEMUCS ? 0 : 0.6;
   const AI = DM + (hit ? 0 : dHit ? 0.7 : 0.2);
   // 0. 曲からドラムだけを取り出す（別のスレッドで動かし、終わったら閉じてメモリを返す）。できなければ飛ばす
   // 前回の分離の途中でアプリが落ちていたら（印が残っていたら）、GPU → CPU → 分離なし の順に 1 段ずつ控える
@@ -3382,7 +3382,8 @@ function startTempo(again = false) {
   } catch {
     dmLevel = 0;
   }
-  const dmPrefer = (['webgpu', 'wasm'] as const).slice(dmLevel);
+  // iPhone で長く、落ちるため、音源分離はいったん止める
+  const dmPrefer = USE_DEMUCS ? (['webgpu', 'wasm'] as const).slice(dmLevel) : [];
   if (!dHit && dmPrefer.length) {
     let dw: Worker | null = null;
     try {
@@ -3505,6 +3506,8 @@ function startTempo(again = false) {
 let tempoRun = 0;
 /** 拍の AI の結果（音源ごと。測り直しのたびに AI を動かさない） */
 let tempoAI: { buf: AudioBuffer; ai: BeatAI } | null = null;
+/** 音源分離でドラムを取り出してから測るか */
+const USE_DEMUCS = false;
 /** 曲から取り出したドラムの音（音源ごと） */
 let tempoDrums: { buf: AudioBuffer; drums: Float32Array; sr: number } | null = null;
 
