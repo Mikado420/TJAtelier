@@ -133,6 +133,10 @@ def to_fp16(src, dst, x):
                     a.i = onnx.TensorProto.FLOAT
                     fixed += 1
     print('fp16 cast fixed', fixed)
+    for n in mdl16.graph.node:
+        if n.op_type == 'Cast' and ('Cast_1' in n.name or 'Cast_2' in n.name or any('Cast_1' in i or 'Cast_2' in i for i in n.input)):
+            cons = [(c.name, c.op_type) for c in mdl16.graph.node if any(o in c.input for o in n.output)]
+            print('fp16 node', n.name, list(n.input), list(n.output), [(a.name, a.i) for a in n.attribute], 'consumers', cons)
     onnx.save(mdl16, dst)
     print('fp16 saved', dst, os.path.getsize(dst))
     # 半精度の版で、どこで値が壊れる（NaN・無限大になる）かを探す
