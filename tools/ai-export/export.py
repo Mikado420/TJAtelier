@@ -95,22 +95,28 @@ def to_fp16(src, dst, x):
     import onnx
     from onnxconverter_common import float16
     mdl = onnx.load(src)
-    probe = onnx.load(src)
-    names = [o for n in probe.graph.node for o in n.output if o]
-    have = {o.name for o in probe.graph.output}
-    for n in names:
-        if n not in have:
-            probe.graph.output.append(onnx.ValueInfoProto(name=n))
-    tmp = src + '.probe.onnx'
-    onnx.save(probe, tmp)
-    so = ort.SessionOptions(); so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-    sess = ort.InferenceSession(tmp, so)
-    outs = sess.run(None, {'mix': x, 'mag': mag_of(x)})
+    # 途中の値を少しずつ出して、いちばん大きい値を見る（一度に全部出すとメモリが足りない）
+    names = [o for n in mdl.graph.node for o in n.output if o]
     big = {}
-    for o, v in zip([o.name for o in sess.get_outputs()], outs):
-        if isinstance(v, np.ndarray) and v.dtype == np.float32 and v.size:
-            big[o] = float(np.abs(v).max())
-    os.remove(tmp)
+    feeds = {'mix': x, 'mag': mag_of(x)}
+    so = ort.SessionOptions(); so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    so.enable_cpu_mem_arena = False
+    B = 150
+    for k in range(0, len(names), B):
+        probe = onnx.load(src)
+        del probe.graph.output[:]
+        for n in names[k:k + B]:
+            probe.graph.output.append(onnx.ValueInfoProto(name=n))
+        tmp = src + '.probe.onnx'
+        onnx.save(probe, tmp)
+        del probe
+        sess = ort.InferenceSession(tmp, so)
+        for o, v in zip([o.name for o in sess.get_outputs()], sess.run(None, feeds)):
+            if isinstance(v, np.ndarray) and v.dtype == np.float32 and v.size:
+                big[o] = float(np.abs(v).max())
+        del sess
+        os.remove(tmp)
+    print('fp16 probe max', max(big.values()))
     block = []
     for n in mdl.graph.node:
         if any(big.get(o, 0) > 2e4 for o in n.output) or any(big.get(i, 0) > 2e4 for i in n.input):
@@ -136,7 +142,11 @@ for name, seg in (('s39', Fraction(39, 10)), ('s26', Fraction(13, 5)), ('s20', F
     print('exported', name, Ls)
     if name == 's20':
         try:
-            to_fp16(f'{OUT}/htdemucs-{name}.onnx', f'{OUT}/htdemucs-{name}-fp16.onnx', xs)
+            # 大きめの音（ほぼ最大音量の雑音と音程）で値の大きさを見る
+            r2 = np.random.default_rng(1)
+            tt = np.arange(Ls) / 44100
+            loud = (0.6 * r2.standard_normal((1, 2, Ls)) + 0.4 * np.sin(2 * np.pi * 55 * tt)).clip(-1, 1).astype(np.float32)
+            to_fp16(f'{OUT}/htdemucs-{name}.onnx', f'{OUT}/htdemucs-{name}-fp16.onnx', loud)
         except Exception as e:
             print('fp16 failed', name, e)
 
@@ -153,10 +163,6 @@ ref = bag.models[0].__class__.forward  # 元に戻したモデルで比べる
 m2 = get_model('htdemucs').models[0].eval()
 exp = m2(torch.from_numpy(mix)).numpy()
 print('htdemucs diff', np.abs(got - exp).max(), 'ref max', np.abs(exp).max())
-try:
-    to_fp16(f'{OUT}/htdemucs.onnx', f'{OUT}/htdemucs-fp16.onnx', mix)
-except Exception as e:
-    print('fp16 failed', e)
 
 # 確かめ用の入出力（ブラウザ側の STFT を合わせるため）
 np.save(f'{OUT}/check-mix.npy', mix)
