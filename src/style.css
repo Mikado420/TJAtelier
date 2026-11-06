@@ -3141,3 +3141,100 @@ canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-inde
 .stage.stack .zoom-ctl #zoomReset { width: 52px; }
 .stage .br-ctl { flex-direction: row; --bh: max(22px, min(30px, calc(var(--tl-h, 60px) - 8px))); top: calc(var(--ev-top, 30px) + (var(--tl-h, 60px) - var(--bh)) / 2); }
 .stage .br-ctl .br-stack { margin-top: 0; margin-left: 3px; }
+
+/* ---------- エディタ: 右の縦の帯（幅 48・ボタンは高さいっぱいに均等） ---------- */
+:root { --rail-w: 48px; }
+.side { width: var(--rail-w); }
+.side > button, .side > .divbtn { flex: 1 1 0; min-height: 40px; }
+.div-menu { right: calc(var(--rail-w) + 8px); }
+
+/* ---------- エディタ: 道具の帯（エディタの幅いっぱい。ボタンを大きく） ---------- */
+.tools { left: calc(var(--col-w, 60px) + 6px); right: 6px; width: auto; padding: 6px 8px; gap: max(8px, calc(20px * var(--es, 0.45))); }
+.note-tools { flex: 4.8 1 0; min-width: 0; grid-auto-columns: minmax(0, 1fr); }
+.cmd-tools { flex: 5 1 0; min-width: 0; grid-auto-columns: minmax(0, 1fr); }
+.grid-step { flex: none; }
+.grid-step #divPrev, .grid-step #divNext { width: 44px; }
+.tool-lb { font-size: clamp(11px, calc(17px * var(--es, 0.45)), 14px); letter-spacing: -0.03em; }
+
+/* ---------- エディタ: 選択中は、道具の帯の所に選択の操作を出す（道具の帯と入れ替え） ---------- */
+.stage.selecting .tools { visibility: hidden; }
+.stage .sel-bar, .stage.stack .sel-bar {
+  left: calc(var(--col-w, 60px) + 6px);
+  right: 6px;
+  bottom: calc(40px * var(--es, 0.45));
+  height: calc(var(--th) + 12px);
+  padding: 6px 8px;
+  gap: 6px;
+  align-items: stretch;
+  background: rgba(29, 32, 35, 0.92);
+}
+.stage .sel-bar button { flex: 1 1 auto; min-width: 0; padding: 0 8px; font-size: 14px; font-weight: 700; }
+.stage .sel-bar .sel-info { align-self: center; min-width: 3.2em; text-align: center; font-size: 14px; }
+.stage .sel-bar .sel-exit { flex: none; width: max(44px, var(--th)); padding: 0; display: grid; place-items: center; background: #fff; }
+.stage .sel-bar .sel-exit svg { width: 20px; height: 20px; fill: none; stroke: #000; stroke-width: 2.6; stroke-linecap: round; }
+
+/* ---------- エディタ: メニュー（右から出る縦長の板。まとまりごとに 2 列で、記号＋ラベルを横に） ---------- */
+.menu-panel {
+  top: 0;
+  bottom: 0;
+  right: var(--rail-w);
+  width: min(300px, calc(100% - var(--rail-w) - 16px));
+  max-height: none;
+  padding: 4px 10px calc(10px + var(--safe-b));
+  border: 0;
+  border-left: 3px solid var(--accent);
+}
+.menu-panel h4 { margin: 12px 2px 6px; font-size: 12px; }
+.mp-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 0; }
+.mp-grid button { height: 48px; padding: 0 12px; flex-direction: row; justify-content: flex-start; gap: 10px; font-size: 14px; }
+.mp-grid svg { width: 22px; height: 22px; flex: none; }
+.mp-grid button span { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- 曲えらび: 左下のボタンは 2 × 2 で、記号の右にラベル ---------- */
+.home-navb { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px 10px 10px; }
+.home-navb button { height: 46px; max-width: none; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.home-navb button span { font-size: 13px; font-weight: 800; color: #fff; white-space: nowrap; }
+.home-navb svg { width: 19px; height: 19px; flex: none; }
+
+/* ---------- 曲えらび: 王冠がまだ無い曲の印は、うすい王冠の形 ---------- */
+.hr-mk { width: 16px; height: 12px; border: 0; background: rgba(255, 255, 255, 0.28); transform: none; clip-path: polygon(0 100%, 0 15%, 28% 55%, 50% 0, 72% 55%, 100% 15%, 100% 100%); }
+.hr.on .hr-mk { background: var(--accent); }
+
+/* ---------- 曲えらび: 選択中は、見出しの中身を操作と入れ替える ---------- */
+.home-picking .home-mh { background: #0f3a4c; padding-left: 6px; }
+.home-picking .home-mh > :not(#homePick) { display: none; }
+.home-mh .home-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0; background: none; border: 0; }
+.home-mh .home-pick.hidden { display: none; }
+.home-mh .home-pick .sp { flex: 1; }
+.home-mh .home-pick .pk-hint { flex: none; text-align: left; font-size: 13px; color: #fff; }
+.home-mh .home-pick .pk-hint b { font: 800 18px var(--fd); }
+.home-mh .home-pick button { height: 36px; min-width: 0; padding: 0 12px; font-size: 13px; font-weight: 800; background: var(--btn); color: #fff; white-space: nowrap; }
+.home-mh .home-pick .pk-x { width: 44px; height: 40px; padding: 0; flex: none; }
+.home-mh .home-pick .pk-x svg { width: 18px; height: 18px; stroke-width: 2.4; }
+.home-mh .home-pick .pk-all { display: flex; }
+.home-mh .home-pick .pk-all.on { background: var(--accent); }
+.home-mh .home-pick .bad { margin-left: 14px; background: transparent; box-shadow: inset 0 0 0 2px #e05555; color: #ff8a8a; }
+.home-mh .home-pick button:disabled { opacity: 0.4; }
+
+/* ---------- 曲えらび: 検索欄は見出しの中（今の場所の表示と入れ替える） ---------- */
+.home-mh .home-search { flex: 1; min-width: 0; padding: 0 6px 0 0; }
+.home-mh .home-search input { height: 34px; }
+.home-mh.searching #homePath, .home-mh.searching .sp { display: none; }
+
+/* ---------- 曲えらび: トーストは画面の下の真ん中（難易度えらびは下に操作があるので、今までどおり上） ---------- */
+body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast { top: auto; bottom: calc(14px + var(--safe-b)); transform: translateX(-50%) translateY(8px); }
+body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ---------- 難易度えらび: 小さい操作を 44 に。選ぶ前の「はじめる」も形を見せる ---------- */
+.hdf-opt button { width: 44px; height: 44px; font-size: 20px; }
+.home .hdf-auto { height: 44px; padding: 0 14px; }
+.home .hdf-go { height: 48px; }
+.home .hdf-card .hdf-uraok { width: 30px; height: 30px; padding: 5px; background: rgba(0, 0, 0, 0.45); }
+.home .hdf-go:disabled { background: transparent; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.45); color: rgba(255, 255, 255, 0.55); }
+/* 幅の狭いエディタ（小さい iPhone）: 音符のボタンを少し細くして、命令のボタンのラベルが収まるように */
+@container (max-width: 660px) {
+  .tools { padding: 6px 4px; gap: 8px; }
+  .note-tools { flex: 4.2 1 0; gap: 3px; }
+  .cmd-tools { gap: 3px; }
+  .tool-lb { font-size: 10.5px; letter-spacing: -0.07em; }
+}

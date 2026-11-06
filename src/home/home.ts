@@ -181,7 +181,7 @@ export class Home {
     this.list = document.getElementById('homeList')!;
     this.foldersEl = document.getElementById('homeFolders')!;
     const q = document.getElementById('homeQuery') as HTMLInputElement;
-    q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); });
+    q.addEventListener('input', () => { this.query = q.value.trim(); this.render(); this.list.scrollTop = 0; });
     this.el.addEventListener('click', (e) => this.onClick(e));
     this.bindSongMenu();
     // 画面の向き・大きさが変わると、ジャケットの下の欄の幅も変わる
@@ -395,13 +395,15 @@ export class Home {
       const allOn = songs.length > 0 && songs.every((x) => pk.has(x.id));
       const inFolder = this.folder !== null && this.folder !== UNCAT && !this.query;
       const off = pk.size ? '' : 'disabled';
+      // 見出しの所に出す: ✕（完了）・何曲・すべて・フォルダへ・未分類へ（フォルダの中なら 移す・外す）・削除
       bar.innerHTML = `
-        <button data-pk="all" class="pk-all ${allOn ? 'on' : ''}"><i class="hr-ck">${allOn ? '✓' : ''}</i>${allOn ? '選択を解除' : 'すべて選択'}</button>
-        <span class="pk-hint">${pk.size ? `<b>${pk.size}</b> 曲` : ''}</span>
-        <button data-pk="add" ${off}>フォルダに入れる</button>
-        ${inFolder ? `<button data-pk="move" ${off}>移す</button><button data-pk="remove" ${off}>外す</button>` : `<button data-pk="clear" ${off}>未分類に戻す</button>`}
-        <button data-pk="delete" class="bad" ${off}>削除</button>
-        <button data-pk="done" class="pk-done">完了</button>`;
+        <button data-pk="done" class="pk-x" aria-label="完了"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <span class="pk-hint"><b>${pk.size}</b> 曲</span>
+        <span class="sp"></span>
+        <button data-pk="all" class="pk-all ${allOn ? 'on' : ''}">すべて</button>
+        <button data-pk="add" ${off}>フォルダへ</button>
+        ${inFolder ? `<button data-pk="move" ${off}>移す</button><button data-pk="remove" ${off}>外す</button>` : `<button data-pk="clear" ${off}>未分類へ</button>`}
+        <button data-pk="delete" class="bad" ${off}>削除</button>`;
     }
     this.el.classList.toggle('home-picking', !!pk);
     const pb = document.getElementById('homePickBtn') as HTMLElement;
@@ -416,7 +418,8 @@ export class Home {
     (document.getElementById('homeCount') as HTMLElement).textContent = this.query || this.open ? `${songs.length} 曲` : `${this.folders.length + 2} フォルダ`;
     // 端の曲もまんなかまで来られるよう、上下に余白
     const pad = `${Math.max(0, this.list.clientHeight / 2 - 26)}px`;
-    this.list.style.paddingTop = pad;
+    // 検索中は先頭から出す（上に余白を空けない）
+    this.list.style.paddingTop = this.query ? '8px' : pad;
     this.list.style.paddingBottom = pad;
     if (scrollToSel) this.centerSel(false);
     this.paintPlayer();
@@ -979,6 +982,8 @@ export class Home {
     } else if (a === 'search') {
       const box = document.getElementById('homeSearch')!;
       box.classList.toggle('hidden');
+      // 検索欄は見出しの今の場所の表示と入れ替える
+      box.parentElement!.classList.toggle('searching', !box.classList.contains('hidden'));
       const q = document.getElementById('homeQuery') as HTMLInputElement;
       if (!box.classList.contains('hidden')) q.focus();
       else { q.value = ''; this.query = ''; this.render(true); }

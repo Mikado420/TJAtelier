@@ -467,6 +467,10 @@ let pvDirty = true;
 let pvRect = '';
 /** 最後にプレビューを描き直した時刻（叩いた演出が終わるまでは描き続ける） */
 let pvActiveUntil = 0;
+/** 見本の大きさが変わった（作り直した canvas は空なので、次のフレームで必ず描き直す） */
+let pvResized = true;
+// Renderer も同じ canvas を見張って作り直す。こちらはその後に呼ばれるので、描き直しの合図だけ出す
+new ResizeObserver(() => { pvResized = true; }).observe($('edPreviewCv'));
 function pvSync() {
   const r = view.L.pv;
   const key = `${r.x}|${r.y}|${r.w}|${r.h}`;
@@ -478,6 +482,7 @@ function pvSync() {
   pvBox.style.height = `${r.h}px`;
   pvBox.classList.toggle('hidden', r.h < 8);
   pvRenderer.resize();
+  pvResized = true;
 }
 function pvBuild(now: number) {
   const course = toPlayable(ed.chart, ed.course);
@@ -513,6 +518,7 @@ function pvFrame(force: boolean) {
     p.t = now;
     force = true;
   }
+  if (pvResized) { force = true; pvResized = false; }
   if (!force && performance.now() > pvActiveUntil) return;
   pvRenderer.speed = settings.speed;
   pvRenderer.draw(pv!.game, pv!.course, now, { title: ed.chart.title, course: ed.course.name, level: ed.course.level });
@@ -547,10 +553,13 @@ function updateHeader() {
   view.invalidate();
 }
 
-// ノーツのボタンは 4 つ。置いてあるノーツはタップで消える。選んでいるボタンをもう一度タップすると、組になっている音符に切り替わる
+// ノーツのボタンは 6 つ（ドン・カッ・大ドン・大カッは別々）。置いてあるノーツはタップで消える。
+// 連打のボタンは、選んでいるときにもう一度タップすると連打⇔大連打 が切り替わる
 const TOOL_GROUPS: Record<string, Tool[]> = {
-  small: ['don', 'ka'],
-  big: ['bigDon', 'bigKa'],
+  don: ['don'],
+  ka: ['ka'],
+  bigDon: ['bigDon'],
+  bigKa: ['bigKa'],
   roll: ['roll', 'bigRoll'],
   balloon: ['balloon'],
   gogo: ['gogo'],
@@ -575,11 +584,14 @@ const TOOL_LOOK: Record<Tool, { label: string; cls: string }> = {
   select: { label: '選択', cls: 'cmd select' },
 };
 /** 各ボタンが今どちらの音符になっているか */
-const groupTool: Record<string, Tool> = { small: 'don', big: 'bigDon', roll: 'roll', balloon: 'balloon', gogo: 'gogo', scroll: 'scroll', bpm: 'bpm', measure: 'measure', select: 'select' };
+const groupTool: Record<string, Tool> = { don: 'don', ka: 'ka', bigDon: 'bigDon', bigKa: 'bigKa', roll: 'roll', balloon: 'balloon', gogo: 'gogo', scroll: 'scroll', bpm: 'bpm', measure: 'measure', select: 'select' };
 const groupOf = (t: Tool) => Object.keys(TOOL_GROUPS).find((g) => TOOL_GROUPS[g].includes(t))!;
+/** 選択ツールにする前の道具（選択の操作の ✕ で戻る） */
+let toolBeforeSelect: Tool = 'don';
 
 function setTool(t: Tool) {
   const prevTool = ed.tool;
+  if (t === 'select' && prevTool !== 'select') toolBeforeSelect = prevTool;
   ed.tool = t;
   groupTool[groupOf(t)] = t;
   // 始点を決めた後に別の種類のツールに替えたら、始点を取り消す（連打・大連打・風船どうしはそのまま終点を選べる）
@@ -695,8 +707,8 @@ const ICON: Record<string, string> = {
 };
 type Tile = { label: string; icon?: string; on?: boolean; primary?: boolean; keep?: boolean; wide?: boolean; run: () => void } | { head: string };
 type MenuTab = 'edit' | 'file' | 'play';
-const MENU_TABS: [MenuTab, string][] = [['edit', '編集'], ['file', 'ファイル'], ['play', '再生']];
-let menuTab: MenuTab = 'file';
+/** メニューは右から出る縦長の板に、編集・ファイル・再生をまとまりごとに上から並べる（タブは使わない） */
+const MENU_GROUPS: [MenuTab, string][] = [['edit', '編集'], ['file', 'ファイル'], ['play', '再生']];
 const menuPanel = $('menuPanel');
 function menuTiles(tab: MenuTab): Tile[] {
   if (tab === 'edit') {
@@ -731,7 +743,8 @@ function menuTiles(tab: MenuTab): Tile[] {
 }
 const svgIcon = (k: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k] ?? ''}</svg>`;
 function renderMenu() {
-  const tiles = menuTiles(menuTab);
+  // ファイルは中に「読み込み」「書き出し」の見出しがあるので、まとまりの見出しは付けない
+  const tiles: Tile[] = MENU_GROUPS.flatMap(([k, n]) => (k === 'file' ? menuTiles(k) : [{ head: n }, ...menuTiles(k)]));
   let grid = '';
   let html = '';
   const flush = () => { if (grid) html += `<div class="mp-grid">${grid}</div>`; grid = ''; };
@@ -740,11 +753,9 @@ function renderMenu() {
     grid += `<button data-ti="${i}" class="${t.on ? 'on' : ''} ${t.primary ? 'primary' : ''} ${t.icon ? '' : 'txt'} ${t.wide ? 'wide' : ''}">${t.icon ? svgIcon(t.icon) : ''}<span>${esc(t.label)}</span></button>`;
   });
   flush();
-  menuPanel.innerHTML = `<div class="mp-tabs">${MENU_TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === menuTab ? 'on' : ''}">${n}</button>`).join('')}</div>${html}`;
+  menuPanel.innerHTML = html;
   menuPanel.onclick = (e) => {
     e.stopPropagation();
-    const tb = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-tab]');
-    if (tb) { menuTab = tb.dataset.tab as MenuTab; renderMenu(); return; }
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-ti]');
     if (!b) return;
     const t = tiles[Number(b.dataset.ti)];
@@ -966,12 +977,15 @@ function updateSelBar() {
   const bar = $('selBar');
   const on = ed.tool === 'select';
   bar.classList.toggle('hidden', !on);
+  // 選択中は、道具の帯の所に選択の操作を出す（道具の帯は隠す）
+  $('editor').parentElement!.classList.toggle('selecting', on);
   if (!on) return;
   const n = ed.selectedNotes().length;
   const has = !!ed.sel;
   bar.querySelector<HTMLElement>('.sel-info')!.textContent = has ? `${n} 個` : ed.pendingLong !== null ? '終点' : '始点';
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
+    if (k === 'exit') return;
     b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
     if (k === 'ev') b.classList.toggle('on', ed.clipEvents);
     if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
@@ -979,6 +993,7 @@ function updateSelBar() {
   });
 }
 function selAction(k: string) {
+  if (k === 'exit') { setTool(toolBeforeSelect === 'select' ? 'don' : toolBeforeSelect); return; }
   if (k === 'adopt') { collab.adoptSelection(); updateSelBar(); view.invalidate(); return; }
   if (k === 'branch') {
     const s = ed.sel;
@@ -1256,7 +1271,7 @@ const BR_SHORT = ['N', 'E', 'M'];
 const BR_TYPE: Record<EBranch['type'], string> = { p: '精度', r: '連打', s: 'スコア' };
 const brCtl = document.createElement('div');
 brCtl.className = 'br-ctl hidden';
-brCtl.innerHTML = `${BR_SHORT.map((t, k) => `<button data-br="${k}" class="br-${k}">${t}</button>`).join('')}<button data-br="stack" class="br-stack" aria-label="分岐を並べる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16"/></svg></button>`;
+brCtl.innerHTML = `${BR_SHORT.map((t, k) => `<button data-br="${k}" class="br-${k}">${t}</button>`).join('')}<button data-br="stack" class="br-stack" aria-label="分岐を並べる"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5"/><rect x="3" y="15" width="18" height="5"/><path d="M3 12h18" stroke-dasharray="2 2"/></svg></button>`;
 $('editor').parentElement!.appendChild(brCtl);
 brCtl.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-br]');

@@ -36,10 +36,12 @@
         <!-- プレビュー（プレイ画面のレーンの帯をそのまま縮小） -->
         <div id="edPreview" class="ed-preview" aria-hidden="true"><canvas id="edPreviewCv"></canvas></div>
         <div id="tools" class="tools">
-          <!-- ノーツ 4 つ（選んでいるボタンをもう一度タップすると、ドン⇔カッ・大ドン⇔大カッ・連打⇔大連打 が切り替わる） -->
+          <!-- ノーツ 6 つ（ドン・カッ・大ドン・大カッは別のボタン。連打はもう一度タップすると連打⇔大連打 が切り替わる） -->
           <div class="note-tools">
-            <button data-group="small" class="tool" aria-label="ドン / カッ"><i></i></button>
-            <button data-group="big" class="tool" aria-label="大ドン / 大カッ"><i></i></button>
+            <button data-group="don" class="tool" aria-label="ドン"><i></i></button>
+            <button data-group="ka" class="tool" aria-label="カッ"><i></i></button>
+            <button data-group="bigDon" class="tool" aria-label="大ドン"><i></i></button>
+            <button data-group="bigKa" class="tool" aria-label="大カッ"><i></i></button>
             <button data-group="roll" class="tool" aria-label="連打 / 大連打"><i></i></button>
             <button data-group="balloon" class="tool" aria-label="風船"><i></i></button>
           </div>
@@ -88,6 +90,7 @@
         </div>
         <!-- 選択ツールのときの操作 -->
         <div id="selBar" class="sel-bar hidden">
+          <button data-sel="exit" class="sel-exit" aria-label="選択をやめる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           <span class="sel-info"></span>
           <button data-sel="ev">命令</button>
           <button data-sel="copy">コピー</button>
@@ -122,24 +125,24 @@
         <h1 class="home-logo"><img src="logo.png" alt="TJAtelier" draggable="false"></h1>
         <div id="homeFolders" class="home-folders"></div>
         <div class="home-navb">
-          <button data-h="import" title="読み込み" aria-label="読み込み"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg></button>
-          <button data-h="new" title="新しい譜面" aria-label="新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg></button>
-          <button data-h="online" title="オンライン対戦" aria-label="オンライン対戦"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5z"/></svg></button>
-          <button data-h="settings" title="設定" aria-label="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+          <button data-h="import" title="読み込み" aria-label="読み込み"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg><span>読込</span></button>
+          <button data-h="new" title="新しい譜面" aria-label="新しい譜面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg><span>新規</span></button>
+          <button data-h="online" title="オンライン対戦" aria-label="オンライン対戦"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5z"/></svg><span>対戦</span></button>
+          <button data-h="settings" title="設定" aria-label="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg><span>設定</span></button>
         </div>
       </aside>
       <section class="home-mid">
         <div class="home-mh">
+          <div id="homeSearch" class="home-search hidden"><input id="homeQuery" type="search" placeholder="" autocomplete="off"></div>
           <b id="homePath">すべて</b><small id="homeCount">0</small>
           <span class="sp"></span>
           <button data-h="pick" id="homePickBtn" class="home-pickbtn" title="選択"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h3M4 12h3M4 18h3"/><path d="M10 6h10M10 12h10M10 18h10"/></svg><small>選択</small></button>
           <button data-h="sort" class="home-sort" title="並べ替え"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h11M4 17h6"/></svg><small id="homeSort">更新順</small></button>
+          <!-- 曲を選んでいるときの操作（見出しの中身と入れ替える） -->
+          <div id="homePick" class="home-pick hidden"></div>
           <button data-h="search" title="検索" aria-label="検索"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg></button>
         </div>
-        <div id="homeSearch" class="home-search hidden"><input id="homeQuery" type="search" placeholder="" autocomplete="off"></div>
         <div id="homeList" class="home-list"></div>
-        <!-- 曲を選んでいるときの操作 -->
-        <div id="homePick" class="home-pick hidden"></div>
       </section>
       <!-- 難易度えらび（まんなかの曲をもう一度タップ・「この曲にする」） -->
       <div id="homeDiff" class="home-diff hidden"></div>
