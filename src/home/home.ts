@@ -1085,6 +1085,49 @@ export class Home {
     pop.style.left = `${Math.max(8, Math.min((r.left - hr.left) / k, hr.width / k - pop.offsetWidth - 8))}px`;
     // 項目が多くて入りきらないときは、高さを画面に収めて中をスクロールする
     pop.style.top = `${Math.max(8, Math.min(hr.height / k - pop.offsetHeight - 8, (r.bottom - hr.top) / k + 4))}px`;
+    // 指でのスクロールはこちらで動かす（iPhone では中の一覧がスクロールしないことがあるため）。動かしたら押したことにしない
+    let drag: { y: number; top: number; moved: boolean; last: number; t: number; v: number } | null = null;
+    let fling = 0;
+    pop.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') return;
+      cancelAnimationFrame(fling);
+      drag = { y: e.clientY, top: pop.scrollTop, moved: false, last: e.clientY, t: performance.now(), v: 0 };
+    });
+    pop.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dy = e.clientY - drag.y;
+      if (!drag.moved && Math.abs(dy) < 6) return;
+      drag.moved = true;
+      const now = performance.now();
+      const dt = Math.max(1, now - drag.t);
+      drag.v = (drag.last - e.clientY) / dt;
+      drag.last = e.clientY;
+      drag.t = now;
+      pop.scrollTop = drag.top - dy / k;
+    });
+    const end = () => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      if (!d.moved) return;
+      // 押したことにしない（このあとに来るクリックを 1 回だけ捨てる）
+      const eat = (ev: Event) => { ev.stopPropagation(); ev.preventDefault(); };
+      pop.addEventListener('click', eat, { capture: true, once: true });
+      setTimeout(() => pop.removeEventListener('click', eat, { capture: true }), 350);
+      // 指を離したあとも少し流れる
+      let v = d.v / k;
+      let prev = performance.now();
+      const step = (t: number) => {
+        const dt = t - prev;
+        prev = t;
+        pop.scrollTop += v * dt;
+        v *= Math.pow(0.995, dt);
+        if (Math.abs(v) > 0.02 && pop.isConnected) fling = requestAnimationFrame(step);
+      };
+      fling = requestAnimationFrame(step);
+    };
+    pop.addEventListener('pointerup', end);
+    pop.addEventListener('pointercancel', end);
     pop.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
       if (!b) return;
