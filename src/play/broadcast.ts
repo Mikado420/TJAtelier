@@ -155,7 +155,6 @@ export class Broadcast {
   private knob: HTMLElement | null = null;
   private peaks: Float32Array | null = null;
   private q = 1;
-  private gogo = false;
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
@@ -177,8 +176,6 @@ export class Broadcast {
 
   hide() {
     this.el.classList.add('hidden');
-    this.el.classList.remove('bc-gogo');
-    this.gogo = false;
     this.course = null;
   }
 
@@ -195,7 +192,7 @@ export class Broadcast {
     const genre = info.genre?.trim();
     this.el.style.setProperty('--cc', col);
     // 上半分の背景: ジャケットを大きくぼかして敷く（ジャケットが無ければ難易度の色）
-    const art = `${backdrop ? '' : `<div class="bc-art${info.jacket ? '' : ' bc-art-none'}"></div><div class="bc-shade"></div>`}<div class="bc-glow"></div>`;
+    const art = backdrop ? '' : `<div class="bc-art${info.jacket ? '' : ' bc-art-none'}"></div><div class="bc-shade"></div>`;
     this.el.classList.toggle('bc-backdrop', backdrop);
     this.inner.innerHTML = `${art}
       <div class="bc-title bc-pnl"><i class="bc-bar"></i>
@@ -326,12 +323,6 @@ export class Broadcast {
   update(now: number) {
     const c = this.course;
     if (!c) return;
-    // ゴーゴータイムは背景をほんのり白く光らせる
-    const gogo = c.gogo.some(([a, b]) => now >= a && now < b);
-    if (gogo !== this.gogo) {
-      this.gogo = gogo;
-      this.el.classList.toggle('bc-gogo', gogo);
-    }
     const ps = c.params ?? [];
     let p = ps[0];
     for (const x of ps) {
@@ -358,7 +349,7 @@ export class Broadcast {
       if (el && el.textContent !== v) el.textContent = v;
     };
     set('bpm', bpm.toFixed(2));
-    set('scroll', `×${scroll.toFixed(2)}`);
+    set('scroll', `×${scroll.toFixed(3)}`);
     set('meas', m ? `${m.num}/${m.den}` : '4/4');
     set('bar', String(now < (ms[0]?.time ?? 0) ? 0 : mi + 1));
     set('time', mmss(now));

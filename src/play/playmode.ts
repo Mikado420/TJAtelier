@@ -45,6 +45,8 @@ export interface PlaySettings {
   passiveTouch?: boolean;
   /** プレイ中のポーズボタンを出す（出さないときは上の真ん中に触れるとポーズ） */
   pauseButton?: boolean;
+  /** 左上に FPS を出す */
+  showFps?: boolean;
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
   padVisible?: boolean;
   /** 画面上部を指置きにする（叩いても反応しない） */
@@ -526,6 +528,7 @@ export class PlayMode {
         if (gap > 34) P.slow++;
       }
       P.last = t0;
+      this.tickFps(t0);
       // 続けた直後は音が出るまで時計が少し戻ることがあるので、止めた時刻より前には戻さない
       const now = Math.max(this.time(), this.timeFloor);
       this.syncVideo();
@@ -626,6 +629,32 @@ export class PlayMode {
   }
 
   /** 動画用の画面にするか（タイミング調整のときはしない） */
+  /** FPS の表示（0.5 秒ごとに数え直す） */
+  private fpsEl: HTMLElement | null = null;
+  private fpsAt = 0;
+  private fpsN = 0;
+  private tickFps(t: number) {
+    const on = !!this.settings.showFps;
+    if (!on) {
+      if (this.fpsEl && !this.fpsEl.classList.contains('hidden')) this.fpsEl.classList.add('hidden');
+      return;
+    }
+    if (!this.fpsEl) {
+      this.fpsEl = document.createElement('div');
+      this.fpsEl.className = 'play-fps';
+      this.root.append(this.fpsEl);
+    }
+    this.fpsEl.classList.remove('hidden');
+    this.fpsN++;
+    if (!this.fpsAt) this.fpsAt = t;
+    const dt = t - this.fpsAt;
+    if (dt >= 500) {
+      this.fpsEl.textContent = `${Math.round((this.fpsN * 1000) / dt)} FPS`;
+      this.fpsN = 0;
+      this.fpsAt = t;
+    }
+  }
+
   private get broadcastOn() {
     return !!this.settings.broadcast && !this.calibrating;
   }

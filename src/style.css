@@ -2765,13 +2765,6 @@ body.playing .br-ctl { display: none; }
 .bc-art-none { filter: none; background: radial-gradient(ellipse 60% 80% at 30% 20%, color-mix(in srgb, var(--cc) 55%, #0d1014), #0d1014 75%); }
 .bc-shade { left: 0; top: 0; width: 2000px; height: 660px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55) 92%, #0d1014); }
 .bc-backdrop .bc-shade { display: none; }
-/* ゴーゴータイム: 背景をほんのり白く光らせる（レーンの帯 673〜934px には重ねない）。
-   重ね方の計算（blend）や切り抜き（mask）は重いので使わず、白い半透明の板 2 枚の濃さだけを変える */
-.bc-glow { left: 0; top: 0; width: 2000px; height: 1125px; opacity: 0; transition: opacity 0.9s ease-out; will-change: opacity; contain: strict;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.13)) 0 0 / 2000px 673px no-repeat,
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.06)) 0 934px / 2000px 191px no-repeat; }
-.bc-gogo .bc-glow { opacity: 1; transition-duration: 0.35s; }
 /* 動かない部分は 1 つの層にまとめ、変わる所（数字・時間・歌詞・進み具合）は別の層に分ける */
 .bc-title, .bc-jk { will-change: transform; }
 .bc-stats .bc-cell b, .bc-time, .bc-lyric { will-change: transform; contain: layout paint; }
@@ -3248,3 +3241,9 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
   .cmd-tools { gap: 3px; }
   .tool-lb { font-size: 10.5px; letter-spacing: -0.07em; }
 }
+
+/* FPS の表示（設定で出す） */
+.play-fps { position: absolute; left: calc(8px + var(--safe-l, 0px)); top: calc(8px + var(--safe-t, 0px)); z-index: 30; pointer-events: none; padding: 1px 6px; background: rgba(0, 0, 0, 0.55); color: #9fe39a; font: 700 12px/16px ui-monospace, Menlo, monospace; letter-spacing: 0.02em; }
+.play-fps.hidden { display: none; }
+/* ポーズボタンがあるときは、その右に並べる */
+.play:not(.no-pause-btn) .play-fps { left: calc(66px + var(--safe-l, 0px)); }
