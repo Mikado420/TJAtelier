@@ -1083,14 +1083,23 @@ export class Home {
     // 画面の px を、中の px に戻す（PC で丸ごと拡大しているとき）
     const k = uiScale();
     pop.style.left = `${Math.max(8, Math.min((r.left - hr.left) / k, hr.width / k - pop.offsetWidth - 8))}px`;
-    pop.style.top = `${Math.min(hr.height / k - pop.offsetHeight - 8, (r.bottom - hr.top) / k + 4)}px`;
+    // 項目が多くて入りきらないときは、高さを画面に収めて中をスクロールする
+    pop.style.top = `${Math.max(8, Math.min(hr.height / k - pop.offsetHeight - 8, (r.bottom - hr.top) / k + 4))}px`;
     pop.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-i]');
       if (!b) return;
       pop.remove();
       void items[Number(b.dataset.i)][1]();
     });
-    setTimeout(() => document.addEventListener('pointerdown', (e) => { if (!pop.contains(e.target as Node)) pop.remove(); }, { once: true }), 0);
+    // 外を触ったら閉じる（中をスクロールで触っても閉じない）
+    const outside = (e: PointerEvent) => {
+      if (!pop.isConnected) document.removeEventListener('pointerdown', outside);
+      else if (!pop.contains(e.target as Node)) {
+        pop.remove();
+        document.removeEventListener('pointerdown', outside);
+      }
+    };
+    setTimeout(() => document.addEventListener('pointerdown', outside), 0);
   }
 
   /**

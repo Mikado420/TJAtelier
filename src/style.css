@@ -1008,8 +1008,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .hdx-empty b { font-size: 18px; }
 .hdx-empty small { font-size: 12px; opacity: 0.85; }
 .hdx-empty button { width: 70%; }
-.home-pop { position: absolute; z-index: 3; min-width: 200px; padding: 4px; background: var(--panel); border: 1.5px solid #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8); }
-.home-pop button { display: block; width: 100%; text-align: left; padding: 11px 12px; font-size: 14px; color: #fff; }
+.home-pop { position: absolute; z-index: 3; min-width: 200px; max-height: calc(100% - 16px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 4px; background: var(--panel); border: 1.5px solid #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8); }
+.home-pop button { touch-action: pan-y; display: block; width: 100%; text-align: left; padding: 11px 12px; font-size: 14px; color: #fff; }
 .home-pop button:active { background: var(--accent); }
 .home-pop button.bad { font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-height: 360px) {
