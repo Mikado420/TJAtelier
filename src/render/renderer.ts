@@ -421,16 +421,22 @@ export class Renderer {
   }
 
   /** レーンの動かない部分（黒い枠・濃い灰色の本体・音符文字の帯） */
-  private paintLaneBase(c: CanvasRenderingContext2D, right: number) {
+  private paintLaneBase(c: CanvasRenderingContext2D, right: number, own = false) {
     c.fillStyle = '#000';
     c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, TEXT_BOTTOM - LANE_TOP + 12);
     c.fillStyle = '#1b2025';
-    c.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
+    const top = own ? this.laneTop : LANE_TOP;
+    c.fillRect(LANE_X, top, right - LANE_X, LANE_BOTTOM - top);
     // エディタの見本では、音符文字の帯を目立たない暗い色にする
     c.fillStyle = this.preview ? '#242a30' : '#5d6f7a';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, TEXT_BOTTOM - LANE_BOTTOM);
     c.fillStyle = '#000';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, 4);
+  }
+
+  /** 自分のレーンの上端。動画用の画面では上にゲージが無いので、左のパネルの上端まで伸ばす */
+  private get laneTop() {
+    return this.broadcast ? LANE_TOP - 6 : LANE_TOP;
   }
 
   /** 動かない背景を一度だけ描いておく（毎フレームはこれをコピーするだけ） */
@@ -463,7 +469,7 @@ export class Renderer {
         c.fillStyle = PV_GAP;
         c.fillRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
       }
-      this.paintLaneBase(c, V.x1);
+      this.paintLaneBase(c, V.x1, true);
       c.globalAlpha = 1;
     }
     // オンライン対戦の相手のレーンの動かない部分
@@ -976,12 +982,13 @@ export class Renderer {
         this.gogoGrads.set(right, g);
       }
       ctx.fillStyle = this.gogoGrad;
-      ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
+      const gt = opp ? LANE_TOP : this.laneTop;
+      ctx.fillRect(LANE_X, gt, right - LANE_X, LANE_BOTTOM - gt);
     }
 
     // 譜面分岐: 玄人は青、達人は紫にレーンを染める
     if (!opp) {
-      const top = LANE_TOP;
+      const top = this.laneTop;
       const bot = LANE_BOTTOM;
       const tint = (b: number, y1 = top, y2 = bot) => {
         const c = BRANCH_TINT[b];
@@ -1039,7 +1046,7 @@ export class Renderer {
       const a = 1 - (wall - f.t) / 170;
       if (a <= 0) continue;
       ctx.fillStyle = f.kind === 'don' ? `rgba(170,90,40,${0.2 * a})` : `rgba(40,140,170,${0.2 * a})`;
-      ctx.fillRect(LANE_X, LANE_TOP, right - LANE_X, LANE_BOTTOM - LANE_TOP);
+      ctx.fillRect(LANE_X, this.laneTop, right - LANE_X, LANE_BOTTOM - this.laneTop);
     }
     // 相手が叩いた入力（何もない所を叩いたものも）: その時刻になったら、自分と同じくレーンが色づき、判定枠が光る
     if (opp?.taps) {
@@ -1103,7 +1110,8 @@ export class Renderer {
         if (x < LANE_X || x > far) continue;
         if (share) this.visBars.push(x);
         const dy = this.yOf(b.time, b.beat, b, now);
-        if (x <= right && LANE_BOTTOM + dy > V.y0 && LANE_TOP + dy < V.y1) ctx.fillRect(x - 1.5, LANE_TOP + dy, 3, LANE_BOTTOM - LANE_TOP);
+        const lt = this.laneTop;
+        if (x <= right && LANE_BOTTOM + dy > V.y0 && lt + dy < V.y1) ctx.fillRect(x - 1.5, lt + dy, 3, LANE_BOTTOM - lt);
       }
       if (this.hasY) ctx.restore();
     }

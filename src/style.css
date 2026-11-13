@@ -2759,11 +2759,18 @@ body.playing .br-ctl { display: none; }
 .bc-time small { font-size: 28px; font-weight: 700; opacity: 0.55; margin-left: 6px; }
 
 /* 動画用の画面: ジャケットが主役（ぼかしたジャケットを上半分の背景に、板は半透明の白に細い縁） */
-.bc-art { left: -80px; top: -120px; width: 2160px; height: 820px; background: center / 100% 100% no-repeat; }
+/* ぼかしたジャケットは、レーン（左のパネルの上端 = 673px）より下へはみ出さない */
+.bc-art { left: -80px; top: -120px; width: 2160px; height: 793px; background: center / 100% 100% no-repeat; clip-path: inset(0); }
 .bc-art-css { background-size: cover; filter: blur(46px) saturate(1.35) brightness(0.62); }
 .bc-art-none { filter: none; background: radial-gradient(ellipse 60% 80% at 30% 20%, color-mix(in srgb, var(--cc) 55%, #0d1014), #0d1014 75%); }
 .bc-shade { left: 0; top: 0; width: 2000px; height: 660px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55) 92%, #0d1014); }
 .bc-backdrop .bc-shade { display: none; }
+/* ゴーゴータイム: 背景をほんのり白く光らせる（レーンの帯 673〜934px には重ねない） */
+.bc-glow { left: 0; top: 0; width: 2000px; height: 1125px; opacity: 0; transition: opacity 0.9s ease-out; mix-blend-mode: screen;
+  background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07) 70%, rgba(255, 255, 255, 0.1));
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 673px, transparent 673px, transparent 934px, #000 934px);
+  mask-image: linear-gradient(180deg, #000 0, #000 673px, transparent 673px, transparent 934px, #000 934px); }
+.bc-gogo .bc-glow { opacity: 1; transition-duration: 0.35s; }
 /* 動かない部分は 1 つの層にまとめ、変わる所（数字・時間・歌詞・進み具合）は別の層に分ける */
 .bc-title, .bc-jk { will-change: transform; }
 .bc-stats .bc-cell b, .bc-time, .bc-lyric { will-change: transform; contain: layout paint; }
