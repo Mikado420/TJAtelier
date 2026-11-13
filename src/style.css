@@ -1011,6 +1011,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .home-pop { position: absolute; z-index: 3; min-width: 200px; max-width: min(560px, calc(100% - 16px)); max-height: calc(100% - 16px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; touch-action: none; padding: 4px; background: var(--panel); border: 1.5px solid #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8); }
 .home-pop button { touch-action: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%; text-align: left; padding: 11px 12px; font-size: 14px; color: #fff; }
 .home-pop button:active { background: var(--accent); }
+.home-pop .pop-fc { display: inline-block; vertical-align: middle; width: 6px; height: 1.35em; margin: -2px 10px 0 calc(var(--dp, 0) * 18px); background: var(--fc); }
+.home-pop .pop-ck { display: inline-block; width: 1.3em; }
 .home-pop button.bad { font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 @media (max-height: 360px) {
   .hdx-diffs { display: none; }

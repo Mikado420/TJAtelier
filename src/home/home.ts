@@ -91,6 +91,9 @@ const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文�
 const ALL = '\uE000all';
 const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
 /** フォルダごとの色（すべては青、未分類は灰色、ほかは名前から決まる） */
+/** ポップアップのフォルダの行（色・階層の深さ・入っているか） */
+type PopFolder = { color: string; depth: number; on: boolean };
+
 function folderColor(key: string, custom?: Record<string, string>) {
   if (key === ALL) return '#4d9fbe';
   if (key === UNCAT) return '#5a6670';
@@ -1071,11 +1074,15 @@ export class Home {
 
   // ---------- 曲・フォルダの操作 ----------
 
-  private popup(anchor: HTMLElement, items: [string, () => void | Promise<void>, boolean?][]) {
+  private popup(anchor: HTMLElement, items: [string, () => void | Promise<void>, boolean?, PopFolder?][]) {
     document.querySelector('.home-pop')?.remove();
     const pop = document.createElement('div');
     pop.className = 'home-pop';
-    pop.innerHTML = items.map(([l, , danger], i) => `<button data-i="${i}" class="${danger ? 'bad' : ''}">${esc(l)}</button>`).join('');
+    pop.innerHTML = items
+      .map(([l, , danger, f], i) => f
+        ? `<button data-i="${i}" class="pop-f" style="--dp:${f.depth}"><span class="pop-ck">${f.on ? '✓' : ''}</span><i class="pop-fc" style="--fc:${f.color}"></i>${esc(l)}</button>`
+        : `<button data-i="${i}" class="${danger ? 'bad' : ''}">${esc(l)}</button>`)
+      .join('');
     this.el.appendChild(pop);
     const r = anchor.getBoundingClientRect();
     const hr = this.el.getBoundingClientRect();
@@ -1210,7 +1217,7 @@ export class Home {
     const names = [...this.folders].sort((a, b) => a.localeCompare(b, 'ja')).filter((f) => f !== move);
     const done = async (msg: string) => { await this.reload(); this.render(); this.host.toast(msg); };
     this.popup(anchor, [
-      ...names.map((f) => [`${has(f) && !move ? '✓ ' : '　 '}${'　'.repeat(f.split('/').length - 1)}${f.split('/').pop()}`, async () => {
+      ...names.map((f) => [f.split('/').pop()!, async () => {
         if (move) {
           await addToFolder(ids, f);
           await removeFromFolder(ids, move);
@@ -1222,7 +1229,7 @@ export class Home {
           await addToFolder(ids, f);
           await done(`${ids.length} 曲を「${f}」に入れました`);
         }
-      }] as [string, () => Promise<void>]),
+      }, false, { color: folderColor(f, this.colors), depth: f.split('/').length - 1, on: has(f) && !move }] as [string, () => Promise<void>, boolean, PopFolder]),
       ['＋ 新しいフォルダ…', async () => {
         const name = await this.askName('新しいフォルダ', '', '作って入れる');
         if (!name) return;
@@ -1231,7 +1238,15 @@ export class Home {
         await done(`${ids.length} 曲を「${name}」に${move ? '移しました' : '入れました'}`);
       }],
     ]);
+    // スクロールの位置は、アプリを開き直すまで前と同じ所に
+    const pop = this.el.querySelector<HTMLElement>('.home-pop');
+    if (pop) {
+      pop.scrollTop = this.pickerTop;
+      pop.addEventListener('scroll', () => (this.pickerTop = pop.scrollTop), { passive: true });
+    }
   }
+  /** 入れるフォルダの一覧のスクロールの位置（アプリを開いている間だけ覚える） */
+  private pickerTop = 0;
 
   /** 曲を選んでいるときの操作 */
   private async pickAction(a: string, anchor: HTMLElement) {
