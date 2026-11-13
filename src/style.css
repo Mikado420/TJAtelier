@@ -2765,11 +2765,12 @@ body.playing .br-ctl { display: none; }
 .bc-art-none { filter: none; background: radial-gradient(ellipse 60% 80% at 30% 20%, color-mix(in srgb, var(--cc) 55%, #0d1014), #0d1014 75%); }
 .bc-shade { left: 0; top: 0; width: 2000px; height: 660px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55) 92%, #0d1014); }
 .bc-backdrop .bc-shade { display: none; }
-/* ゴーゴータイム: 背景をほんのり白く光らせる（レーンの帯 673〜934px には重ねない） */
-.bc-glow { left: 0; top: 0; width: 2000px; height: 1125px; opacity: 0; transition: opacity 0.9s ease-out; mix-blend-mode: screen;
-  background: radial-gradient(ellipse 75% 70% at 50% 45%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.07) 70%, rgba(255, 255, 255, 0.1));
-  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 673px, transparent 673px, transparent 934px, #000 934px);
-  mask-image: linear-gradient(180deg, #000 0, #000 673px, transparent 673px, transparent 934px, #000 934px); }
+/* ゴーゴータイム: 背景をほんのり白く光らせる（レーンの帯 673〜934px には重ねない）。
+   重ね方の計算（blend）や切り抜き（mask）は重いので使わず、白い半透明の板 2 枚の濃さだけを変える */
+.bc-glow { left: 0; top: 0; width: 2000px; height: 1125px; opacity: 0; transition: opacity 0.9s ease-out; will-change: opacity; contain: strict;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.13)) 0 0 / 2000px 673px no-repeat,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.06)) 0 934px / 2000px 191px no-repeat; }
 .bc-gogo .bc-glow { opacity: 1; transition-duration: 0.35s; }
 /* 動かない部分は 1 つの層にまとめ、変わる所（数字・時間・歌詞・進み具合）は別の層に分ける */
 .bc-title, .bc-jk { will-change: transform; }
