@@ -218,7 +218,7 @@ interface GhostGeo { chart: EChart; course: ECourse; timing: Timing; lanes: Dela
 export interface CursorMark { color: string; name: string; t: number }
 
 export class EditorView {
-  private readonly ctx: CanvasRenderingContext2D;
+  private ctx: CanvasRenderingContext2D;
   w = 0;
   h = 0;
   /** 基準座標 → 画面 px の倍率（画面の高さ / 924） */
@@ -1993,17 +1993,17 @@ export class EditorView {
   private densKey = '';
   private densD = new Float32Array(0);
   private densK = new Float32Array(0);
-  private drawDensity(L: Lay) {
-    const ctx = this.ctx;
+  private densMax = 0;
+  private densN = 0;
+
+  /** 密度のグラフの数え直し（譜面が変わったときだけ） */
+  private drawDensityBars(L: Lay) {
     const s = L.s;
     const g = this.graph;
-    const x1 = L.colLine1 + R.densW * s;
-    const maxW = (R.densW - 6) * s;
     const len = this.songLength();
     const step = Math.max(3, 7 * s);
     const n = Math.max(8, Math.floor((g.bottom - g.top) / step));
     // ドン（赤）とカッ（水色）を分けて数え、右端からドン → カッの順に積む（連打・風船はドンに数える）
-    // 譜面が変わったときだけ数え直す
     const key = `${this.ed.undoCount}|${this.ed.courseIndex}|${this.ed.branch}|${n}|${len}`;
     if (this.densKey !== key) {
       this.densKey = key;
@@ -2020,11 +2020,24 @@ export class EditorView {
       }
       this.densD = dn;
       this.densK = kn;
+      let max = 0;
+      for (let i = 0; i < n; i++) max = Math.max(max, dn[i] + kn[i]);
+      this.densMax = max;
+      this.densN = n;
     }
+  }
+
+  /** 密度のグラフの棒 */
+  private paintDensityBars(L: Lay) {
+    const ctx = this.ctx;
+    const s = L.s;
+    const g = this.graph;
+    const x1 = L.colLine1 + R.densW * s;
+    const maxW = (R.densW - 6) * s;
+    const n = this.densN;
     const dons = this.densD;
     const kas = this.densK;
-    let max = 0;
-    for (let i = 0; i < n; i++) max = Math.max(max, dons[i] + kas[i]);
+    const max = this.densMax;
     const bh = ((g.bottom - g.top) / n) * 0.8;
     for (let i = 0; i < n; i++) {
       const total = dons[i] + kas[i];
@@ -2037,15 +2050,58 @@ export class EditorView {
       ctx.fillStyle = '#5ec4d4';
       ctx.fillRect(x1 - w, y, w - wd, bh);
     }
-    // 今の位置
+  }
+
+  /** 左の列の動かない部分（地・線・密度のグラフ・再生ボタン）を描いておいた絵 */
+  private colCache: { c: HTMLCanvasElement; key: string } | null = null;
+
+  /** 左の列（Malody と同じ配置） */
+  private drawColumn(L: Lay) {
+    const s = L.s;
+    // 動かない部分は、変わったときだけ描き直して貼る（再生中に密度のグラフを毎フレーム描き直さない）
+    this.drawDensityBars(L);
+    const dpr = this.canvas.width / Math.max(1, this.w);
+    const key = `${this.densKey}|${this.densMax}|${this.canvas.width}x${this.canvas.height}|${L.colW}|${L.colLine1}|${L.laneY}|${L.evY}|${L.cy}|${L.play.x}|${L.play.y}|${L.play.r}|${this.graph.top}|${this.graph.bottom}|${this.playing ? 1 : 0}`;
+    let cc = this.colCache;
+    if (!cc || cc.key !== key) {
+      const c = cc?.c ?? document.createElement('canvas');
+      // 再生ボタンは列の右にはみ出すので、その分まで
+      const cw = Math.min(this.canvas.width, Math.ceil(Math.max(L.colW, L.play.x + L.play.r * 1.4 + 8 * L.s) * dpr) + 1);
+      const ch = this.canvas.height;
+      if (c.width !== cw || c.height !== ch) {
+        c.width = cw;
+        c.height = ch;
+      }
+      const g = c.getContext('2d')!;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, cw, ch);
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const prev = this.ctx;
+      this.ctx = g;
+      try {
+        this.paintColumnBase(L);
+      } finally {
+        this.ctx = prev;
+      }
+      cc = this.colCache = { c, key };
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(cc.c, 0, 0);
+    ctx.restore();
+    // 密度のグラフの上の、今の位置
+    const g = this.graph;
+    const len = this.songLength();
     const now = this.ed.timing.tickToTime(this.pos);
     const y = g.bottom - Math.min(1, Math.max(0, now / len)) * (g.bottom - g.top);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(L.colLine1, y - Math.max(1, 1.5 * s), R.densW * s, Math.max(2, 3 * s));
+    this.drawColumnTime(L);
   }
 
-  /** 左の列（Malody と同じ配置） */
-  private drawColumn(L: Lay) {
+  /** 左の列の動かない部分 */
+  private paintColumnBase(L: Lay) {
     const ctx = this.ctx;
     const s = L.s;
     ctx.fillStyle = C.col;
@@ -2056,7 +2112,7 @@ export class EditorView {
     ctx.fillRect(L.colW - lw, 0, lw, L.laneY);
     ctx.fillRect(L.colW - lw, L.evY, lw, this.h - L.evY);
 
-    this.drawDensity(L);
+    this.paintDensityBars(L);
 
     // 再生位置の線（左端から再生ボタンまで）
     ctx.fillStyle = '#fff';
@@ -2097,7 +2153,12 @@ export class EditorView {
       ctx.restore();
     };
     hex(L.play, this.playing ? 'pause' : 'play');
+  }
 
+  /** 左の列の時刻（縦書き） */
+  private drawColumnTime(L: Lay) {
+    const ctx = this.ctx;
+    const s = L.s;
     // 曲の長さ（上）と現在時刻（下）を縦書きで（Malody と同じ位置）
     // 曲の頭より前（1 小節ぶん）にいるときは、音源の頭より前ならマイナスの時刻になる
     const time = this.ed.timing.tickToTime(this.pos);
