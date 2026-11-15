@@ -47,6 +47,8 @@ export interface PlaySettings {
   pauseButton?: boolean;
   /** 左上に FPS を出す */
   showFps?: boolean;
+  /** コマが落ちるときは、絵の細かさを自動で下げる */
+  autoRes?: boolean;
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
   padVisible?: boolean;
   /** 画面上部を指置きにする（叩いても反応しない） */
@@ -232,6 +234,7 @@ export class PlayMode {
     this.renderer.broadcast = false;
     this.bc.hide();
     this.applyVideo(false);
+    this.resetRes();
     this.renderer.resize();
     this.placeVideo();
     this.renderer.speed = this.settings.speed;
@@ -436,6 +439,7 @@ export class PlayMode {
     this.stopVideo();
     this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
+    this.resetRes();
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
@@ -529,6 +533,7 @@ export class PlayMode {
       }
       P.last = t0;
       this.tickFps(t0);
+      this.watchRes(t0);
       // 続けた直後は音が出るまで時計が少し戻ることがあるので、止めた時刻より前には戻さない
       const now = Math.max(this.time(), this.timeFloor);
       this.syncVideo();
@@ -629,6 +634,37 @@ export class PlayMode {
   }
 
   /** 動画用の画面にするか（タイミング調整のときはしない） */
+  /** 絵の細かさの自動調整: 2 秒ごとに、コマ落ちの割合を見る */
+  private res = { at: 0, frames: 0, slow: 0, last: 0, gaps: [] as number[] };
+  private resetRes() {
+    this.renderer.dprCap = 3;
+    this.res = { at: 0, frames: 0, slow: 0, last: 0, gaps: [] };
+  }
+  private watchRes(t: number) {
+    if (this.settings.autoRes === false || this.renderer.dprCap <= 2) return;
+    const R = this.res;
+    if (R.last) {
+      const gap = t - R.last;
+      R.frames++;
+      R.gaps.push(gap);
+    }
+    R.last = t;
+    if (!R.at) R.at = t;
+    if (t - R.at < 2000) return;
+    // その端末のふつうの 1 コマの間隔（速いほうから 2 割の所）の 1.6 倍以上かかったコマを「落ちた」とする
+    const gs = R.gaps.slice().sort((a, b) => a - b);
+    // 全体がずっと遅いとき（どのコマも遅い）も分かるように、60 コマ/秒より遅い値は使わない
+    const base = Math.min(17.5, gs[Math.floor(gs.length * 0.2)] ?? 16.7);
+    const slow = gs.filter((g) => g > base * 1.6).length;
+    // 2 秒のうち 1 割以上落ちていたら、この曲の間は細かさを 2 倍までに下げる（一度下げたら戻さない。ちらつかないように）
+    if (gs.length >= 8 && slow / gs.length >= 0.1) {
+      this.renderer.dprCap = 2;
+      this.renderer.resize();
+    }
+    R.at = t;
+    R.gaps = [];
+  }
+
   /** FPS の表示（0.5 秒ごとに数え直す） */
   private fpsEl: HTMLElement | null = null;
   private fpsAt = 0;

@@ -88,6 +88,8 @@ const settings = {
   broadcast: false,
   /** プレイ中に左上へ FPS を出す */
   showFps: false,
+  /** プレイ中にコマが落ちるときは、絵の細かさを自動で下げる */
+  autoRes: true,
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
   /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
@@ -1889,6 +1891,7 @@ function viewRows(heads = false) {
     ${heads ? '<h4 class="st-h">画面</h4>' : ''}
     ${stSwitch('broadcast', '動画用の画面', settings.broadcast)}
     ${stSwitch('showFps', 'FPS を表示', settings.showFps)}
+    ${stSwitch('autoRes', '重いときは画質を下げる', settings.autoRes)}
     <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }

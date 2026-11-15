@@ -273,7 +273,7 @@ export class Renderer {
   resize() {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
     // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
-    this.dpr = Math.min(this.opponents.length ? 2 : 3, pixelRatio());
+    this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(w * this.dpr);
@@ -331,6 +331,9 @@ export class Renderer {
     }
     this.hudKeys.clear();
   }
+
+  /** 絵の細かさ（端末のピクセルに対する倍率）の上限。コマが落ちるときだけ下げる。変えたら resize() */
+  dprCap = 3;
 
   /** 観戦（自分のレーンを描かず、参加している人だけを上から並べる） */
   spectate = false;
