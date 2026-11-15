@@ -159,6 +159,23 @@ function paintPanelBg(ctx: CanvasRenderingContext2D, x: number, w: number, top: 
 
 /** ゲージが満タンのときの虹色（毎フレーム色の文字列を作らないよう前もって作っておく） */
 const RAINBOW = Array.from({ length: 360 }, (_, h) => `hsl(${h},90%,58%)`);
+/** RAINBOW と同じ色を数値で（360 色 × RGB） */
+const RAINBOW_RGB = (() => {
+  const out = new Uint8ClampedArray(360 * 3);
+  const S = 0.9;
+  const L = 0.58;
+  const a = S * Math.min(L, 1 - L);
+  for (let h = 0; h < 360; h++) {
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      return L - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    };
+    out[h * 3] = Math.round(f(0) * 255);
+    out[h * 3 + 1] = Math.round(f(8) * 255);
+    out[h * 3 + 2] = Math.round(f(4) * 255);
+  }
+  return out;
+})();
 
 const ease = (x: number) => 1 - (1 - x) * (1 - x);
 
@@ -585,10 +602,87 @@ export class Renderer {
   private gogoGradRight = 0;
   private sprites = new Map<string, { c: HTMLCanvasElement; dx: number; dy: number; x0: number; y0: number }>();
 
+  /** 中身がときどき変わる絵（ゲージの目盛りなど）。変わったときだけ描き直して、毎フレームは貼るだけ */
+  private slots = new Map<string, { key: string; c: HTMLCanvasElement; dx: number; dy: number }>();
+  /** 粒の絵（塵・火花・きらきら）。1 粒ずつ形を描く代わりに、これを大きさを変えて貼る */
+  private particles = new Map<string, { c: HTMLCanvasElement; unit: number }>();
+
   /** 前もって描いた絵を全部手放す（iPhone はキャンバスの大きさを 0 にしないとメモリがすぐ空かない） */
   private dropSprites() {
     for (const sp of this.sprites.values()) { sp.c.width = 0; sp.c.height = 0; }
     this.sprites.clear();
+    for (const sp of this.slots.values()) { sp.c.width = 0; sp.c.height = 0; }
+    this.slots.clear();
+    for (const sp of this.particles.values()) { sp.c.width = 0; sp.c.height = 0; }
+    this.particles.clear();
+    this.gaugeFx = null;
+  }
+
+  /**
+   * drawSprite と同じく端末のピクセルの位置まで合わせて描くが、絵は id ごとに 1 枚だけ持ち、key が変わったら描き直す。
+   * zoom を渡すと、(cx, cy) を中心に拡大して貼る
+   */
+  private drawSlot(id: string, key: string, x: number, y: number, w: number, h: number, paint: () => void, zoom?: { k: number; cx: number; cy: number }) {
+    const sc = this.dpr * this.s;
+    const full = `${key}|${x}|${y}|${w}|${h}|${this.canvas.width}x${this.canvas.height}|${this.ox}|${this.oy}`;
+    let sp = this.slots.get(id);
+    if (!sp || sp.key !== full) {
+      const dx = Math.floor(this.dpr * (this.s * x + this.ox));
+      const dy = Math.floor(this.dpr * (this.s * y + this.oy));
+      const c = sp?.c ?? document.createElement('canvas');
+      const cw = Math.ceil(w * sc) + 2;
+      const ch = Math.ceil(h * sc) + 2;
+      if (c.width !== cw || c.height !== ch) {
+        c.width = cw;
+        c.height = ch;
+      }
+      const g = c.getContext('2d')!;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, cw, ch);
+      g.setTransform(sc, 0, 0, sc, this.dpr * this.ox - dx, this.dpr * this.oy - dy);
+      const prev = this.ctx;
+      this.ctx = g;
+      try {
+        paint();
+      } finally {
+        this.ctx = prev;
+      }
+      sp = { key: full, c, dx, dy };
+      this.slots.set(id, sp);
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (zoom && zoom.k !== 1) {
+      const px = this.dpr * (this.s * zoom.cx + this.ox);
+      const py = this.dpr * (this.s * zoom.cy + this.oy);
+      ctx.drawImage(sp.c, px + (sp.dx - px) * zoom.k, py + (sp.dy - py) * zoom.k, sp.c.width * zoom.k, sp.c.height * zoom.k);
+    } else ctx.drawImage(sp.c, sp.dx, sp.dy);
+    ctx.restore();
+  }
+
+  /** 粒の絵（丸・星）。r0 = 作っておく大きさ（半径）。unit = 半径 1 あたりの、貼るときの一辺の長さ */
+  private particle(kind: 'dot' | 'star', color: string, r0: number) {
+    const sc = this.dpr * this.s;
+    const key = `${kind}|${color}|${r0}|${sc.toFixed(4)}`;
+    let sp = this.particles.get(key);
+    if (!sp) {
+      const half = Math.ceil(r0 * sc) + 2;
+      const c = document.createElement('canvas');
+      c.width = c.height = half * 2;
+      const g = c.getContext('2d')!;
+      g.setTransform(sc, 0, 0, sc, half, half);
+      g.fillStyle = color;
+      if (kind === 'star') star(g, 0, 0, r0);
+      else {
+        g.beginPath();
+        g.arc(0, 0, r0, 0, Math.PI * 2);
+        g.fill();
+      }
+      sp = { c, unit: (half * 2) / sc / r0 };
+      this.particles.set(key, sp);
+    }
+    return sp;
   }
 
   private drawSprite(key: string, x: number, y: number, w: number, h: number, paint: () => void, alpha = 1) {
@@ -941,6 +1035,12 @@ export class Renderer {
       ctx.ellipse((D.cx - this.ox) / this.s, (D.cy - this.oy) / this.s, (D.rx + D.rim * 2) / this.s, (D.ry + D.rim * 2) / this.s, 0, 0, Math.PI * 2);
     }
     ctx.clip('evenodd');
+    // 1 粒ずつ丸を描くと命令が多いので、丸の絵を貼る。濃さは細かい段に分け、同じ段の粒をまとめて貼る
+    // （色はどの粒も同じなので、貼る順が変わっても見た目は同じ）
+    const NB = Renderer.DUST_LEVELS;
+    const buckets = this.dustBuckets;
+    for (let i = 0; i < NB; i++) buckets[i].length = 0;
+    const sprites = [0, 1, 2].map((l) => this.particle('dot', 'rgb(220,236,250)', SIZE[l] * 1.3));
     for (const d of this.dust) {
       const layer = d.z < 0.4 ? 0 : d.z < 0.75 ? 1 : 2;
       const x = V.x0 + wrap(d.x - P * SPEED[layer]) * W;
@@ -948,13 +1048,26 @@ export class Renderer {
       const r = SIZE[layer] * (0.7 + d.r * 0.6);
       const a = ALPHA[layer] * (0.6 + 0.4 * Math.sin(wall / 700 + d.ph));
       if (a <= 0) continue;
-      ctx.fillStyle = `rgba(220,236,250,${a.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+      // 濃さは 0〜0.5
+      const b = Math.min(NB - 1, Math.round((a / 0.5) * (NB - 1)));
+      if (b <= 0) continue;
+      buckets[b].push(layer, x, y, r);
+    }
+    for (let b = 1; b < NB; b++) {
+      const list = buckets[b];
+      if (!list.length) continue;
+      ctx.globalAlpha = (b / (NB - 1)) * 0.5;
+      for (let i = 0; i < list.length; i += 4) {
+        const sp = sprites[list[i]];
+        const side = sp.unit * list[i + 3];
+        ctx.drawImage(sp.c, list[i + 1] - side / 2, list[i + 2] - side / 2, side, side);
+      }
     }
     ctx.restore();
   }
+  /** 塵の濃さの段の数 */
+  private static readonly DUST_LEVELS = 49;
+  private dustBuckets: number[][] = Array.from({ length: Renderer.DUST_LEVELS }, () => []);
 
   /** opp を渡すと、オンライン対戦の相手のレーンとして描く（相手が叩いた音符を消す・叩いた光は出さない） */
   private drawLane(V: Rect, game: Game, bars: Course['bars'], now: number, gogo: boolean, wall: number, opp?: Opponent) {
@@ -1925,59 +2038,141 @@ export class Renderer {
     const nNorm = G.segs - nClear;
     const filled = Math.floor((gauge / 100) * G.segs + 1e-6);
     const full = gauge >= 100;
-    for (let i = 0; i < G.segs; i++) {
+    const seg = (i: number) => {
       const clear = i >= nNorm;
       const w = clear ? (G.x2 - G.clearX) / nClear : (G.split - G.x1) / nNorm;
-      const x = clear ? G.clearX + (i - nNorm) * w : G.x1 + i * w;
-      const top = clear ? G.clearTop : G.y1;
-      let col: string;
-      if (i < filled) {
-        if (full) col = RAINBOW[Math.floor((i * 9 + wall / 4) % 360)];
-        else col = clear ? gold : '#5ab4d6';
-      } else col = clear ? '#3d3a1e' : '#1d3442';
-      ctx.fillStyle = col;
-      ctx.fillRect(x + 1, top, w - 2, G.y2 - top);
-      if (i < filled) {
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.fillRect(x + 1, top, w - 2, 7);
+      return { clear, w, x: clear ? G.clearX + (i - nNorm) * w : G.x1 + i * w, top: clear ? G.clearTop : G.y1 };
+    };
+    // 満タンのときだけ、目盛りの色が虹色に流れる（毎フレーム変わる）ので、色だけ先に塗る。
+    // 目盛り 1 つずつではなく、色を並べた細い絵を模様にして、目盛りの形をまとめて 1 回で塗る
+    if (full) this.paintGaugeRainbow(wall, nNorm, nClear, seg);
+    // 目盛り（満タンでないときの色・上のつや）・クリアの文字・魂の後ろの光は、ゲージの量が変わったときだけ描き直す
+    this.drawSlot('gauge-segs', `${full ? 'full' : filled}|${clearOn ? 1 : 0}|${right}`, G.x1 - 2, B.tabTop, right - G.x1 + 4, B.bottom - B.tabTop, () => {
+      const c = this.ctx;
+      for (let i = 0; i < G.segs; i++) {
+        const { clear, w, x, top } = seg(i);
+        if (!full) {
+          c.fillStyle = i < filled ? (clear ? gold : '#5ab4d6') : clear ? '#3d3a1e' : '#1d3442';
+          c.fillRect(x + 1, top, w - 2, G.y2 - top);
+        }
+        if (i < filled) {
+          c.fillStyle = 'rgba(255,255,255,0.3)';
+          c.fillRect(x + 1, top, w - 2, 7);
+        }
       }
-    }
-    ctx.font = `800 26px ${FONT}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    outlinedText(ctx, 'クリア', G.clearX + 7, G.clearTop + 18, clearOn ? '#ffe25a' : '#b9a46a', '#0b1015', 5);
+      c.font = `800 26px ${FONT}`;
+      c.textAlign = 'left';
+      c.textBaseline = 'middle';
+      outlinedText(c, 'クリア', G.clearX + 7, G.clearTop + 18, clearOn ? '#ffe25a' : '#b9a46a', '#0b1015', 5);
+      if (clearOn) {
+        const g = c.createRadialGradient(FLOWER.x, FLOWER.y, 0, FLOWER.x, FLOWER.y, 70);
+        g.addColorStop(0, 'rgba(255,210,31,0.22)');
+        g.addColorStop(1, 'rgba(255,210,31,0)');
+        c.fillStyle = g;
+        c.fillRect(G.x2 + 4, B.tabTop + 2, right - G.x2 - 4, B.bottom - B.tabTop - 4);
+      }
+    });
 
     // 魂: 枠いっぱいの「魂」の字。クリアすると金色に光り、満タンで虹色になる。ノーツが届くと少しはねる
     const pop = Math.max(0, 1 - (wall - this.flowerPop) / 160);
     const S = SOUL;
-    const cx = (S.x0 + S.x1) / 2;
-    const cy = (S.y0 + S.y1) / 2;
-    if (clearOn) {
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 70);
-      g.addColorStop(0, 'rgba(255,210,31,0.22)');
-      g.addColorStop(1, 'rgba(255,210,31,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(G.x2 + 4, B.tabTop + 2, right - G.x2 - 4, B.bottom - B.tabTop - 4);
+    const cx = FLOWER.x;
+    const cy = FLOWER.y;
+    // 字の縁と光は変わらないので、一度だけ描いて貼る（はねるときは拡大して貼る）。
+    // 満タンのときは、字の中の色だけ毎フレーム塗り直す
+    const soul = (c: CanvasRenderingContext2D, k0: number, fill: string, glow: boolean, fillOnly: boolean) => {
+      c.font = `900 100px ${FONT}`;
+      c.textAlign = 'left';
+      c.textBaseline = 'alphabetic';
+      const m = c.measureText('魂');
+      const gw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+      const gh = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+      const k = Math.min((S.x1 - S.x0) / gw, (S.y1 - S.y0) / gh) * k0;
+      c.save();
+      c.translate(cx, cy);
+      c.scale(k, k);
+      const fx = -(m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+      const fy = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+      if (fillOnly) {
+        c.fillStyle = fill;
+        c.fillText('魂', fx, fy);
+      } else {
+        if (glow) {
+          c.shadowColor = 'rgba(255,210,31,0.8)';
+          c.shadowBlur = 14 / k;
+        }
+        outlinedText(c, '魂', fx, fy, fill, '#0b1015', 7 / k);
+      }
+      c.restore();
+    };
+    const fill = full ? '#0b1015' : clearOn ? '#ffe25a' : '#2a5a70';
+    const M = 40; // 縁と光のぶんの余白
+    this.drawSlot('soul', `${fill}|${clearOn ? 1 : 0}`, S.x0 - M, S.y0 - M, S.x1 - S.x0 + M * 2, S.y1 - S.y0 + M * 2, () => soul(this.ctx, 1, fill, clearOn, false), { k: 1 + 0.06 * pop, cx, cy });
+    if (full) soul(ctx, 1 + 0.06 * pop, RAINBOW[Math.floor((wall / 4) % 360)], false, true);
+  }
+
+  /** 満タンのゲージの虹色（色を並べた絵と、目盛りの形） */
+  private gaugeFx: {
+    norm: HTMLCanvasElement; clear: HTMLCanvasElement; normData: ImageData; clearData: ImageData;
+    normPath: Path2D; clearPath: Path2D; key: string;
+  } | null = null;
+
+  private paintGaugeRainbow(wall: number, nNorm: number, nClear: number, seg: (i: number) => { clear: boolean; w: number; x: number; top: number }) {
+    const ctx = this.ctx;
+    const G = GAUGE;
+    // 目盛り 1 つを K 個の点で持つ（模様がなめらかに引き伸ばされても、色の境目が目盛りのすき間に収まるように）
+    const K = 16;
+    const key = `${nNorm}|${nClear}`;
+    let F = this.gaugeFx;
+    if (!F || F.key !== key) {
+      const mk = (n: number) => {
+        const c = document.createElement('canvas');
+        c.width = n * K;
+        c.height = 1;
+        return c;
+      };
+      const norm = mk(nNorm);
+      const clear = mk(nClear);
+      const normPath = new Path2D();
+      const clearPath = new Path2D();
+      for (let i = 0; i < nNorm + nClear; i++) {
+        const { clear: cl, w, x, top } = seg(i);
+        (cl ? clearPath : normPath).rect(x + 1, top, w - 2, G.y2 - top);
+      }
+      F = this.gaugeFx = {
+        norm, clear, normPath, clearPath, key,
+        normData: norm.getContext('2d')!.createImageData(nNorm * K, 1),
+        clearData: clear.getContext('2d')!.createImageData(nClear * K, 1),
+      };
     }
-    ctx.font = `900 100px ${FONT}`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    const m = ctx.measureText('魂');
-    const gw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
-    const gh = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
-    const k = Math.min((S.x1 - S.x0) / gw, (S.y1 - S.y0) / gh) * (1 + 0.06 * pop);
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(k, k);
-    const fx = -(m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
-    const fy = (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
-    if (clearOn) {
-      ctx.shadowColor = 'rgba(255,210,31,0.8)';
-      ctx.shadowBlur = 14 / k;
-    }
-    const fill = full ? RAINBOW[Math.floor((wall / 4) % 360)] : clearOn ? '#ffe25a' : '#2a5a70';
-    outlinedText(ctx, '魂', fx, fy, fill, '#0b1015', 7 / k);
-    ctx.restore();
+    const put = (c: HTMLCanvasElement, data: ImageData, n: number, i0: number) => {
+      const d = data.data;
+      for (let i = 0; i < n; i++) {
+        const o = Math.floor(((i0 + i) * 9 + wall / 4) % 360) * 3;
+        for (let k = 0; k < K; k++) {
+          const q = (i * K + k) * 4;
+          d[q] = RAINBOW_RGB[o];
+          d[q + 1] = RAINBOW_RGB[o + 1];
+          d[q + 2] = RAINBOW_RGB[o + 2];
+          d[q + 3] = 255;
+        }
+      }
+      c.getContext('2d')!.putImageData(data, 0, 0);
+    };
+    put(F.norm, F.normData, nNorm, 0);
+    put(F.clear, F.clearData, nClear, nNorm);
+    const fillWith = (c: HTMLCanvasElement, path: Path2D, x0: number, w: number) => {
+      const pat = ctx.createPattern(c, 'repeat');
+      if (!pat) return;
+      pat.setTransform(new DOMMatrix([w / K, 0, 0, 1, x0, 0]));
+      ctx.fillStyle = pat;
+      ctx.fill(path);
+    };
+    const smooth = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    fillWith(F.norm, F.normPath, G.x1, (G.split - G.x1) / nNorm);
+    fillWith(F.clear, F.clearPath, G.clearX, (G.x2 - G.clearX) / nClear);
+    ctx.imageSmoothingEnabled = smooth;
   }
 
   /**
@@ -2152,12 +2347,18 @@ export class Renderer {
     if (!this.sparkles.length) return;
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = '#fffbe0';
     this.sparkles = this.sparkles.filter((p) => wall - p.t < 520);
+    // 星の形を 1 つずつ描く代わりに、星の絵を大きさを変えて貼る（同じ時に出た粒は濃さが同じなので、濃さの指定もまとめる）
+    const sp = this.particle('star', '#fffbe0', 6);
+    let last = -1;
     for (const p of this.sparkles) {
       const age = wall - p.t;
-      ctx.globalAlpha = 0.8 * (1 - age / 520);
-      star(ctx, p.x + p.vx * age, p.y + p.vy * age, 6 * (1 - age / 700));
+      const a = Math.round(0.8 * (1 - age / 520) * 64) / 64;
+      const r = 6 * (1 - age / 700);
+      if (a <= 0 || r <= 0) continue;
+      if (a !== last) ctx.globalAlpha = last = a;
+      const side = sp.unit * r;
+      ctx.drawImage(sp.c, p.x + p.vx * age - side / 2, p.y + p.vy * age - side / 2, side, side);
     }
     ctx.restore();
   }
@@ -2343,12 +2544,42 @@ export class Renderer {
       }
       ctx.globalAlpha = 1;
     }
+    this.flushSparks();
     ctx.restore();
+  }
+
+  /** 火花の濃さの段の数 */
+  private static readonly SPARK_LEVELS = 33;
+  /** 濃さの段ごとにためた火花（絵の番号・x・y） */
+  private sparkBuckets: number[][] = Array.from({ length: Renderer.SPARK_LEVELS }, () => []);
+
+  /**
+   * ためた火花をまとめて貼る。1 粒ずつ星や丸の形を描くと、噴き出した瞬間に 1 フレーム数千の命令になるので、
+   * 星・丸の絵を貼る。明るさを足していく重ね方なので、貼る順が変わっても見た目は同じ
+   */
+  private flushSparks() {
+    const ctx = this.ctx;
+    const NB = Renderer.SPARK_LEVELS;
+    let sprites: { c: HTMLCanvasElement; unit: number }[] | null = null;
+    for (let b = 1; b < NB; b++) {
+      const list = this.sparkBuckets[b];
+      if (!list.length) continue;
+      sprites ??= [this.particle('star', '#ffd27a', 9), this.particle('star', '#fffaf0', 9), this.particle('dot', '#ffd27a', 4), this.particle('dot', '#fffaf0', 4)];
+      ctx.globalAlpha = b / (NB - 1);
+      for (let i = 0; i < list.length; i += 3) {
+        const k = list[i];
+        const sp = sprites[k];
+        const side = sp.unit * (k < 2 ? 9 : 4);
+        ctx.drawImage(sp.c, list[i + 1] - side / 2, list[i + 2] - side / 2, side, side);
+      }
+      list.length = 0;
+    }
+    this.sparkBuckets[0].length = 0;
+    ctx.globalAlpha = 1;
   }
 
   /** 火花の粒を 1 つ描く（r1・r2 = 決まった乱数の元、pa = 噴き出してからの秒、boost = 勢い） */
   private spark(k1: number, k2: number, x: number, pa: number, i: number, bottom: number, hgt: number, LIFE: number, boost: number) {
-    const ctx = this.ctx;
     const r1 = hash(k1);
     const r2 = hash(k2);
     const vy = -(hgt * 1.5 + r1 * hgt * 0.9) * boost;
@@ -2358,14 +2589,10 @@ export class Renderer {
     const px = x + vx * pa;
     const py = bottom + vy * pa + 0.5 * g * pa * pa;
     const life = (pa * 1000) / LIFE;
-    ctx.globalAlpha = 1 - life;
-    ctx.fillStyle = i % 4 === 0 ? '#ffd27a' : '#fffaf0';
-    if (i % 3 === 0) star(ctx, px, py, 9);
-    else {
-      ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // ここでは描かず、濃さの段ごとにためる（flushSparks でまとめて貼る）
+    const NB = Renderer.SPARK_LEVELS;
+    const b = Math.max(0, Math.min(NB - 1, Math.round((1 - life) * (NB - 1))));
+    this.sparkBuckets[b].push((i % 3 === 0 ? 0 : 2) + (i % 4 === 0 ? 0 : 1), px, py);
   }
 
 
