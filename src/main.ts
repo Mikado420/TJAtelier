@@ -1015,6 +1015,14 @@ function selAction(k: string) {
     updateSelBar();
     return;
   }
+  if (k === 'bars') {
+    // 選んだ音符すべての位置に小節線（#MEASURE）
+    const n = ed.barlinesAtNotes();
+    if (n) toast(`${n} か所に小節線を置きました`);
+    updateSelBar();
+    view.invalidate();
+    return;
+  }
   if (k === 'copy') { const n = ed.copySelection(); toast(`${n} 個コピーしました`); }
   else if (k === 'cut') { const n = ed.cutSelection(); toast(`${n} 個切り取りました`); }
   else if (k === 'del') { const n = ed.deleteSelection(); toast(`${n} 個消しました`); }

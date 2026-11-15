@@ -34,3 +34,38 @@ describe('#MEASURE を小節の途中に置く', () => {
     expect(ms(ed)).toEqual([[TPB * 4, 3, 4]]);
   });
 });
+
+describe('選んだ音符すべての位置に小節線', () => {
+  const T2 = 'TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n1010220001000100,\n1111,\n#MEASURE 3/4\n111,\n#END\n';
+  it('音符ごとに小節が始まり、音符の時刻とその先の小節線は変わらない', () => {
+    const ed = new Editor(parseTJA(T2));
+    const notes = ed.course.notes.map((n) => [n.tick, ed.timing.tickToTime(n.tick)]);
+    const bars = (e: Editor) => {
+      const out: number[] = [];
+      for (let t = 0; t < TPB * 15; ) {
+        const m = e.measureOf(t);
+        out.push(m.start);
+        t = m.start + m.length;
+      }
+      return out;
+    };
+    const before = bars(ed);
+    // 2 小節目の 2 拍目から 4 拍目まで（2 拍目の頭・その 16 分後・3 拍目の 16 分後の 3 つ）
+    ed.sel = { start: TPB * 5, end: TPB * 7 + 1 };
+    expect(ed.barlinesAtNotes()).toBe(3);
+    const after = bars(ed);
+    expect(after.slice(0, 6)).toEqual([0, TPB * 4, TPB * 5, TPB * 5.25, TPB * 6.25, TPB * 8]);
+    // 選んだ範囲の先の小節線は元のまま
+    expect(after.filter((t) => t >= TPB * 8)).toEqual(before.filter((t) => t >= TPB * 8));
+    expect(ed.course.notes.map((n) => [n.tick, ed.timing.tickToTime(n.tick)])).toEqual(notes);
+    // 3/4 の小節もそのまま
+    expect(ed.measureOf(TPB * 12)).toMatchObject({ num: 3, den: 4 });
+    // TJA に書いて読み直しても同じ
+    const ed2 = new Editor(parseTJA(writeTJA(ed.chart)));
+    expect(bars(ed2)).toEqual(after);
+    expect(ed2.course.notes.map((n) => n.tick)).toEqual(notes.map((n) => n[0]));
+    // 元に戻すと元の小節線
+    ed.undo();
+    expect(bars(ed)).toEqual(before);
+  });
+});

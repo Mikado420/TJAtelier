@@ -746,6 +746,33 @@ export class Editor {
     });
   }
 
+  /**
+   * 選んでいる範囲の音符すべての位置に小節線が来るように #MEASURE を置く。
+   * 最初の音符の前の小節はそこまでの長さにし、最後の音符の小節は元の次の小節線までにする（その先の小節線は動かさない）。
+   * 音符の位置（時刻）は変わらない。置いた数を返す
+   */
+  barlinesAtNotes(): number {
+    const ticks = [...new Set(this.selectedNotes().map((n) => n.tick))].sort((a, b) => a - b);
+    if (!ticks.length) return 0;
+    const first = this.measureOf(ticks[0]);
+    const lastM = this.measureOf(ticks[ticks.length - 1]);
+    const endTick = lastM.start + lastM.length;
+    const after = this.measureOf(endTick);
+    const add: EEvent[] = [];
+    if (ticks[0] > first.start) add.push({ tick: first.start, kind: 'measure', ...measureFrac(ticks[0] - first.start, first.den) });
+    ticks.forEach((t, i) => {
+      const next = i + 1 < ticks.length ? ticks[i + 1] : endTick;
+      if (next > t) add.push({ tick: t, kind: 'measure', ...measureFrac(next - t, (i + 1 < ticks.length ? first : lastM).den) });
+    });
+    // その先の小節は元の拍子のまま
+    add.push({ tick: endTick, kind: 'measure', num: after.num, den: after.den });
+    this.mutate(() => {
+      this.course.events = this.course.events.filter((e) => !(e.kind === 'measure' && e.tick >= first.start && e.tick <= endTick));
+      this.course.events.push(...add);
+    });
+    return ticks.length;
+  }
+
   removeEvent(ev: EEvent) {
     this.mutate(() => {
       this.course.events = this.course.events.filter((e) => e !== ev);
