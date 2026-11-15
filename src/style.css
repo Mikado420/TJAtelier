@@ -1857,6 +1857,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 /* 難易度えらび */
 .home-diff { position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: calc(8px + var(--safe-t)) calc(14px + var(--safe-r)) calc(8px + var(--safe-b)) calc(14px + var(--safe-l)); background: rgba(10, 12, 14, 0.72); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); opacity: 0; transition: opacity 0.22s; }
 .home-diff.on { opacity: 1; }
+/* 難易度えらびを重ねている間は、後ろ（ぼかして見せている所）の動きを止める */
+.home:has(> .home-diff.on) .home-list *, .home:has(> .home-diff.on) .home-list { animation-play-state: paused !important; }
 .home-diff.hidden { display: none; }
 .hdf-box { width: min(760px, 100%); background: var(--panel); box-shadow: 0 0 0 3px var(--accent), 0 18px 40px rgba(0, 0, 0, 0.6); transform: scale(0.6); transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.25, 1.15); }
 .home-diff.on .hdf-box { transform: none; }
@@ -2817,6 +2819,12 @@ button, input, select, textarea { font-family: inherit; }
 
 /* 曲えらび・リザルトの背景（方眼と走る光） */
 canvas.grid-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+/* 方眼の上を横に走る光（GPU で横に動かすだけ） */
+.grid-streaks { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; contain: strict; }
+.grid-streaks > i { position: absolute; left: 0; height: 4px; will-change: transform; }
+.grid-streaks > i::before { content: ''; position: absolute; left: 0; right: 0; top: 1px; height: 2px; background: linear-gradient(90deg, rgba(147, 205, 226, 0), rgba(147, 205, 226, 0.6)); }
+.grid-streaks > i::after { content: ''; position: absolute; right: -1px; top: 0; width: 4px; height: 4px; background: rgba(210, 240, 255, 0.9); }
+body.playing .grid-streaks.hide-playing, .hidden > .grid-streaks { display: none; }
 .res-bg::before, .res-bg .res-obj { display: none; }
 .res > .res-bg { z-index: 1; }
 .res > .res-top, .res > .res-main { z-index: 2; }
