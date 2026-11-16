@@ -90,6 +90,8 @@ const settings = {
   showFps: false,
   /** プレイ中にコマが落ちるときは、絵の細かさを自動で下げる */
   autoRes: true,
+  /** プレイ画面の絵: いつもの / TNDE スキン */
+  skin: 'std' as 'std' | 'tnde',
   /** タッチ用の太鼓を半透明で表示する（隠しても叩ける） */
   padVisible: true,
   /** 譜面情報: 連打・風船のシミュレーションの秒速（打/秒） */
@@ -1638,6 +1640,7 @@ function renderSheet() {
     const pane =
       t === 'play' ? `<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
           <h4 class="st-h">譜面</h4>${chartRows()}
+          <h4 class="st-h">見た目</h4>${skinRow()}
           <div class="st-btns">
             <button data-act="calibrate">タイミング調整</button>
             ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
@@ -1870,7 +1873,19 @@ const autoBtn = (on: boolean) => `<button class="st-auto ${on ? 'on' : ''}" data
 const HIT_MODES = [['on', 'オン'], ['playOff', 'プレイだけオフ'], ['off', 'オフ']] as const;
 /** プレイの設定（叩き方に関わるもの） */
 function playRows() {
-  return hitRow() + chartRows();
+  return hitRow() + chartRows() + skinRow();
+}
+const SKINS: [typeof settings.skin, string][] = [['std', 'いつもの'], ['tnde', 'TNDE']];
+/** プレイ画面の絵の欄 */
+function skinRow() {
+  return `
+    <div class="st-row"><span>スキン</span><div class="st-seg">${SKINS.map(([v, l]) => `<button data-skin="${v}" class="${settings.skin === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
+}
+function onSkinClick(b: HTMLButtonElement) {
+  settings.skin = b.dataset.skin as typeof settings.skin;
+  saveSettings();
+  b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  play.applySettings();
 }
 /** 打音の欄 */
 function hitRow() {
@@ -1992,6 +2007,8 @@ $('sheetBody').addEventListener('click', (e) => {
   if (b) onHitModeClick(b);
   const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');
   if (v) onVideoModeClick(v);
+  const sk = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-skin]');
+  if (sk) onSkinClick(sk);
   const br = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-brmode]');
   if (br) onBranchModeClick(br);
 });
@@ -2695,6 +2712,8 @@ $('pauseSettings').addEventListener('click', (e) => {
   if (hm) onHitModeClick(hm);
   const vm = t.closest<HTMLButtonElement>('[data-vmode]');
   if (vm) onVideoModeClick(vm);
+  const sk = t.closest<HTMLButtonElement>('[data-skin]');
+  if (sk) onSkinClick(sk);
   const br = t.closest<HTMLButtonElement>('[data-brmode]');
   if (br) onBranchModeClick(br);
 });

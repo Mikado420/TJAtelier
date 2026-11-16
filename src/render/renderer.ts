@@ -3,6 +3,7 @@ import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type 
 import { starSlots, STAR_RED } from '../chart/stars';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { pixelRatio } from '../orient';
+import { TndeSkin, TW, TH } from './tnde';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
 
 /**
@@ -349,6 +350,15 @@ export class Renderer {
   /** 16:9 の枠（画面 px。左上と倍率） */
   frame = { x: 0, y: 0, s: 1 };
 
+  /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */
+  tnde: TndeSkin | null = null;
+  /** ネームプレートの称号と名前 */
+  plate = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
+  /** 今の画面を TNDE スキンで描くか（ひとりで遊ぶふつうの画面だけ。動画・プレビュー・対戦・観戦はいつもの絵） */
+  private get skinOn() {
+    return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length && !this.videoMode;
+  }
+
   /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
   videoMode: '' | 'full' | 'bottom' = '';
 
@@ -478,6 +488,7 @@ export class Renderer {
     c.beginPath();
     c.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
     c.clip();
+    if (this.skinOn) { c.restore(); this.finishBackground(c, bg); return; }
     if (this.broadcast) { if (vm !== 'full') this.paintBroadcastBackground(c, V); }
     else if (vm) this.paintVideoBackground(c, V, vm);
     else this.paintPlainBackground(c, V);
@@ -814,6 +825,7 @@ export class Renderer {
   }
 
   reset() {
+    this.tnde?.reset();
     this.endFx = null;
     this.branchFx = null;
     // 曲ごとの絵（曲名・難易度のパネル）は曲が変わると使わないので手放す。
@@ -900,6 +912,10 @@ export class Renderer {
     // 背景は後ろの canvas に描いてあるので、手前は消すだけ
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.skinOn) {
+      this.drawTnde(game, course, now, wall, info);
+      return;
+    }
     ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
     ctx.save();
     const V = this.vis;
@@ -959,6 +975,39 @@ export class Renderer {
       this.drawPad(wall);
     }
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  /** TNDE スキンで 1 フレーム描く（1920×1080 の座標を、この画面の基準座標に合わせて縮める） */
+  private drawTnde(game: Game, course: Course, now: number, wall: number, info: { title: string; course: string; level: number; genre?: string }) {
+    const ctx = this.ctx;
+    const k = REF_W / TW;
+    ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, REF_W, REF_H);
+    ctx.clip();
+    ctx.save();
+    ctx.scale(k, (REF_H / TH));
+    const labels = this.labelsFor(game);
+    this.tnde!.draw(ctx, {
+      game, course, now, wall, info,
+      adv: (t, b, n) => scrollAhead(this.scrollMode, { time: t, bpm: n.bpm, scroll: n.scroll, beat: b }, now, this.beatNow) * this.speed,
+      advY: (t, b, n) => (n.scrollY ? scrollBase(this.scrollMode, { time: t, bpm: n.bpm, beat: b }, now, this.beatNow) * n.scrollY * this.speed : 0),
+      jpos: jposAt(course.jpos, now),
+      labels: (n) => (labels[n.sec === undefined ? game.branch : (n.br ?? 0)]?.get(n) ?? labels[0].get(n)),
+      fx: { bursts: this.bursts, flyers: this.flyers, flashes: this.flashes, judgeFx: this.judgeFx, rollFx: this.rollFx, rainbow: this.rainbow, comboPop: this.comboPop, gogoStart: this.gogoStartWall },
+      name: this.plate.name,
+      title: this.plate.title,
+    });
+    ctx.restore();
+    this.drawLyric(this.vis, course, now);
+    this.drawEnd(this.vis, wall);
+    ctx.restore();
+    if (this.touch) {
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      this.drawPad(wall);
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 

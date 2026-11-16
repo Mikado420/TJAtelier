@@ -3,6 +3,7 @@ import type { Course } from '../chart/types';
 import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
+import { TndeSkin } from '../render/tnde';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
@@ -49,6 +50,8 @@ export interface PlaySettings {
   showFps?: boolean;
   /** コマが落ちるときは、絵の細かさを自動で下げる */
   autoRes?: boolean;
+  /** プレイ画面の絵: いつもの / TNDE スキン */
+  skin?: 'std' | 'tnde';
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
   padVisible?: boolean;
   /** 画面上部を指置きにする（叩いても反応しない） */
@@ -440,6 +443,7 @@ export class PlayMode {
     this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
     this.resetRes();
+    await this.applySkin();
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
@@ -618,8 +622,37 @@ export class PlayMode {
   }
 
   /** 設定（ハイスピード・ドンの幅・太鼓の表示など）を今のプレイに反映する */
+  /** TNDE スキン（初めて使うときに読み込む） */
+  private tnde: TndeSkin | null = null;
+  private tndeLoad: Promise<void> | null = null;
+  /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
+  private applySkin() {
+    const R = this.renderer;
+    const want = this.settings.skin === 'tnde';
+    if (!want) {
+      R.tnde = null;
+      return Promise.resolve();
+    }
+    if (this.tnde) {
+      R.tnde = this.tnde;
+      return Promise.resolve();
+    }
+    this.tndeLoad ??= TndeSkin.load('skins/tnde/').then(
+      (s) => {
+        this.tnde = s;
+        if (this.settings.skin === 'tnde') {
+          R.tnde = s;
+          R.resize();
+        }
+      },
+      () => { this.tndeLoad = null; },
+    );
+    return this.tndeLoad;
+  }
+
   applySettings() {
     const R = this.renderer;
+    void this.applySkin();
     R.speed = this.settings.speed;
     R.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
