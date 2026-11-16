@@ -151,7 +151,7 @@ const hash = (s: string) => {
 const step = (wall: number, t0: number, ms: number) => Math.floor((wall - t0) / ms);
 
 export class TndeSkin {
-  /** 読み込んだ絵（ImageBitmap にして、描くたびに読み直されないようにする） */
+  /** 読み込んだ絵（ImageBitmap にして、描くたびに読み直されないようにする。作れなかったときだけ img） */
   private imgs = new Map<string, ImageBitmap | HTMLImageElement>();
   private loading = new Map<string, Promise<ImageBitmap | HTMLImageElement | null>>();
   private man!: Manifest;
@@ -195,6 +195,8 @@ export class TndeSkin {
   /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
   private wants(name: string) {
     const p = this.pick;
+    // 曲が決まるまでは、曲ごとに変わる絵（背景・踊り子・モブ）は読み込まない
+    if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;
     let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
     if (m) return m[1] === String(p.up);
     m = /^bg\/Bg_down\/([^/]+)\//.exec(name);
@@ -210,7 +212,7 @@ export class TndeSkin {
 
   /** 使う絵を読み込み、使わない絵を手放す */
   private sync() {
-    const set = `${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
+    const set = `${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
     const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)];
     if (set !== this.loadedSet) {
       this.loadedSet = set;
@@ -231,32 +233,16 @@ export class TndeSkin {
     if (p) return p;
     const info = this.man.img[name] ?? this.man.anim[name];
     if (!info) return Promise.resolve(null);
-    p = new Promise<ImageBitmap | HTMLImageElement | null>((res) => {
-      const im = new Image();
-      let done = false;
-      const finish = (v: HTMLImageElement | null) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (!v) {
-          // 読み込めなかった絵は、次にまた読み込み直せるようにしておく
-          if (this.loading.get(name) === p) this.loading.delete(name);
-          res(null);
-          return;
-        }
-        if (this.loading.get(name) !== p) { res(null); return; }
-        this.imgs.set(name, v);
-        res(v);
-      };
-      // 返事が来ない絵は 15 秒であきらめる（ほかの絵の読み込みを止めない）
-      const timer = setTimeout(() => finish(null), 15000);
-      // iPhone では ImageBitmap が絵のメモリの上限に数えられて、作れなくなる（返事も来ない）ことがあるので、img のまま使う
-      im.onload = () => {
-        const dec = typeof im.decode === 'function' ? im.decode().catch(() => {}) : Promise.resolve();
-        void Promise.race([dec, new Promise((r) => setTimeout(r, 3000))]).then(() => finish(im));
-      };
-      im.onerror = () => finish(null);
-      im.src = this.base + info.f;
+    const url = this.base + info.f;
+    p = this.queue(() => loadBitmap(url)).then((v) => {
+      if (!v) {
+        // 読み込めなかった絵は、次にまた読み込み直せるようにしておく
+        if (this.loading.get(name) === p) this.loading.delete(name);
+        return null;
+      }
+      if (this.loading.get(name) !== p) { if ('close' in v) v.close(); return null; }
+      this.imgs.set(name, v);
+      return v;
     });
     this.loading.set(name, p);
     return p;
@@ -264,6 +250,23 @@ export class TndeSkin {
 
   private img(name: string) {
     return this.imgs.get(name) ?? null;
+  }
+
+  /** 一度に読み込む絵の数をしぼる（iPhone は一度にたくさん頼むと止まりやすい） */
+  private running = 0;
+  private waiting: (() => void)[] = [];
+  private queue<T>(job: () => Promise<T>): Promise<T> {
+    return new Promise<T>((res, rej) => {
+      const go = () => {
+        this.running++;
+        job().then(res, rej).finally(() => {
+          this.running--;
+          this.waiting.shift()?.();
+        });
+      };
+      if (this.running < 6) go();
+      else this.waiting.push(go);
+    });
   }
 
   /** 絵を 1.5 倍で貼る（sx..sh は絵の中の範囲、x, y は左上） */
@@ -526,7 +529,7 @@ export class TndeSkin {
   draw(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { game, course, now, wall } = F;
     this.choose(F.info.title);
-    if (`${this.pick.up}|${this.pick.down}|${this.pick.dancer}` !== this.loadedSet) void this.sync();
+    if (`${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}` !== this.loadedSet) void this.sync();
     const beat = this.beatOf(course, now);
     const b0 = course.bars[0];
     this.dancePhase = b0 ? (b0.time * b0.bpm) / 60 + 0.55 : 0;
@@ -1718,4 +1721,25 @@ function shade(hex: string, k: number) {
   const n = parseInt(m[1], 16);
   const f = (v: number) => Math.round(v * k).toString(16).padStart(2, '0');
   return `#${f(n >> 16)}${f((n >> 8) & 255)}${f(n & 255)}`;
+}
+
+/** 絵を ImageBitmap にして読み込む（返事が来ないときは 12 秒で 1 回やり直す。2 回とも駄目なら img にする） */
+async function loadBitmap(url: string): Promise<ImageBitmap | HTMLImageElement | null> {
+  const wait = (ms: number) => new Promise<null>((r) => setTimeout(() => r(null), ms));
+  for (let i = 0; i < 2; i++) {
+    try {
+      const bm = await Promise.race([
+        fetch(url).then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status))))).then((b) => createImageBitmap(b)),
+        wait(12000),
+      ]);
+      if (bm) return bm;
+    } catch { /* もう 1 回 */ }
+  }
+  return new Promise((res) => {
+    const im = new Image();
+    const t = setTimeout(() => res(null), 12000);
+    im.onload = () => { clearTimeout(t); res(im); };
+    im.onerror = () => { clearTimeout(t); res(null); };
+    im.src = url;
+  });
 }

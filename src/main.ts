@@ -283,6 +283,8 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
+// スキンの絵は、最初の画面が出たあとに裏で読み込み始める（最初の曲を早く始められるように）
+setTimeout(() => play.preloadSkin(), 1500);
 // プレイ画面などの文字（マキナス 4 Flat。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
 // ページからの相対の場所で読む（GitHub Pages のサブパスでも、ローカルでも同じ）
 try {

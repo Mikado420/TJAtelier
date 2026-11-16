@@ -631,6 +631,11 @@ export class PlayMode {
   private tnde: TndeSkin | null = null;
   private tndeLoad: Promise<void> | null = null;
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
+  /** アプリを開いたときに、スキンの絵（曲で変わらないもの）を裏で読み込み始める */
+  preloadSkin() {
+    if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});
+  }
+
   private applySkin(title?: string) {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
