@@ -49,6 +49,8 @@ export interface TndeInfo {
 }
 
 export interface TndeFrame {
+  /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
+  laneOnly?: boolean;
   game: Game;
   course: Course;
   now: number;
@@ -474,30 +476,37 @@ export class TndeSkin {
     c.imageSmoothingEnabled = true;
     this.watch(F, gogo, 60 / bpm);
     const jx = TJX + F.jpos * S;
-    // TJAPlayer3 と同じ重ね順
-    this.drawUp(c, wall, beat, clear, now);
-    this.drawDown(c, wall, beat, clear, now);
-    this.drawFooter(c);
-    this.drawChara(c, beat, gogo, F);
-    this.drawMob(c, beat, wall);
+    // TJAPlayer3 と同じ重ね順（lane = 動画用の画面: レーンと左のパネルだけ）
+    const all = !F.laneOnly;
+    if (all) {
+      this.drawUp(c, wall, beat, clear, now);
+      this.drawDown(c, wall, beat, clear, now);
+      this.drawFooter(c);
+      this.drawChara(c, beat, gogo, F);
+      this.drawMob(c, beat, wall);
+    }
     this.drawLane(c, F, gogo);
-    this.drawGauge(c, st.gauge, wall);
+    if (all) this.drawGauge(c, st.gauge, wall);
     this.drawJudgeFrame(c, F, gogo, jx);
     this.drawNotes(c, F, beat, jx);
     this.drawPanel(c, F);
-    this.drawSplash(c, wall);
+    if (all) this.drawSplash(c, wall);
     this.drawCombo(c, st.combo, wall);
     this.drawScore(c, wall);
-    this.drawRainbow(c, F);
-    this.drawFireworks(c, wall);
-    this.drawSoulFx(c, F);
-    this.drawFlyers(c, F, jx);
+    if (all) {
+      this.drawRainbow(c, F);
+      this.drawFireworks(c, wall);
+      this.drawSoulFx(c, F);
+      this.drawFlyers(c, F, jx);
+    }
     this.drawExplosion(c, F, jx);
-    this.drawTitle(c, F);
-    this.drawComboBanner(c, wall);
+    if (all) {
+      this.drawTitle(c, F);
+      this.drawComboBanner(c, wall);
+    }
     this.drawRoll(c, F);
     this.drawJudgeText(c, F, jx);
-    this.drawBalloonChara(c, F);
+    if (all) this.drawBalloonChara(c, F);
   }
 
   private bpmAt(course: Course, now: number) {
@@ -896,7 +905,16 @@ export class TndeSkin {
     flash('lane/Red', don);
     flash('lane/Blue', ka);
     flash('lane/Yellow', hit);
-    this.put(c, 'taiko/frame3', P(329), P(136));
+    if (!F.laneOnly) this.put(c, 'taiko/frame3', P(329), P(136));
+    else {
+      // 動画用の画面: ゲージの下地（黒）は出さず、レーンの縁だけ
+      c.save();
+      c.beginPath();
+      c.rect(0, 276, TW, TH);
+      c.clip();
+      this.put(c, 'taiko/frame3', P(329), P(136));
+      c.restore();
+    }
   }
 
   // ---------- ゲージ ----------
@@ -1457,9 +1475,9 @@ export class TndeSkin {
   private drawRoll(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { wall } = F;
     const r = F.fx.rollFx;
-    // 連打の扇（40 ms ごと。0〜3 でひらき、4 のまま、最後に閉じる）
+    // 連打の扇（40 ms ごと。0〜3 でひらき、4 のまま、最後に閉じる）。動画用の画面では上の曲の情報に重なるので出さない
     const v = step(wall, this.rollAt, 40);
-    if (r && !r.balloon && v >= 0 && v <= 66 && wall - r.t < 2700) {
+    if (r && !F.laneOnly && !r.balloon && v >= 0 && v <= 66 && wall - r.t < 2700) {
       const cell = v <= 3 ? v : v >= 57 && v <= 60 ? 60 - v : 4;
       const fade = v > 60 ? 1 - (v - 60) / 6 : 1;
       this.alpha(c, fade, () => {

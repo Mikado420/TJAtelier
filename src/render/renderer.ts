@@ -358,6 +358,10 @@ export class Renderer {
   private get skinOn() {
     return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length && !this.videoMode;
   }
+  /** 動画用の画面で、レーンと左のパネルだけ TNDE スキンで描くか */
+  private get skinLane() {
+    return !!this.tnde?.ready && this.broadcast && !this.preview && !this.spectate && !this.opponents.length;
+  }
 
   /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
   videoMode: '' | 'full' | 'bottom' = '';
@@ -500,7 +504,7 @@ export class Renderer {
         c.fillStyle = PV_GAP;
         c.fillRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
       }
-      this.paintLaneBase(c, V.x1, true);
+      if (!this.skinLane) this.paintLaneBase(c, V.x1, true);
       c.globalAlpha = 1;
     }
     // オンライン対戦の相手のレーンの動かない部分
@@ -912,8 +916,8 @@ export class Renderer {
     // 背景は後ろの canvas に描いてあるので、手前は消すだけ
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    if (this.skinOn) {
-      this.drawTnde(game, course, now, wall, info);
+    if (this.skinOn || this.skinLane) {
+      this.drawTnde(game, course, now, wall, info, this.skinLane);
       return;
     }
     ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
@@ -979,13 +983,15 @@ export class Renderer {
   }
 
   /** TNDE スキンで 1 フレーム描く（1920×1080 の座標を、この画面の基準座標に合わせて縮める） */
-  private drawTnde(game: Game, course: Course, now: number, wall: number, info: TndeInfo) {
+  private drawTnde(game: Game, course: Course, now: number, wall: number, info: TndeInfo, laneOnly = false) {
     const ctx = this.ctx;
     const k = REF_W / TW;
     ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, 0, REF_W, REF_H);
+    const V = this.vis;
+    if (laneOnly) ctx.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+    else ctx.rect(0, 0, REF_W, REF_H);
     ctx.clip();
     ctx.save();
     ctx.scale(k, (REF_H / TH));
@@ -999,12 +1005,13 @@ export class Renderer {
       fx: { bursts: this.bursts, flyers: this.flyers, flashes: this.flashes, judgeFx: this.judgeFx, rollFx: this.rollFx, rainbow: this.rainbow, comboPop: this.comboPop, gogoStart: this.gogoStartWall },
       name: this.plate.name,
       title: this.plate.title,
+      laneOnly,
     });
     ctx.restore();
-    this.drawLyric(this.vis, course, now);
+    if (!laneOnly) this.drawLyric(this.vis, course, now);
     this.drawEnd(this.vis, wall);
     ctx.restore();
-    if (this.touch) {
+    if (this.touch && !laneOnly) {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawPad(wall);
     }
