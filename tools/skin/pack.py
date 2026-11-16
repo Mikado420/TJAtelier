@@ -122,6 +122,15 @@ def pick(f):
     o = os.path.join(OVR, f) if OVR else ''
     return o if o and os.path.exists(o) else os.path.join(SRC, f)
 man['img']['nameplate'] = {'f': wr('nameplate', rd(pick('NamePlate.png')), False), 'w': 0, 'h': 0}
+# 段位の枠（8〜10 段目）は小さい絵を大きく出すので、4 倍にしておく（ふちがぼやけないよう、なめらかに広げてから輪郭を立てる）
+_np = rd(pick('NamePlate.png')).astype(np.float32)[8 * 54:11 * 54]
+_a = _np[:, :, 3:] / 255
+_pm = np.dstack([_np[:, :, :3] * _a, _np[:, :, 3:]])
+_up = cv2.resize(_pm, None, fx=4, fy=4, interpolation=cv2.INTER_LANCZOS4)
+_sh = np.clip(_up * 1.7 - cv2.GaussianBlur(_up, (0, 0), 2.2) * 0.7, 0, 255)
+_A = _sh[:, :, 3:]
+_hd = np.dstack([np.clip(np.where(_A > 1, _sh[:, :, :3] / np.maximum(_A, 1) * 255, 0), 0, 255), _A]).astype(np.uint8)
+man['img']['nameplate_frames'] = {'f': wr('nameplate_frames', _hd, False), 'w': _hd.shape[1], 'h': _hd.shape[0]}
 for f in ['FOT-Seurat_Pro_B.otf', 'FOT-OedoKtr.otf']:
     shutil.copy(pick(f), os.path.join(OUT, f))
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w'), ensure_ascii=False, separators=(',', ':'))

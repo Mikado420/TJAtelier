@@ -1193,13 +1193,21 @@ export class TndeSkin {
     const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
     if (dan) {
       row(7);
-      row(pf.danFrame === 'gold' ? 9 : pf.danFrame === 'rainbow' ? 10 : 8);
+      const fr = pf.danFrame === 'gold' ? 1 : pf.danFrame === 'rainbow' ? 2 : 0;
+      // 枠は 4 倍にした絵から（無ければ元の絵）
+      const hd = this.img('nameplate_frames');
+      if (hd) c.drawImage(hd, 0, fr * 216, 880, 216, -6, 443.5, 330, 81);
+      else row(8 + fr);
     }
     row(0);
     c.save();
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.font = `16.5px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    // 称号: 帯に収まるいちばん大きい字（21px まで。それより小さくなるときは 13px で横に縮める）
+    c.font = `20px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    const tw = c.measureText(F.title).width || 1;
+    const ts = Math.max(13, Math.min(21, (20 * 228) / tw));
+    c.font = `${ts}px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.fillStyle = titleInk(pf);
     // 帯の 1P の丸より右の真ん中（字の真ん中が帯の所の真ん中に来る高さ）
     fitText(c, F.title, 192, 468, 228);
@@ -1224,8 +1232,9 @@ export class TndeSkin {
     const n = chars.length;
     const size = 21.7;
     // 3 文字は字の間を詰める（字の形は変えない）。丸に重ならないよう少し右へ
-    const adv = n >= 3 ? size * 0.92 : 29;
-    const cx = n >= 3 ? 100 : 98;
+    const sx = n >= 3 ? 0.9 : 1;
+    const adv = n >= 3 ? size * 0.92 * sx : 29;
+    const cx = n >= 3 ? 99 : 98;
     const k = Math.hypot(c.getTransform().a, c.getTransform().b) || 1;
     const W = 120;
     const H = 40;
@@ -1240,7 +1249,8 @@ export class TndeSkin {
     g.fillStyle = '#fff';
     const xs = chars.map((_, i) => W / 2 + (i - (n - 1) / 2) * adv);
     // 字の色（白か金）を先に描き、そのあと縁を後ろに描く
-    chars.forEach((ch, i) => g.fillText(ch, xs[i], H / 2));
+    const put = (f: (ch: string, x: number) => void) => chars.forEach((ch, i) => { g.save(); g.translate(xs[i], H / 2); g.scale(sx, 1); f(ch, 0); g.restore(); });
+    put((ch, x) => g.fillText(ch, x, 0));
     if (gold) {
       g.globalCompositeOperation = 'source-in';
       // 金の字の色は 11 段目の帯の、色のある所（縦に金のしま）を字の高さに合わせて引きのばす
@@ -1250,7 +1260,7 @@ export class TndeSkin {
     g.lineJoin = 'round';
     g.lineWidth = 5;
     g.strokeStyle = '#140a0a';
-    chars.forEach((ch, i) => g.strokeText(ch, xs[i], H / 2));
+    put((ch, x) => g.strokeText(ch, x, 0));
     c.drawImage(cv, cx - W / 2, 500 - H / 2, W, H);
   }
 

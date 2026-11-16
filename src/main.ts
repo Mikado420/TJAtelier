@@ -1985,7 +1985,8 @@ function onVideoModeClick(b: HTMLButtonElement) {
   play.applySettings();
 }
 
-const TITLE_STYLES: [PlateStyle['titleStyle'], string][] = [['wood', '木'], ['gold', '金'], ['purple', '紫'], ['goldc', '金・色'], ['purplec', '紫・色']];
+const TITLE_STYLES: [string, string][] = [['wood', '木'], ['gold', '金'], ['purple', '紫'], ['custom', 'カスタム']];
+const TITLE_DESIGNS: [PlateStyle['titleStyle'], string][] = [['goldc', '金'], ['purplec', '紫']];
 const DAN_FRAMES: [PlateStyle['danFrame'], string][] = [['silver', '銀'], ['gold', '金'], ['rainbow', '虹']];
 const DAN_PASSES: [PlateStyle['danPass'], string][] = [['red', '赤合格'], ['gold', '金合格']];
 /** ID の欄の状態（'' = ふつう） */
@@ -2003,8 +2004,9 @@ function profileRows() {
     <div class="st-row"><span>ID</span><input class="st-text ${profIdState && profIdState !== 'busy' ? 'err' : ''}" data-ptext="id" value="${esc(profIdDraft ?? p.id)}" maxlength="16" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">${profIdState ? `<em class="st-state">${PROF_ID_STATE[profIdState]}</em>` : ''}</div>
     <div class="st-row"><span>名前</span><input class="st-text" data-ptext="name" value="${esc(p.name)}" maxlength="16" autocomplete="off"></div>
     <div class="st-row"><span>称号</span><input class="st-text" data-ptext="title" value="${esc(p.title)}" maxlength="24" autocomplete="off"></div>
-    <div class="st-row"><span>称号の色</span>${seg('titleStyle', TITLE_STYLES, p.titleStyle, 'five')}</div>
-    ${custom ? `<div class="st-row"><span>色</span><input type="color" class="st-color" data-ptext="titleColor" value="${esc(p.titleColor)}"><input class="st-text" data-ptext="titleColor" value="${esc(p.titleColor)}" maxlength="7" autocapitalize="off" autocomplete="off" spellcheck="false"></div>` : ''}
+    <div class="st-row"><span>称号の色</span>${seg('titleStyle', TITLE_STYLES, custom ? 'custom' : p.titleStyle, 'four')}</div>
+    ${custom ? `<div class="st-row"><span>デザイン</span>${seg('titleStyle', TITLE_DESIGNS, p.titleStyle, 'two')}</div>
+    <div class="st-row"><span>色</span><input type="color" class="st-color" data-ptext="titleColor" value="${esc(p.titleColor)}"><input class="st-text" data-ptext="titleColor" value="${esc(p.titleColor)}" maxlength="7" autocapitalize="off" autocomplete="off" spellcheck="false"></div>` : ''}
     <h4 class="st-h">段位</h4>
     <label class="st-row"><span>段位を表示</span><input type="checkbox" class="st-sw" data-pdan="1" ${p.danOn ? 'checked' : ''}></label>
     ${p.danOn ? `
@@ -2068,7 +2070,10 @@ async function claimProfileId(raw: string) {
 }
 function onProfileClick(b: HTMLButtonElement) {
   const p = settings.profile as Record<string, unknown>;
-  p[b.dataset.prof!] = b.dataset.v;
+  let v = b.dataset.v;
+  // カスタム: 前に選んでいたデザイン（無ければ紫）
+  if (b.dataset.prof === 'titleStyle' && v === 'custom') v = p.titleStyle === 'goldc' || p.titleStyle === 'purplec' ? (p.titleStyle as string) : p.titleStyle === 'gold' ? 'goldc' : 'purplec';
+  p[b.dataset.prof!] = v;
   saveProfile();
   renderSheet();
 }
