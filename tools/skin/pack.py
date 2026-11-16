@@ -1,5 +1,6 @@
 """TNDE スキン（TaikoNijiiroDondaEX Ver4.1用）の 5_Game から、プレイ画面で使う絵を public/skins/tnde へ書き出す。
-使い方: python3 -I tools/skin/pack.py <TNDE-R/Graphics> <出力先>
+使い方: python3 -I tools/skin/pack.py <TNDE-R/Graphics> <出力先> [差し替えのフォルダ]
+差し替えのフォルダに NamePlate.png・FOT-OedoKtr.otf があれば、スキンのものの代わりに使う
 連番の絵（どんちゃん・踊り子など）は 1 枚の絵にまとめる（読み込む数を減らす）"""
 import cv2, json, os, re, sys, shutil
 import numpy as np
@@ -108,7 +109,11 @@ for k in ['Normal', 'In']:
 for f in sorted(os.listdir(os.path.join(G, '1_Chara/1P'))):
     anim('chara/' + f, '1_Chara/1P/' + f, step=2)
 # ネームプレート・字
-man['img']['nameplate'] = {'f': wr('nameplate', rd(os.path.join(SRC, 'NamePlate.png')), False), 'w': 0, 'h': 0}
+OVR = sys.argv[3] if len(sys.argv) > 3 else ''
+def pick(f):
+    o = os.path.join(OVR, f) if OVR else ''
+    return o if o and os.path.exists(o) else os.path.join(SRC, f)
+man['img']['nameplate'] = {'f': wr('nameplate', rd(pick('NamePlate.png')), False), 'w': 0, 'h': 0}
 for f in ['FOT-Seurat_Pro_B.otf', 'FOT-OedoKtr.otf']:
-    shutil.copy(os.path.join(SRC, f), os.path.join(OUT, f))
+    shutil.copy(pick(f), os.path.join(OUT, f))
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w'), ensure_ascii=False, separators=(',', ':'))

@@ -630,6 +630,7 @@ export class PlayMode {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
     if (!want) {
+      this.tnde?.dropCaches();
       R.tnde = null;
       return Promise.resolve();
     }
