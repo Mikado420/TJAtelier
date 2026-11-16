@@ -51,6 +51,8 @@ export interface TndeInfo {
 export interface TndeFrame {
   /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
   laneOnly?: boolean;
+  /** 背景の動画（画像）を出している所: full = 全面（上下の背景を描かない）、bottom = 下だけ（下の背景・踊り子・モブを描かない） */
+  bgMode?: '' | 'full' | 'bottom';
   game: Game;
   course: Course;
   now: number;
@@ -479,11 +481,15 @@ export class TndeSkin {
     // TJAPlayer3 と同じ重ね順（lane = 動画用の画面: レーンと左のパネルだけ）
     const all = !F.laneOnly;
     if (all) {
-      this.drawUp(c, wall, beat, clear, now);
-      this.drawDown(c, wall, beat, clear, now);
-      this.drawFooter(c);
+      const noUp = F.bgMode === 'full';
+      const noDown = !!F.bgMode;
+      if (!noUp) this.drawUp(c, wall, beat, clear, now);
+      if (!noDown) {
+        this.drawDown(c, wall, beat, clear, now);
+        this.drawFooter(c);
+      }
       this.drawChara(c, beat, gogo, F);
-      this.drawMob(c, beat, wall);
+      if (!noDown) this.drawMob(c, beat, wall);
     }
     this.drawLane(c, F, gogo);
     if (all) this.drawGauge(c, st.gauge, wall);

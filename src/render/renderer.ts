@@ -354,9 +354,9 @@ export class Renderer {
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
   plate = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
-  /** 今の画面を TNDE スキンで描くか（ひとりで遊ぶふつうの画面だけ。動画・プレビュー・対戦・観戦はいつもの絵） */
+  /** 今の画面を TNDE スキンで描くか（ひとりで遊ぶふつうの画面。背景の動画があれば、その所の背景は描かない） */
   private get skinOn() {
-    return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length && !this.videoMode;
+    return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length;
   }
   /** 動画用の画面で、レーンと左のパネルだけ TNDE スキンで描くか */
   private get skinLane() {
@@ -492,7 +492,13 @@ export class Renderer {
     c.beginPath();
     c.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
     c.clip();
-    if (this.skinOn) { c.restore(); this.finishBackground(c, bg); return; }
+    if (this.skinOn) {
+      // 背景の動画を下だけに出すとき: レーンより下を透かす
+      if (vm === 'bottom') c.clearRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
+      c.restore();
+      this.finishBackground(c, bg);
+      return;
+    }
     if (this.broadcast) { if (vm !== 'full') this.paintBroadcastBackground(c, V); }
     else if (vm) this.paintVideoBackground(c, V, vm);
     else this.paintPlainBackground(c, V);
@@ -1006,6 +1012,7 @@ export class Renderer {
       name: this.plate.name,
       title: this.plate.title,
       laneOnly,
+      bgMode: this.videoMode,
     });
     ctx.restore();
     if (!laneOnly) this.drawLyric(this.vis, course, now);
