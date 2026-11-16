@@ -1078,6 +1078,8 @@ export class TndeSkin {
         if (s.done && s.count >= (n.hits ?? 5)) continue;
         const end = n.endTime ?? n.time;
         if (now >= end) continue;
+        // 叩き始めたら、レーンの風船は消して、どんちゃんと風船のアニメーションだけにする
+        if (now >= n.time && s.count > 0) continue;
         if (now >= n.time) x = jx;
         this.put(c, 'notes', x - HALF, y, 1430, row, 260, 130);
         this.se(c, 'ふうせん', x - HALF - P(2), y);

@@ -256,6 +256,8 @@ export function bindInput(
   let btnRects: DOMRect[] | null = null;
   window.addEventListener('resize', () => { btnRects = null; });
   new ResizeObserver(() => { btnRects = null; }).observe(root);
+  // ボタンが出たり消えたりしたとき（動画用の画面との切り替えなど）も測り直す
+  new MutationObserver(() => { btnRects = null; }).observe(root, { attributes: true, attributeFilter: ['class', 'style'], subtree: false, childList: true });
   const buttonRects = () => (btnRects ??= Array.from(root.querySelectorAll<HTMLElement>(':scope > button')).map((b) => b.getBoundingClientRect()).filter((r) => r.width > 0));
   (window as unknown as { __nativeHit?: unknown }).__nativeHit = (nx: number, ny: number, ts?: number, tag?: string, seq?: number, played?: number) => {
     const now = performance.now();

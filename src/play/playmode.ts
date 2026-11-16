@@ -438,6 +438,9 @@ export class PlayMode {
     resetTouchStats();
     this.game = game;
 
+    // スキンの用意ができて最初のコマを描くまでは、ゲーム画面を隠しておく（前のコマやいつもの見た目が一瞬見えないように）
+    this.canvasEl.style.visibility = 'hidden';
+    this.firstFrame = true;
     this.root.classList.remove('hidden');
     // プレイ中は後ろのエディタを描かない・重ねて表示しない（プレイ画面に全部の力を使う）
     document.body.classList.add('playing');
@@ -554,6 +557,10 @@ export class PlayMode {
       if (this.compare.length && !this.online && !this.calibrating) this.stepCompare(now);
       if (this.online && !this.spectating) this.sendOnline(game);
       this.renderer.draw(game, course, now, info);
+      if (this.firstFrame) {
+        this.firstFrame = false;
+        this.canvasEl.style.visibility = '';
+      }
       if (this.renderer.broadcast) this.bc.update(now);
       const w = performance.now() - t0;
       P.frames++;
@@ -630,6 +637,8 @@ export class PlayMode {
   /** TNDE スキン（初めて使うときに読み込む） */
   private tnde: TndeSkin | null = null;
   private tndeLoad: Promise<void> | null = null;
+  /** スキンの用意ができてから最初のコマを描くまで（ゲーム画面を隠しておく） */
+  private firstFrame = false;
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
   /** アプリを開いたときに、スキンの絵（曲で変わらないもの）を裏で読み込み始める */
   preloadSkin() {
