@@ -467,6 +467,10 @@ export class PlayMode {
     this.showBroadcast(course, info);
     this.renderer.speed = this.settings.speed;
     this.applyPlate();
+    // 音が鳴り始めるのを待つ間も、始まりの画面を出しておく（暗いまま待たせない）
+    try { this.renderer.draw(game, course, from - 2, info); } catch { /* 次のコマで描く */ }
+    this.firstFrame = false;
+    this.canvasEl.style.visibility = '';
     this.active = true;
     postNative({ type: 'play', active: true });
     await this.audio.startAt(from - 2, 1);
@@ -484,7 +488,9 @@ export class PlayMode {
     this.soundIdx = 0;
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
     // 終わりの帯は、音源と譜面がどちらも終わってから
-    this.cur = { course, info, endAt, clicks: clicks ?? [], fxAt: this.calibrating ? lastTime + 0.4 : this.endFxTime(lastTime, course.endTime), tailEnd };
+    // TNDE スキン: 本家と同じく、最後の音符を叩き終えたらすぐ演出を出す
+    const fxAt = this.calibrating ? lastTime + 0.4 : this.settings.skin === 'tnde' ? Math.min(this.endFxTime(lastTime, course.endTime), lastTime + 0.5) : this.endFxTime(lastTime, course.endTime);
+    this.cur = { course, info, endAt, clicks: clicks ?? [], fxAt, tailEnd };
     this.endWall = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
@@ -588,7 +594,8 @@ export class PlayMode {
         if (this.renderer.skinEnd(kind)) this.audio.playUi(`tnde:${kind}`);
       }
       // 帯を出したら、曲が終わっても帯を見せきってから結果へ
-      if (this.endWall ? performance.now() - this.endWall > this.endHold && now > (this.cur?.tailEnd ?? 0) + 1 : now > endAt) {
+      // 演出を出す前に曲が終わっても、演出を見せてから結果へ（演出の時刻より前には終えない）
+      if (this.endWall ? performance.now() - this.endWall > this.endHold && now > (this.cur?.tailEnd ?? 0) + 1 : now > endAt && (this.calibrating || this.spectating || now > (this.cur?.fxAt ?? 0))) {
         this.finish();
         return;
       }
