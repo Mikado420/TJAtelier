@@ -39,6 +39,7 @@ import { loadAudio, loadChart } from './io/storage';
 import { addFolder, listFolderColors, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
 import { Home, folderColor } from './home/home';
 import type { PlayInfo } from './play/broadcast';
+import { canRecord, RecordCancelled } from './play/offline';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
@@ -90,7 +91,6 @@ const settings = {
   passiveTouch: false,
   pauseButton: true,
   /** 自動録画 */
-  autoRecord: false,
   /** 動画用の画面 */
   broadcast: false,
   /** プレイ中に左上へ FPS を出す */
@@ -286,7 +286,6 @@ document.addEventListener('pointerdown', (e) => {
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
 // 自動録画の動画は、曲が終わったら共有シートで保存する
-play.onRecorded = (blob, name) => download(blob, name);
 // スキンの絵は、最初の画面が出たあとに裏で読み込み始める（最初の曲を早く始められるように）
 setTimeout(() => play.preloadSkin(), 1500);
 // プレイ画面などの文字（マキナス 4 Flat。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
@@ -1652,7 +1651,7 @@ function renderSheet() {
     $('sheetTitle').textContent = '設定';
     const t = settingsTab;
     const pane =
-      t === 'play' ? `${recRow()}<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
+      t === 'play' ? `<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
           <h4 class="st-h">譜面</h4>${chartRows()}
           <h4 class="st-h">見た目</h4>${skinRow()}
           <div class="st-btns">
@@ -2020,9 +2019,6 @@ function profileRows() {
     <div class="st-row"><span>枠</span>${seg('danFrame', DAN_FRAMES, p.danFrame)}</div>
     <div class="st-row"><span>合格</span>${seg('danPass', DAN_PASSES, p.danPass, 'two')}</div>` : ''}`;
 }
-/** 自動録画の欄 */
-const recRow = () =>
-  `<h4 class="st-h">録画</h4><div class="st-row"><span>自動録画</span><div class="st-seg two">${[['0', 'オフ'], ['1', 'オン']].map(([v, l]) => `<button data-rec="${v}" class="${(v === '1') === !!settings.autoRecord ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
 /** プロフィールを保存して、プレイ画面に伝える */
 function saveProfile() {
   saveSettings();
@@ -2125,12 +2121,6 @@ $('sheetBody').addEventListener('click', (e) => {
   if (br) onBranchModeClick(br);
   const pb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-prof]');
   if (pb) onProfileClick(pb);
-  const rb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-rec]');
-  if (rb) {
-    settings.autoRecord = rb.dataset.rec === '1';
-    saveSettings();
-    renderSheet();
-  }
 });
 $('sheetBody').addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement;
@@ -2957,8 +2947,70 @@ async function folderOf(id: string): Promise<PlayInfo['folder']> {
   return { name: key.split('/').pop()!, color: folderColor(key, colors), custom: !!colors[key] };
 }
 
+/** 録画中か */
+let recording = false;
+/** 録画をやめる（進み具合の画面の「やめる」） */
+let recordStop = false;
+
+/** 曲えらびの「録画」: 曲を読み込んで、オートで流した動画を作る */
+async function recordSong(id: string, course?: string) {
+  if (recording) return;
+  if (!canRecord()) {
+    toast('この端末では録画できません');
+    return;
+  }
+  recording = true;
+  try {
+    busy('録画の準備をしています…', 0);
+    await openSong(id, 'record', course);
+  } finally {
+    recording = false;
+    busyEnd();
+  }
+}
+
+/** 開いている譜面を録画して、保存・共有する */
+async function recordCurrent() {
+  const course = toPlayable(ed.chart, ed.mainCourse);
+  if (!course.notes.length) {
+    toast('ノーツがありません');
+    return;
+  }
+  const title = ed.chart.title || '譜面';
+  const msg = `「${title}」を録画しています…`;
+  recordStop = false;
+  $('busyStop').classList.remove('hidden');
+  busy(msg, 0);
+  try {
+    const r = await play.exportVideo(
+      course,
+      {
+        title: ed.chart.title,
+        course: ed.course.name,
+        level: ed.course.level,
+        genre: ed.chart.extra.find(([k]) => k.toUpperCase() === 'GENRE')?.[1],
+        sub: ed.chart.subtitle,
+        maker: hdrOf(ed.chart, 'MAKER') || hdrOf(ed.chart, `NOTESDESIGNER${Math.max(0, (COURSE_NAMES as readonly string[]).indexOf(ed.course.name))}`) || undefined,
+        jacket: currentJacket?.url,
+        folder: currentSongId ? await folderOf(currentSongId).catch(() => undefined) : undefined,
+        stage: Math.max(1, stageNo),
+      },
+      (p) => busy(msg, p),
+      () => recordStop,
+    );
+    busyEnd();
+    download(r.blob, `${safeName(title)}_${ed.course.name}.${r.ext}`);
+  } catch (e) {
+    busyEnd();
+    if (!(e instanceof RecordCancelled)) toast(`録画できませんでした（${(e as Error)?.message ?? e}）`);
+  } finally {
+    $('busyStop').classList.add('hidden');
+  }
+}
+$('busyStop').addEventListener('click', () => { recordStop = true; });
+
 /** 一覧の曲をエディタで開く（play ならそのままテストプレイ） */
-async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
+async function openSong(id: string, mode: 'edit' | 'play' | 'record', course?: string) {
   const data = await loadSongData(id);
   if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
   if (course) {
@@ -2992,6 +3044,11 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   if (id !== currentSongId) return;
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
+  if (mode === 'record') {
+    updateHeader();
+    await recordCurrent();
+    return;
+  }
   home.hide();
   updateHeader();
   if (mode === 'play') void startTest(true);
@@ -3060,6 +3117,7 @@ const home = new Home({
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
   online: () => online.open(),
+  record: (id, course) => void recordSong(id, course),
   analyze: (id, course) => void (async () => {
     const d = await loadSongData(id);
     if (!d) { toast('譜面を読み込めませんでした'); return; }

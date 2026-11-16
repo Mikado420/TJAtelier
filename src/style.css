@@ -3266,3 +3266,7 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 
 .st-nav button span { white-space: nowrap; min-width: 0; }
 .sheet-body .st-nav button[data-sttab="prof"] span { display: inline-block; transform: scaleX(0.84); transform-origin: left center; }
+/* 曲えらびの「録画」・録画の進み具合の「やめる」 */
+.home .home-diff svg.ic-rec { fill: #ff4b4b; stroke: #fff; stroke-width: 2; }
+.busy-stop { min-width: 120px; height: 36px; padding: 0 18px; border: 0; border-radius: 0; background: #353d45; color: #fff; font: 800 14px var(--fd); }
+.busy-stop.hidden { display: none; }

@@ -3,7 +3,7 @@ import type { Course } from '../chart/types';
 import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
-import { Recorder } from './recorder';
+import { renderChartVideo } from './offline';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
@@ -47,8 +47,6 @@ export interface PlaySettings {
   passiveTouch?: boolean;
   /** プレイ中のポーズボタンを出す（出さないときは上の真ん中に触れるとポーズ） */
   pauseButton?: boolean;
-  /** 自動録画（曲の始まりから結果の前までを動画にする） */
-  autoRecord?: boolean;
   /** 左上に FPS を出す */
   showFps?: boolean;
   /** コマが落ちるときは、絵の細かさを自動で下げる */
@@ -144,7 +142,6 @@ export class PlayMode {
         if (!this.active || this.paused || !this.game || this.auto || this.spectating) return;
         // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）。アプリが鳴らしたときは鳴らさない
         if (this.hitOn && !silent) this.audio.playHit(kind);
-        else if (this.hitOn && this.recorder.active) this.audio.recordHit(kind);
         this.renderer.pushHit(kind, side);
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
@@ -317,7 +314,6 @@ export class PlayMode {
 
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
-    this.recorder.discard();
     this.stopVideo();
     this.bc.hide();
     this.root.classList.add('hidden');
@@ -447,12 +443,6 @@ export class PlayMode {
     this.canvasEl.style.visibility = 'hidden';
     this.firstFrame = true;
     this.root.classList.remove('hidden');
-    // 自動録画: 読み込みの画面から録り始める
-    this.recorder.discard();
-    this.recTitle = info.title;
-    if (this.settings.autoRecord && !this.calibrating && !this.spectating) {
-      if (!this.recorder.start(this.root, this.audio.recordStream())) this.onError('この端末では録画できません');
-    }
     // プレイ中は後ろのエディタを描かない・重ねて表示しない（プレイ画面に全部の力を使う）
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
@@ -658,17 +648,49 @@ export class PlayMode {
   /** TNDE スキン（初めて使うときに読み込む） */
   private tnde: TndeSkin | null = null;
   private tndeLoad: Promise<void> | null = null;
-  /** 自動録画 */
-  private recorder = new Recorder();
-  /** 録れた動画を渡す（保存・共有） */
-  onRecorded: (blob: Blob, name: string) => void = () => {};
   /** スキンの用意ができてから最初のコマを描くまで（ゲーム画面を隠しておく） */
   private firstFrame = false;
-  private recTitle = '';
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
   /** アプリを開いたときに、スキンの絵（曲で変わらないもの）を裏で読み込み始める */
   preloadSkin() {
     if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});
+  }
+
+  /**
+   * 譜面の録画: オートで最初から最後まで遊んだときの画面と音を、プレイ画面を出さずに動画にする（今の設定の見た目で）
+   */
+  async exportVideo(course: Course, info: PlayInfo, onProgress: (p: number) => void, cancelled: () => boolean) {
+    if (this.active) throw new Error('プレイ中は録画できません');
+    this.calibrating = false;
+    await Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+    this.applyPlate();
+    const tnde = this.settings.skin === 'tnde' && this.tnde?.ready ? this.tnde : null;
+    const broadcast = !!this.settings.broadcast;
+    const m = (this.settings.videoMode as string) === 'top' ? 'bottom' : this.settings.videoMode ?? 'full';
+    const vmode: '' | 'full' | 'bottom' = !this.videoUrl || m === 'off' ? '' : broadcast ? 'full' : m;
+    const fix = ({ N: 0, E: 1, M: 2 } as Record<string, number | undefined>)[this.settings.branch ?? 'auto'];
+    return renderChartVideo({
+      course,
+      info,
+      audio: this.audio,
+      view: {
+        speed: this.settings.speed,
+        donWidth: this.settings.donWidth ?? 0.6,
+        padVisible: this.settings.padVisible !== false,
+        broadcast,
+        vmode,
+        tnde,
+        plate: { ...this.renderer.plate },
+      },
+      fixed: fix,
+      hitOn: this.hitOn,
+      fxAt: (last) => (tnde ? Math.min(this.endFxTime(last, course.endTime), last + 0.5) : this.endFxTime(last, course.endTime)),
+      video: this.videoUrl ? { url: this.videoUrl, offset: this.videoOffset } : null,
+      bgImage: this.bgImgUrl || null,
+      dim: this.settings.videoDim ?? 0.5,
+      onProgress,
+      cancelled,
+    });
   }
 
   private applySkin(title?: string) {
@@ -1166,10 +1188,6 @@ export class PlayMode {
 
   finish() {
     if (!this.active) return;
-    if (this.recorder.active) {
-      const name = `${(this.recTitle || 'play').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`;
-      void this.recorder.stop().then((r) => { if (r) this.onRecorded(r.blob, `${name}.${r.ext}`); });
-    }
     this.stopVideo();
     this.hidePause();
     this.active = false;

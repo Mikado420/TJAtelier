@@ -36,32 +36,63 @@ export class AudioEngine {
     this.applyMix();
   }
 
-  // ---------- 録画 ----------
-  private recDest: MediaStreamAudioDestinationNode | null = null;
-  /** 録画にだけ入れる打音（アプリが鳴らした打音は Web の音に入らないため） */
-  private recHit: GainNode | null = null;
-  /** 録画用の音（鳴っている音すべて） */
-  recordStream(): MediaStream | null {
-    if (typeof this.ctx.createMediaStreamDestination !== 'function') return null;
-    if (!this.recDest) {
-      this.recDest = this.ctx.createMediaStreamDestination();
-      if (this.limiter) this.limiter.connect(this.recDest);
-      else for (const g of [this.musicGain, this.sfxGain, this.metroGain, this.uiGain]) g.connect(this.recDest);
-      this.recHit = this.ctx.createGain();
-      this.recHit.connect(this.recDest);
+  /**
+   * 録画の音: 音源・打音・画面の音を、プレイで鳴るのと同じ音量とリミッターで混ぜる（その場で鳴らさずに計算する）。
+   * 時刻はどれも動画の頭からの秒。musicAt = 音源の 0 秒が来る時刻
+   */
+  async renderMix(o: { length: number; rate: number; musicAt: number; hits: { kind: HitSound; at: number }[]; ui: { name: string; at: number }[] }): Promise<AudioBuffer> {
+    const ctx = new OfflineAudioContext(2, Math.max(1, Math.ceil(o.length * o.rate)), o.rate);
+    let out: AudioNode = ctx.destination;
+    if (this.limiter) {
+      const l = ctx.createDynamicsCompressor();
+      l.threshold.value = -3;
+      l.knee.value = 3;
+      l.ratio.value = 20;
+      l.attack.value = 0.002;
+      l.release.value = 0.1;
+      l.connect(ctx.destination);
+      out = l;
     }
-    return this.recDest.stream;
-  }
-  /** 打音を録画にだけ入れる */
-  recordHit(kind: 'don' | 'ka') {
-    if (!this.recHit) return;
-    this.recHit.gain.value = this.sfxGain.gain.value;
-    const src = this.ctx.createBufferSource();
-    src.buffer = this.customHit[kind] ?? this.builtinHit(kind);
-    const g = this.ctx.createGain();
-    g.gain.value = this.hitNorm(kind);
-    src.connect(g).connect(this.recHit);
-    src.start();
+    const bus = (v: number) => {
+      const g = ctx.createGain();
+      g.gain.value = v;
+      g.connect(out);
+      return g;
+    };
+    const music = bus(this.musicGain.gain.value);
+    const sfx = bus(this.sfxGain.gain.value);
+    const ui = bus(this.uiGain.gain.value);
+    if (this.music) {
+      const s = ctx.createBufferSource();
+      s.buffer = this.music;
+      s.connect(music);
+      s.start(Math.max(0, o.musicAt), Math.max(0, -o.musicAt));
+    }
+    const last: Record<string, { g: GainNode; end: number }> = {};
+    for (const h of o.hits) {
+      const buf = this.customHit[h.kind] ?? this.builtinHit(h.kind);
+      if (!this.hitLevel[h.kind]) this.measureHit(h.kind);
+      const prev = last[h.kind];
+      if (prev && prev.end > h.at) prev.g.gain.setTargetAtTime(0, h.at, 0.006);
+      const s = ctx.createBufferSource();
+      s.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.value = this.hitNorm(h.kind);
+      s.connect(g).connect(sfx);
+      s.start(Math.max(0, h.at));
+      last[h.kind] = { g, end: h.at + buf.duration };
+    }
+    if (this.mix.ui > 0) {
+      for (const u of o.ui) {
+        const b = this.uiBufs.get(u.name);
+        if (!b) continue;
+        const s = ctx.createBufferSource();
+        s.buffer = b;
+        s.connect(ui);
+        s.start(Math.max(0, u.at));
+      }
+    }
+    return ctx.startRendering();
   }
 
   // ---------- 音量（自動で揃える） ----------

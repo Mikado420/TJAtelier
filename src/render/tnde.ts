@@ -222,6 +222,14 @@ export class TndeSkin {
     for (const n of Object.keys(this.man.img)) if (n.startsWith('end/') && this.endWant.has(endGroup(n))) void this.fetchImg(n);
   }
 
+  /** 終わりの演出の絵を読み込み終えるまで待つ（録画: 演出までに読み込みが間に合わないことがあるので） */
+  async loadEnd(kind: string) {
+    const g = END_GROUP[kind];
+    if (!g) return;
+    this.needEnd([g]);
+    await Promise.all(Object.keys(this.man.img).filter((n) => n.startsWith('end/') && endGroup(n) === g).map((n) => this.fetchImg(n)));
+  }
+
   /** 使う絵を読み込み、使わない絵を手放す */
   private sync() {
     const set = `${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
