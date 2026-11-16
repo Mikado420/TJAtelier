@@ -191,7 +191,7 @@ export class TndeSkin {
     this.drawLane(c, F, beat, gogo);
     this.drawGauge(c, st.gauge, wall);
     this.drawPanel(c, F);
-    this.drawJudgeFx(c, F, gogo);
+    this.drawJudgeFx(c, F);
     this.drawFlyers(c, F);
     this.drawRainbow(c, F);
     this.drawBubbles(c, F);
@@ -678,7 +678,7 @@ export class TndeSkin {
 
   // ---------- 判定の演出 ----------
 
-  private drawJudgeFx(c: CanvasRenderingContext2D, F: TndeFrame, gogo: boolean) {
+  private drawJudgeFx(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { wall } = F;
     const jx = TJX + F.jpos * S;
     for (const b of F.fx.bursts) {
