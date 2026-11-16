@@ -174,7 +174,9 @@ export class TndeSkin {
       [['TNDE Seurat', 'FOT-Seurat_Pro_B.otf'], ['TNDE Kantei', 'FOT-OedoKtr.otf']].map(async ([name, file]) => {
         try {
           const ff = new FontFace(name, `url(${base}${file})`);
-          document.fonts.add(await ff.load());
+          document.fonts.add(ff);
+          // 字の読み込みは 10 秒まで待つ（来なければ、届いたときから使う）
+          await Promise.race([ff.load(), new Promise((r) => setTimeout(r, 10000))]);
         } catch { /* 字が無くても描ける */ }
       }),
     );
@@ -231,15 +233,29 @@ export class TndeSkin {
     if (!info) return Promise.resolve(null);
     p = new Promise<ImageBitmap | HTMLImageElement | null>((res) => {
       const im = new Image();
-      im.decoding = 'async';
-      im.onload = async () => {
-        let out: ImageBitmap | HTMLImageElement = im;
-        try { out = await createImageBitmap(im); } catch { /* そのまま使う */ }
-        if (this.loading.get(name) !== p) { if ('close' in out) out.close(); res(null); return; }
-        this.imgs.set(name, out);
-        res(out);
+      let done = false;
+      const finish = (v: HTMLImageElement | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (!v) {
+          // 読み込めなかった絵は、次にまた読み込み直せるようにしておく
+          if (this.loading.get(name) === p) this.loading.delete(name);
+          res(null);
+          return;
+        }
+        if (this.loading.get(name) !== p) { res(null); return; }
+        this.imgs.set(name, v);
+        res(v);
       };
-      im.onerror = () => res(null);
+      // 返事が来ない絵は 15 秒であきらめる（ほかの絵の読み込みを止めない）
+      const timer = setTimeout(() => finish(null), 15000);
+      // iPhone では ImageBitmap が絵のメモリの上限に数えられて、作れなくなる（返事も来ない）ことがあるので、img のまま使う
+      im.onload = () => {
+        const dec = typeof im.decode === 'function' ? im.decode().catch(() => {}) : Promise.resolve();
+        void Promise.race([dec, new Promise((r) => setTimeout(r, 3000))]).then(() => finish(im));
+      };
+      im.onerror = () => finish(null);
       im.src = this.base + info.f;
     });
     this.loading.set(name, p);
