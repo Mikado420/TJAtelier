@@ -1498,7 +1498,8 @@ export class TndeSkin {
   private drawTitle(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { wall } = F;
     const f = F.info.folder;
-    const stage = F.info.stage ?? 0;
+    // エディタから遊んだときも入れ替える（曲えらびから遊んでいなければ 1 曲目）
+    const stage = Math.max(1, F.info.stage ?? 0);
     if (this.stageAt < 0) this.stageAt = wall;
     // ジャンル（曲のフォルダ）と「○曲目 / ∞曲」を約 4 秒で入れ替える（TJAPlayer3 と同じ数え方。間隔は参考動画で測った）
     const n = ((((wall - this.stageAt) % 3960) + 3960) % 3960) / 1.98;
