@@ -10,6 +10,10 @@
  * GET  /collab/ws/:id?cid=&name=&color=&pass=&watch=1&create=1&rname=&unlisted=1&rwatch=1   部屋に入る（WebSocket）
  * GET  /collab/audio/:id/:hash?cid=    共有している音源を受け取る（メンバー・見学できる部屋）
  * PUT  /collab/audio/:id/:hash?cid=    音源を置く（メンバーだけ）
+ *
+ * プロフィールの ID（ほかの人と同じ ID は使えない）:
+ * POST /id/claim   {id, key, old}  ID を自分のものにする
+ * POST /id/release {id, key}       ID を手放す
  */
 import { DurableObject } from 'cloudflare:workers';
 import { LOBBY_STALE_MS, LobbyCore, newRoomId, RoomCore, type Conn, type LobbyInfo, type RoomState } from './core';
@@ -24,7 +28,7 @@ interface Env {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
   'Access-Control-Allow-Headers': '*',
 };
 const json = (v: unknown, status = 200) =>
@@ -61,6 +65,13 @@ export default {
       const h = new Headers(res.headers);
       for (const [k, v] of Object.entries(CORS)) h.set(k, v);
       return new Response(res.body, { status: res.status, headers: h });
+    }
+    if ((url.pathname === '/id/claim' || url.pathname === '/id/release') && req.method === 'POST') {
+      let b: { id?: unknown; key?: unknown; old?: unknown } = {};
+      try { b = (await req.json()) as typeof b; } catch { return json({ ok: false, reason: 'bad' }, 400); }
+      const id = String(b.id ?? ''), key = String(b.key ?? ''), old = typeof b.old === 'string' ? b.old : undefined;
+      if (url.pathname === '/id/release') { await idsStub(env).idRelease(id, key); return json({ ok: true }); }
+      return json(await idsStub(env).idClaim(id, key, old));
     }
     if (url.pathname === '/') return json({ ok: true, name: 'tjatelier-online' });
     return json({ error: 'not found' }, 404);
@@ -114,7 +125,31 @@ export class Lobby extends DurableObject<Env> {
     c.update(info);
     await this.ctx.storage.put('collabRooms', [...c.rooms.values()]);
   }
+
+  // ───── プロフィールの ID（名前 'ids' の Lobby で使う。大文字小文字は区別しないで 1 人 1 つ） ─────
+  /** ID を自分のものにする（同じ合言葉なら取り直せる。old は手放す前の ID） */
+  async idClaim(id: string, key: string, old?: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!ID_RE.test(id) || !KEY_RE.test(key)) return { ok: false, reason: 'bad' };
+    const k = `id:${id.toLowerCase()}`;
+    const owner = await this.ctx.storage.get<string>(k);
+    if (owner && owner !== key) return { ok: false, reason: 'taken' };
+    await this.ctx.storage.put(k, key);
+    if (old && old.toLowerCase() !== id.toLowerCase()) await this.idRelease(old, key);
+    return { ok: true };
+  }
+
+  /** ID を手放す（持っている人だけ） */
+  async idRelease(id: string, key: string) {
+    if (!ID_RE.test(id)) return;
+    const k = `id:${id.toLowerCase()}`;
+    if ((await this.ctx.storage.get<string>(k)) === key) await this.ctx.storage.delete(k);
+  }
 }
+
+const ID_RE = /^[A-Za-z0-9_]{3,16}$/;
+const KEY_RE = /^[0-9a-f]{32}$/;
+/** プロフィールの ID の台帳 */
+const idsStub = (env: Env) => env.LOBBY.get(env.LOBBY.idFromName('ids'));
 
 /** 譜面の文字を保存するときの 1 かけらの長さ（1 つの値の上限 2MB に収める） */
 const TJA_PART = 500_000;

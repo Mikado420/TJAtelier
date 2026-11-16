@@ -3,7 +3,7 @@ import type { Course } from '../chart/types';
 import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
-import { TndeSkin } from '../render/tnde';
+import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
@@ -52,6 +52,8 @@ export interface PlaySettings {
   autoRes?: boolean;
   /** プレイ画面の絵: いつもの / TNDE スキン */
   skin?: 'std' | 'tnde';
+  /** プロフィール（ネームプレートの名前・称号・段位） */
+  profile?: PlateStyle & { name: string; title: string };
   /** タッチ用の太鼓を半透明で表示する（false で隠す。隠しても叩ける） */
   padVisible?: boolean;
   /** 画面上部を指置きにする（叩いても反応しない） */
@@ -241,6 +243,7 @@ export class PlayMode {
     this.renderer.resize();
     this.placeVideo();
     this.renderer.speed = this.settings.speed;
+    this.applyPlate();
     this.active = true;
     postNative({ type: 'play', active: true });
     // 先に音を出せる状態にしてから位置を決める（待った時間のぶん、ほかの人より遅れて始まらないように）
@@ -448,6 +451,7 @@ export class PlayMode {
     this.placeVideo();
     this.showBroadcast(course, info);
     this.renderer.speed = this.settings.speed;
+    this.applyPlate();
     this.active = true;
     postNative({ type: 'play', active: true });
     await this.audio.startAt(from - 2, 1);
@@ -652,10 +656,17 @@ export class PlayMode {
     return this.tndeLoad.then(() => (title !== undefined ? this.tnde?.prepare(title) : undefined));
   }
 
+  /** プロフィールをネームプレートに */
+  private applyPlate() {
+    const pf = this.settings.profile;
+    if (pf) this.renderer.plate = { name: pf.name || 'プレイヤー', title: pf.title, profile: { ...pf } };
+  }
+
   applySettings() {
     const R = this.renderer;
     void this.applySkin();
     R.speed = this.settings.speed;
+    this.applyPlate();
     R.donWidth = this.settings.donWidth ?? 0.6;
     this.applyInputMode();
     const bc = this.online ? false : this.broadcastOn;

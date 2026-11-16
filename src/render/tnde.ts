@@ -39,6 +39,37 @@ export interface TndeFx {
 }
 
 /** 曲の情報（ジャンルの帯は曲のフォルダ、stage は曲えらびから何曲目か） */
+/** ネームプレートの見た目 */
+export interface PlateStyle {
+  /** 称号の帯: 木・金・紫、色を指定した金・紫 */
+  titleStyle: 'wood' | 'gold' | 'purple' | 'goldc' | 'purplec';
+  titleColor: string;
+  danOn: boolean;
+  /** 段位（3 文字まで） */
+  dan: string;
+  danFrame: 'silver' | 'gold' | 'rainbow';
+  /** 赤合格 = 白い字、金合格 = 金の字 */
+  danPass: 'red' | 'gold';
+}
+export const DEFAULT_PROFILE: PlateStyle = { titleStyle: 'purple', titleColor: '#2e9bff', danOn: false, dan: '初段', danFrame: 'gold', danPass: 'red' };
+
+/** 称号の字の色（紫の帯は濃い紫、木・金は焦げ茶、色を指定した帯はその色をうんと暗く） */
+function titleInk(p: PlateStyle) {
+  if ((p.titleStyle === 'goldc' || p.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(p.titleColor)) return shade(p.titleColor, 0.2);
+  return p.titleStyle === 'purple' || p.titleStyle === 'purplec' ? '#220432' : '#2a1400';
+}
+
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [((h * 60) + 360) % 360, mx ? d / mx : 0, mx];
+}
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const f = (n: number) => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5), f(3), f(1)];
+}
+
 export interface TndeInfo {
   title: string;
   course: string;
@@ -66,6 +97,8 @@ export interface TndeFrame {
   fx: TndeFx;
   name: string;
   title: string;
+  /** ネームプレートの見た目（称号の帯・段位） */
+  profile?: PlateStyle;
 }
 
 /** SENotes.png の行 */
@@ -1136,7 +1169,7 @@ export class TndeSkin {
     }
     // 難易度・ネームプレート（中身が変わったときだけ描き直す）
     const course = COURSE_IMG[F.info.course] ?? 'course/Oni';
-    this.cached(c, 'plate', `${course}|${F.title}|${F.name}`, -10, 340, 350, 190, (g) => {
+    this.cached(c, 'plate', `${course}|${F.title}|${F.name}|${JSON.stringify(F.profile ?? null)}`, -10, 340, 350, 190, (g) => {
       this.put(g, course, P(28), P(232));
       this.drawNameplate(g, F);
     });
@@ -1149,26 +1182,110 @@ export class TndeSkin {
   private drawNameplate(c: CanvasRenderingContext2D, F: TndeFrame) {
     const im = this.img('nameplate');
     if (!im) return;
-    const row = (r: number) => c.drawImage(im, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
+    const pf = F.profile ?? DEFAULT_PROFILE;
+    // NamePlate.png の 54px ごとの段: 0 1P の丸、3 白い台、4 木・5 金・6 紫の称号の帯、7 段位の下地、8 銀・9 金・10 虹の枠、11 金の字の色
+    const at = (src: CanvasImageSource, r: number) => c.drawImage(src, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
+    const row = (r: number) => at(im, r);
     row(3);
-    row(6);
+    const base = pf.titleStyle === 'wood' ? 4 : pf.titleStyle === 'gold' || pf.titleStyle === 'goldc' ? 5 : 6;
+    if ((pf.titleStyle === 'goldc' || pf.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(pf.titleColor)) at(this.recolored(im, base, pf.titleColor), base);
+    else row(base);
+    const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
+    if (dan) {
+      row(7);
+      row(pf.danFrame === 'gold' ? 9 : pf.danFrame === 'rainbow' ? 10 : 8);
+    }
     row(0);
     c.save();
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = `16.5px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
-    c.fillStyle = '#220432';
-    // 帯の 1P の丸より右の真ん中（字の真ん中が帯の紫の所の真ん中に来る高さ）
+    c.fillStyle = titleInk(pf);
+    // 帯の 1P の丸より右の真ん中（字の真ん中が帯の所の真ん中に来る高さ）
     fitText(c, F.title, 192, 468, 228);
     c.font = `21px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.lineJoin = 'round';
     c.lineWidth = 6;
     c.strokeStyle = '#000';
     c.fillStyle = '#fff';
-    // 白い所の 1P の丸より右の真ん中
-    fitText(c, F.name, 191, 500, 220, true);
+    // 白い所の真ん中（段位があるときは段位より右の白い所の真ん中。参考動画で測った）
+    if (dan) fitText(c, F.name, 215, 500, 168, true);
+    else fitText(c, F.name, 191, 500, 220, true);
     c.restore();
+    if (dan) this.drawDanText(c, im, dan, pf.danPass === 'gold');
   }
+
+  /**
+   * 段位の字。参考動画で測った: 1 文字 21.7px、字の中心の間 29px、2 文字の真ん中が (98, 500)。
+   * 3 文字のときは字の間を詰める（字は縮めない）。赤合格は白い字、金合格は金の字（NamePlate.png の 11 段目の色）
+   */
+  private drawDanText(c: CanvasRenderingContext2D, im: CanvasImageSource, dan: string, gold: boolean) {
+    const chars = [...dan];
+    const n = chars.length;
+    const size = 21.7;
+    // 3 文字は字の間を詰める（字の形は変えない）。丸に重ならないよう少し右へ
+    const adv = n >= 3 ? size * 0.92 : 29;
+    const cx = n >= 3 ? 100 : 98;
+    const k = Math.hypot(c.getTransform().a, c.getTransform().b) || 1;
+    const W = 120;
+    const H = 40;
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(W * k);
+    cv.height = Math.ceil(H * k);
+    const g = cv.getContext('2d')!;
+    g.scale(k, k);
+    g.font = `${size}px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#fff';
+    const xs = chars.map((_, i) => W / 2 + (i - (n - 1) / 2) * adv);
+    // 字の色（白か金）を先に描き、そのあと縁を後ろに描く
+    chars.forEach((ch, i) => g.fillText(ch, xs[i], H / 2));
+    if (gold) {
+      g.globalCompositeOperation = 'source-in';
+      // 金の字の色は 11 段目の帯の、色のある所（縦に金のしま）を字の高さに合わせて引きのばす
+      g.drawImage(im, 51, 11 * 54 + 30, 35, 15, 0, H / 2 - size / 2, W, size);
+    }
+    g.globalCompositeOperation = 'destination-over';
+    g.lineJoin = 'round';
+    g.lineWidth = 5;
+    g.strokeStyle = '#140a0a';
+    chars.forEach((ch, i) => g.strokeText(ch, xs[i], H / 2));
+    c.drawImage(cv, cx - W / 2, 500 - H / 2, W, H);
+  }
+
+  /** 色を指定した称号の帯（明るさ・光沢はそのままで色だけ変える）。色ごとに 1 枚作っておく */
+  private recolorCache = new Map<string, HTMLCanvasElement>();
+  private recolored(im: CanvasImageSource, r: number, hex: string) {
+    const key = `${r}|${hex}`;
+    let cv = this.recolorCache.get(key);
+    if (cv) return cv;
+    cv = document.createElement('canvas');
+    cv.width = 220;
+    cv.height = 54 * 12;
+    const g = cv.getContext('2d', { willReadFrequently: true })!;
+    g.drawImage(im, 0, r * 54, 220, 54, 0, r * 54, 220, 54);
+    const d = g.getImageData(0, r * 54, 220, 54);
+    const px = d.data;
+    const n = parseInt(hex.slice(1), 16);
+    const [th, ts, tv] = rgbToHsv((n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 128) { sum += Math.max(px[i], px[i + 1], px[i + 2]) / 255; cnt++; }
+    const mv = cnt ? sum / cnt : 1;
+    for (let i = 0; i < px.length; i += 4) {
+      if (!px[i + 3]) continue;
+      const [, s0, v0] = rgbToHsv(px[i] / 255, px[i + 1] / 255, px[i + 2] / 255);
+      const [rr, gg, bb] = hsvToRgb(th, Math.min(1, s0 * ts * 1.05), Math.min(1, ((v0 * tv) / Math.max(mv, 1e-3)) * 0.95));
+      px[i] = rr * 255;
+      px[i + 1] = gg * 255;
+      px[i + 2] = bb * 255;
+    }
+    g.putImageData(d, 0, r * 54);
+    if (this.recolorCache.size > 8) this.recolorCache.clear();
+    this.recolorCache.set(key, cv);
+    return cv;
+  }
+
 
   // ---------- ゴーゴーの始まりの光 ----------
 

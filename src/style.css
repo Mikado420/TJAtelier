@@ -3255,3 +3255,11 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .play-fps.hidden { display: none; }
 /* ポーズボタンがあるときは、その右に並べる */
 .play:not(.no-pause-btn) .play-fps { left: calc(66px + var(--safe-l, 0px)); }
+
+/* プロフィール */
+.st-text { flex: 1; min-width: 0; height: 30px; padding: 0 8px; font-size: 14px; font-weight: 700; color: #fff; -webkit-text-fill-color: #fff; background: var(--deep); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 0; }
+.st-text:focus { outline: none; border-color: var(--accent); }
+.st-text.err { border-color: #e5484d; }
+.st-state { flex: none; font-style: normal; font-size: 11px; font-weight: 800; color: var(--sub); }
+.st-color { flex: none; width: 40px; height: 30px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 0; background: var(--deep); }
+.st-seg.five { grid-template-columns: repeat(5, 1fr); }

@@ -3,7 +3,7 @@ import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type 
 import { starSlots, STAR_RED } from '../chart/stars';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { pixelRatio } from '../orient';
-import { TndeSkin, TW, TH, type TndeInfo } from './tnde';
+import { TndeSkin, TW, TH, type TndeInfo, type PlateStyle } from './tnde';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
 
 /**
@@ -353,7 +353,7 @@ export class Renderer {
   /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
-  plate = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
+  plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
   /** 今の画面を TNDE スキンで描くか（ひとりで遊ぶふつうの画面。背景の動画があれば、その所の背景は描かない） */
   private get skinOn() {
     return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length;
@@ -1011,6 +1011,7 @@ export class Renderer {
       fx: { bursts: this.bursts, flyers: this.flyers, flashes: this.flashes, judgeFx: this.judgeFx, rollFx: this.rollFx, rainbow: this.rainbow, comboPop: this.comboPop, gogoStart: this.gogoStartWall },
       name: this.plate.name,
       title: this.plate.title,
+      profile: this.plate.profile,
       laneOnly,
       bgMode: this.videoMode,
     });
@@ -1815,7 +1816,7 @@ export class Renderer {
   private drawPanel(score: number, combo: number, info: { course: string; level: number }, wall: number) {
     const x0 = Math.min(0, this.vis.x0);
     // 動かない部分（パネル・スコア欄の帯・難易度・名札）
-    this.drawSprite(`panel:${info.course}:${info.level}`, x0, LANE_TOP - 6, LANE_X - x0, TEXT_BOTTOM - LANE_TOP + 12, () => {
+    this.drawSprite(`panel:${info.course}:${info.level}:${this.plate.title}:${this.plate.name}`, x0, LANE_TOP - 6, LANE_X - x0, TEXT_BOTTOM - LANE_TOP + 12, () => {
       const ctx = this.ctx;
       const x0 = Math.min(0, this.vis.x0);
       // パネルの背景（深い青と光の帯）
@@ -1863,7 +1864,7 @@ export class Renderer {
       });
 
       // 名札（1P・称号・名前）
-      this.drawNameplate();
+      this.drawNameplate('1P', undefined, this.plate.title, this.plate.name);
     });
     const ctx = this.ctx;
     ctx.font = `900 50px ${FONT}`;

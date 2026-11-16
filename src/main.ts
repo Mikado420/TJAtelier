@@ -12,6 +12,8 @@ import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
 import type { Course, Note } from './chart/types';
 import { Renderer } from './render/renderer';
+import { DEFAULT_PROFILE, type PlateStyle } from './render/tnde';
+import { serverBase } from './online/net';
 import { Game } from './engine/game';
 import { DEMO_TJA } from './demo';
 import { buildAutoEvents, type AutoEvent } from './play/auto';
@@ -63,6 +65,8 @@ const EXPO_LINK = 'exp://u.expo.dev/66852881-5978-446f-9869-8169b13ab3c3?runtime
 /** 太鼓の大きさ 100% のときの、面の横幅（画面の幅に対する割合） */
 const DRUM_BASE = 0.605;
 
+/** プロフィールの初期値（id = 登録した ID、key = その ID を持っている印。サーバーに見せる合言葉） */
+const DEFAULT_PROFILE_FULL = { ...DEFAULT_PROFILE, id: '', key: '', name: 'プレイヤー', title: 'TJAtelier テストプレイ' };
 const settings = {
   /** 前の版の「1 拍を何分割」（読み込みの引き継ぎ用） */
   divisor: 0,
@@ -123,6 +127,8 @@ const settings = {
   evShow: { bpm: true, scroll: true, measure: true, gogo: true, barline: true, delay: true, jpos: true, lyric: true, section: true, levelhold: true } as EventShow,
   /** 打音の比率の初期値を 0.8 にした版 */
   hitVolVer: 0,
+  /** プロフィール（ID・名前・称号・段位）。ネームプレートに出す */
+  profile: { ...DEFAULT_PROFILE_FULL },
 };
 try {
   // 横スクロール化で拡大率の意味が変わったので v2 のキーで保存
@@ -146,6 +152,7 @@ try {
     settings.drumSize = settings.donWidth === 0.6 ? 100 : Math.max(75, Math.min(125, Math.round((settings.donWidth / DRUM_BASE) * 100)));
   }
   settings.donWidth = (DRUM_BASE * settings.drumSize) / 100;
+  settings.profile = { ...DEFAULT_PROFILE_FULL, ...(settings.profile ?? {}) };
   if (!localStorage.getItem('malody-web:manualPlay')) {
     settings.auto = false;
     localStorage.setItem('malody-web:manualPlay', '1');
@@ -1646,6 +1653,7 @@ function renderSheet() {
             <button data-act="calibrate">タイミング調整</button>
             ${!isNativeHost() && IS_IOS ? `<a class="st-link" href="${EXPO_LINK}">Expo Go で開く</a>` : ''}
           </div>`
+      : t === 'prof' ? profileRows()
       : t === 'view' ? viewRows(true)
       : t === 'vol' ? volumeRows()
       : t === 'ed' ? `<div class="st-sub">表示するイベント</div>
@@ -1977,12 +1985,101 @@ function onVideoModeClick(b: HTMLButtonElement) {
   play.applySettings();
 }
 
+const TITLE_STYLES: [PlateStyle['titleStyle'], string][] = [['wood', '木'], ['gold', '金'], ['purple', '紫'], ['goldc', '金・色'], ['purplec', '紫・色']];
+const DAN_FRAMES: [PlateStyle['danFrame'], string][] = [['silver', '銀'], ['gold', '金'], ['rainbow', '虹']];
+const DAN_PASSES: [PlateStyle['danPass'], string][] = [['red', '赤合格'], ['gold', '金合格']];
+/** ID の欄の状態（'' = ふつう） */
+let profIdState: '' | 'busy' | 'taken' | 'bad' | 'net' = '';
+/** 登録できなかった ID（欄に残しておく） */
+let profIdDraft: string | null = null;
+const PROF_ID_STATE: Record<string, string> = { busy: '確認中', taken: '使用中', bad: '使えない文字', net: 'つながらない' };
+/** プロフィールの欄 */
+function profileRows() {
+  const p = settings.profile;
+  const seg = <T extends string>(key: string, items: [T, string][], cur: T, cls = '') =>
+    `<div class="st-seg ${cls}">${items.map(([v, l]) => `<button data-prof="${key}" data-v="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  const custom = p.titleStyle === 'goldc' || p.titleStyle === 'purplec';
+  return `
+    <div class="st-row"><span>ID</span><input class="st-text ${profIdState && profIdState !== 'busy' ? 'err' : ''}" data-ptext="id" value="${esc(profIdDraft ?? p.id)}" maxlength="16" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">${profIdState ? `<em class="st-state">${PROF_ID_STATE[profIdState]}</em>` : ''}</div>
+    <div class="st-row"><span>名前</span><input class="st-text" data-ptext="name" value="${esc(p.name)}" maxlength="16" autocomplete="off"></div>
+    <div class="st-row"><span>称号</span><input class="st-text" data-ptext="title" value="${esc(p.title)}" maxlength="24" autocomplete="off"></div>
+    <div class="st-row"><span>称号の色</span>${seg('titleStyle', TITLE_STYLES, p.titleStyle, 'five')}</div>
+    ${custom ? `<div class="st-row"><span>色</span><input type="color" class="st-color" data-ptext="titleColor" value="${esc(p.titleColor)}"><input class="st-text" data-ptext="titleColor" value="${esc(p.titleColor)}" maxlength="7" autocapitalize="off" autocomplete="off" spellcheck="false"></div>` : ''}
+    <h4 class="st-h">段位</h4>
+    <label class="st-row"><span>段位を表示</span><input type="checkbox" class="st-sw" data-pdan="1" ${p.danOn ? 'checked' : ''}></label>
+    ${p.danOn ? `
+    <div class="st-row"><span>段位</span><input class="st-text" data-ptext="dan" value="${esc(p.dan)}" autocomplete="off"></div>
+    <div class="st-row"><span>枠</span>${seg('danFrame', DAN_FRAMES, p.danFrame)}</div>
+    <div class="st-row"><span>合格</span>${seg('danPass', DAN_PASSES, p.danPass, 'two')}</div>` : ''}`;
+}
+/** プロフィールを保存して、プレイ画面に伝える */
+function saveProfile() {
+  saveSettings();
+  play.applySettings();
+}
+/** プロフィールの文字の欄（確定したとき） */
+function onProfileText(el: HTMLInputElement) {
+  const p = settings.profile;
+  const k = el.dataset.ptext!;
+  const v = el.value.trim();
+  if (k === 'id') { void claimProfileId(v); return; }
+  if (k === 'name') p.name = v || 'プレイヤー';
+  else if (k === 'title') p.title = v;
+  else if (k === 'dan') {
+    // 段位は 1〜3 文字（空にはできない）
+    const d = [...v].slice(0, 3).join('');
+    if (d) p.dan = d;
+  } else if (k === 'titleColor') {
+    const c = /^#?[0-9a-f]{6}$/i.test(v) ? (v.startsWith('#') ? v : `#${v}`).toLowerCase() : p.titleColor;
+    p.titleColor = c;
+  }
+  saveProfile();
+  renderSheet();
+}
+/** ID を登録する（ほかの人と同じ ID は使えない。サーバーで確かめる） */
+async function claimProfileId(raw: string) {
+  const p = settings.profile;
+  const id = raw.trim();
+  profIdDraft = null;
+  if (id === p.id) { profIdState = ''; renderSheet(); return; }
+  if (id === '') {
+    if (p.id) void fetch(`${serverBase()}/id/release`, { method: 'POST', body: JSON.stringify({ id: p.id, key: p.key }) }).catch(() => {});
+    p.id = '';
+    profIdState = '';
+    saveProfile();
+    renderSheet();
+    return;
+  }
+  if (!/^[A-Za-z0-9_]{3,16}$/.test(id)) { profIdState = 'bad'; profIdDraft = id; renderSheet(); return; }
+  if (!p.key) p.key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+  saveSettings();
+  profIdState = 'busy';
+  profIdDraft = id;
+  renderSheet();
+  try {
+    const r = await fetch(`${serverBase()}/id/claim`, { method: 'POST', body: JSON.stringify({ id, key: p.key, old: p.id }) });
+    const j = (await r.json()) as { ok: boolean; reason?: string };
+    if (j.ok) { p.id = id; profIdState = ''; profIdDraft = null; saveProfile(); }
+    else profIdState = j.reason === 'bad' ? 'bad' : 'taken';
+  } catch {
+    profIdState = 'net';
+  }
+  if (settingsShownTab === 'prof') renderSheet();
+}
+function onProfileClick(b: HTMLButtonElement) {
+  const p = settings.profile as Record<string, unknown>;
+  p[b.dataset.prof!] = b.dataset.v;
+  saveProfile();
+  renderSheet();
+}
+
 /** 設定の画面のタブ */
-type SettingsTab = 'play' | 'view' | 'vol' | 'ed' | 'data';
+type SettingsTab = 'prof' | 'play' | 'view' | 'vol' | 'ed' | 'data';
 let settingsTab: SettingsTab = 'play';
 /** 設定の画面で最後に出したタブ（閉じたら null） */
 let settingsShownTab: SettingsTab | null = null;
 const SETTINGS_TABS: [SettingsTab, string, string][] = [
+  ['prof', 'プロフィール', 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7'],
   ['play', 'プレイ', 'M7 4v16l13-8z'],
   ['view', '表示', 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'],
   ['vol', '音量', 'M4 9v6h4l5 4V5L8 9zM17 8a5 5 0 0 1 0 8M19.5 5.5a8.5 8.5 0 0 1 0 13'],
@@ -2012,6 +2109,21 @@ $('sheetBody').addEventListener('click', (e) => {
   if (sk) onSkinClick(sk);
   const br = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-brmode]');
   if (br) onBranchModeClick(br);
+  const pb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-prof]');
+  if (pb) onProfileClick(pb);
+});
+$('sheetBody').addEventListener('change', (e) => {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset.ptext) onProfileText(el);
+  else if (el.dataset.pdan) {
+    settings.profile.danOn = el.checked;
+    saveProfile();
+    renderSheet();
+  }
+});
+$('sheetBody').addEventListener('keydown', (e) => {
+  const el = e.target as HTMLInputElement;
+  if (e.key === 'Enter' && el.dataset?.ptext) el.blur();
 });
 $('sheetBody').addEventListener('input', (e) => { onSettingInput(e.target as HTMLInputElement, false); });
 $('sheetBody').addEventListener('change', (e) => { onSettingInput(e.target as HTMLInputElement, true); });
