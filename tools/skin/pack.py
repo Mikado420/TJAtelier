@@ -86,6 +86,18 @@ for d in ['Bg_up', 'Bg_down']:
             rel = os.path.relpath(os.path.join(root, f), G)
             name = 'bg/' + os.path.relpath(os.path.join(root, f[:-4]), bg).replace(os.sep, '/')
             img(name, rel, lossy=True)
+# クリアの下の背景の部品（1 枚の絵に並んでいるのを、部品ごとに切り出す）
+_cl = rd(os.path.join(G, '5_Background/Bg_down/c/0/Clear.png'))
+_a = (_cl[:, :, 3] > 20).astype(np.uint8)
+_n, _lab, _st, _ = cv2.connectedComponentsWithStats(cv2.dilate(_a, np.ones((25, 25), np.uint8)))
+for _i in range(1, _n):
+    _x, _y, _w, _h, _area = (int(v) for v in _st[_i])
+    if _area <= 800:
+        continue
+    _p = _cl[_y:_y + _h, _x:_x + _w].copy()
+    _p[_lab[_y:_y + _h, _x:_x + _w] != _i] = 0
+    _k = 'bg/clear/%d_%d' % (_x, _y)
+    man['img'][_k] = {'f': wr(_k, _p, True), 'w': _w, 'h': _h}
 for i in range(3):
     img('footer%d' % i, '8_Footer/%d.png' % i, lossy=True)
 img('mob', '3_Mob/0.png', lossy=True)

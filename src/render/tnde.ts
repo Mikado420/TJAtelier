@@ -76,6 +76,18 @@ const ROLL_SCALE = [0, 0.123, 0.164, 0.164, 0.164, 0.137, 0.11, 0.082, 0.055, 0]
 /** ゴーゴーの始まりの炎の大きさ（18 ms ごと） */
 const FIRE_SCALE = [0.8, 1.2, 1.7, 2.5, 2.3, 2.2, 2.0, 1.8, 1.7, 1.6, 1.6, 1.5, 1.5, 1.4, 1.3, 1.2, 1.1, 1.0];
 /** ゴーゴーの始まりに下から噴き上がる光（1280×720 の、下の真ん中の位置と傾き） */
+/** モブの跳ねる拍のずれ（参考動画で測った） */
+const MOB_PHASE = 0.17;
+/** クリアの背景を測ったときの曲の時刻（魔宵月の動画の 96 秒） */
+const CLEAR_T0 = 82.398;
+/** クリアの背景の松と梅: [部品, 動画の 96 秒での x, y, 部品の幅（1280×720）] */
+const CLEAR_DECO: [string, number, number, number][] = [
+  ['657_727', 107, 560, 131], ['238_798', 231.5, 700, 72], ['0_1346', 310.5, 734, 64], ['358_759', 411.5, 642, 120],
+  ['1130_785', 480, 690, 74], ['592_820', 763, 733, 64], ['0_1346', 852, 790, 64], ['657_727', 858.5, 593, 131],
+  ['782_821', 1049, 734, 64], ['845_720', 1143, 583, 95], ['782_821', 1364, 895, 64], ['657_727', 1467, 778, 131],
+  ['657_727', 1616, 548, 131], ['782_821', 1634, 880, 64], ['238_798', 1789, 676, 72], ['0_757', 1794.5, 639, 114],
+  ['657_727', 1876, 786, 131],
+];
 /** 連打のキャラが出てくる x（1280×720） */
 const ROLL_X = [56, -10, 200, 345, 100, 451, 600, 260, -30, 534, 156, 363];
 const SPLASH = [[80, 740, -0.2793], [300, 730, -0.1396], [520, 720, 0], [760, 720, 0], [980, 730, 0.1396], [1160, 740, 0.2793]];
@@ -356,9 +368,10 @@ export class TndeSkin {
     const jx = TJX + F.jpos * S;
     // TJAPlayer3 と同じ重ね順
     this.drawUp(c, wall, beat, clear);
-    this.drawDown(c, wall, beat, clear);
+    this.drawDown(c, wall, beat, clear, now);
     this.drawFooter(c);
     this.drawChara(c, beat, gogo, F);
+    this.drawMob(c, beat, wall);
     this.drawLane(c, F, gogo);
     this.drawGauge(c, st.gauge, wall);
     this.drawJudgeFrame(c, F, gogo, jx);
@@ -406,42 +419,55 @@ export class TndeSkin {
       };
       if (fade < 1) layer('');
       this.alpha(c, fade, () => layer('_Clear'));
-      // 鯛とイカが、3 拍ずつ代わりばんこに下から出てくる
-      const ph = (((beat / 3) % 2) + 2) % 2;
+      // 鯛とイカが 1 拍ずつ代わりばんこに、下の波の後ろから出てくる（参考動画を見て合わせた）
+      const ph = (((beat + 0.9) % 2) + 2) % 2;
       const p = ph % 1;
-      const rise = Math.sin(Math.min(1, p * 1.25) * Math.PI);
       for (let x = o - tw; x < TW + tw; x += tw) {
         if (ph < 1) {
+          // 鯛: 弧を描いて跳ねる。上がるときは頭が上、下りるときは頭が下
           const im = this.img('bg/Bg_up/2/Fish');
-          if (im && rise > 0) {
+          const y = 250 - Math.sin(p * Math.PI) * 200;
+          if (im) {
             c.save();
-            c.translate(x + 300 - p * 160, 250 - rise * 170);
-            c.rotate((p - 0.5) * 1.4);
+            c.translate(x + 330 - p * 180, y);
+            c.rotate((p - 0.35) * 1.8);
             c.drawImage(im, (-im.width * S) / 2, (-im.height * S) / 2, im.width * S, im.height * S);
             c.restore();
           }
-        } else if (rise > 0) {
-          const n = Math.floor(p * 18) % 9;
-          this.put(c, 'bg/Bg_up/2/Ika', x - 96, 250 - rise * 200, n * (1230 / 9), 0, 1230 / 9, 136);
+        } else {
+          // イカ: くるっと回りながら上がって止まり、また回りながら下りる
+          const up = p < 0.25 ? p / 0.25 : p > 0.75 ? (1 - p) / 0.25 : 1;
+          const e = 1 - (1 - up) * (1 - up);
+          const cell = up < 1 ? Math.min(8, Math.floor((1 - up) * 9)) : 0;
+          const y = 260 - e * 170 + (up >= 1 ? Math.sin(p * Math.PI * 4) * 4 : 0);
+          this.put(c, 'bg/Bg_up/2/Ika', x - 96, y, cell * (1230 / 9), 0, 1230 / 9, 136);
         }
       }
-      const hw = (176 / 3) * S;
-      for (let x = (o % hw) - hw; x < TW; x += hw) this.put(c, `bg/Bg_up/2/Hair${k}`, x, 195, 0, 0, clear ? 234 / 4 : 176 / 3, 54);
+      // 下のうろこの帯
+      const hc = clear ? 234 / 4 : 176 / 3;
+      const hw = hc * S;
+      for (let x = (o % hw) - hw; x < TW; x += hw) this.put(c, `bg/Bg_up/2/Hair${k}`, x, 195, 0, 0, hc, 54);
     } else {
       const tw = 335 * S;
       const o = -(sc % tw);
-      for (let x = o - tw; x < TW; x += tw) this.put(c, 'bg/Bg_up/3/Base', x, 0, 0, 0, 335, 188);
       const bob = Math.abs(Math.sin(beat * Math.PI)) * 14;
-      for (let x = o - tw, i = 0; x < TW + tw; x += tw, i++) this.put(c, 'bg/Bg_up/3/Chara', x + 60, 30 - bob, (i % 2) * 328, 0, 328, 233);
-      const im = this.img('bg/Bg_up/3/Flower');
-      if (im) {
-        for (let i = 0; i < 14; i++) {
-          const q = (wall / 6000 + i / 14) % 1;
-          const px = ((i * 397) % TW) - q * 300 + 150;
-          const py = q * 320 - 30;
-          c.drawImage(im, 0, (i % 3) * 184, 641, 184, px - 60, py - 20, 641 * 0.25, 184 * 0.25);
+      // 3 段（桃・青・橙）のうち、ふだんは桃、クリアからは橙（0.2 秒で変わる）
+      const fade = clear ? Math.min(1, (wall - this.clearAt) / 200) : 0;
+      const layer = (v: number) => {
+        for (let x = o - tw; x < TW; x += tw) this.put(c, 'bg/Bg_up/3/Base', x, 0, v * 335, 0, 335, 188);
+        for (let x = o - tw, i = 0; x < TW + tw; x += tw, i++) this.put(c, 'bg/Bg_up/3/Chara', x + 60, 30 - bob, (i % 2) * 328, v * 233, 328, 233);
+        const im = this.img('bg/Bg_up/3/Flower');
+        if (im) {
+          for (let i = 0; i < 14; i++) {
+            const q = (wall / 6000 + i / 14) % 1;
+            const px = ((i * 397) % TW) - q * 300 + 150;
+            const py = q * 320 - 30;
+            c.drawImage(im, 0, v * 184, 641, 184, px - 60, py - 20, 641 * 0.25, 184 * 0.25);
+          }
         }
-      }
+      };
+      if (fade < 1) layer(0);
+      this.alpha(c, fade, () => layer(2));
     }
   }
 
@@ -450,7 +476,7 @@ export class TndeSkin {
   private static readonly GLOW: Record<number, number[]> = { 1: [1], 2: [1], 3: [2, 5], 4: [1], 5: [1, 2, 3] };
   private static readonly LAYERS: Record<number, number> = { 1: 2, 2: 2, 3: 8, 4: 3, 5: 6 };
 
-  private drawDown(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean) {
+  private drawDown(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean, now: number) {
     const d = this.pick.down;
     const n = TndeSkin.LAYERS[d] ?? 1;
     const glow = TndeSkin.GLOW[d] ?? [];
@@ -465,27 +491,7 @@ export class TndeSkin {
         this.put(c, 'bg/Bg_down/4/3', ((i * 211) % TW) - q * 240 + Math.sin(wall / 700 + i) * 20, 560 + q * 470);
       }
     }
-    if (clear) {
-      // クリアの下の背景（金の市松・雲・飾り）: 0.2 秒で現れる。並べ方はスキンに書かれていないので、参考動画で測った位置
-      const fade = Math.min(1, (wall - this.clearAt) / 200);
-      this.alpha(c, fade, () => {
-        const name = 'bg/Bg_down/c/0/Clear';
-        const w = 1280 * S;
-        const loop = (v: number, f: (x: number) => void) => {
-          const o = -(((wall / 1000) * v) % w);
-          for (let x = o; x < TW; x += w) f(x);
-        };
-        // 市松（ゆっくり）
-        loop(24, (x) => { for (let y = 540; y < TH; y += 392 * S) this.put(c, name, x, y, 0, 0, 1280, 392); });
-        // 下に並ぶ飾り（動かない）
-        this.put(c, name, 0, 556, 0, 2865, 1280, 233);
-        this.put(c, name, 0, 628, 0, 2188, 1280, 209);
-        this.put(c, name, -8, 804, 0, 2672, 1280, 171);
-        this.put(c, name, w - 8, 804, 0, 2672, 1280, 171);
-        // 上の雲（速く）
-        loop(60, (x) => this.put(c, name, x, 540, 0, 380, 1280, 69));
-      });
-    }
+    if (clear) this.drawClearDown(c, wall, now);
     this.drawRollCharas(c, wall);
     this.drawDancers(c, beat, wall);
   }
@@ -522,6 +528,37 @@ export class TndeSkin {
   private inAt = [-1, -1, -1, -1, -1];
   private dancePhase = 0;
 
+  /**
+   * クリアの下の背景（金の市松・雲・こま・松と梅）。0.2 秒で現れる。
+   * 並べ方はスキンに書かれていないので、参考動画（魔宵月）で部品ごとに位置と流れる速さを測った
+   */
+  private drawClearDown(c: CanvasRenderingContext2D, wall: number, now: number) {
+    const fade = Math.min(1, (wall - this.clearAt) / 200);
+    // 動画で測ったときの曲の時刻（ここで下の位置になる）
+    const t = now - CLEAR_T0;
+    const wrap = (x: number, w: number, f: (x: number) => void) => {
+      const p = ((x % TW) + TW) % TW;
+      f(p);
+      if (p + w > TW) f(p - TW);
+    };
+    this.alpha(c, fade, () => {
+      const piece = (name: string, x: number, y: number) => this.put(c, `bg/clear/${name}`, x, y);
+      // 市松（動かない）と、上のふちの金の雲
+      this.put(c, 'bg/clear/0_0', 0, 540, 0, 0, 1280, 392);
+      // 大きな金の雲（1 秒に 57px 左へ）
+      wrap(975 - 57 * t, 475 * S, (x) => piece('43_1575', x, 475));
+      wrap(958 - 57 * t, 483 * S, (x) => piece('664_1760', x, 521));
+      this.put(c, 'bg/clear/0_0', -24, 540, 0, 380, 1280, 77);
+      this.put(c, 'bg/clear/0_0', -24 + TW, 540, 0, 380, 1280, 77);
+      // 松と梅（1 秒に 90px 左へ。1920px でひと回り）
+      for (const [name, x, y, w] of CLEAR_DECO) wrap(x - 90 * t, w * S, (xx) => piece(name, xx, y));
+      // こま（動かない）
+      piece('228_2176', 340, 582);
+      piece('23_2660', 36, 765);
+      piece('856_2853', 1284, 516);
+    });
+  }
+
   /** 連打のキャラ: 画面の下から、1 ms に 0.6px（1280×720）ずつ右上へ */
   private drawRollCharas(c: CanvasRenderingContext2D, wall: number) {
     this.rollCharas = this.rollCharas.filter((r) => wall - r.t < 1300);
@@ -531,6 +568,27 @@ export class TndeSkin {
       if (a) this.frame(c, `fx/roll${this.rollSeries}`, r.type, r.x + d, TH - d);
     }
   }
+
+  /**
+   * 魂ゲージが満タンの間、下に出るモブ（前の列と、後ろの群れ）。1 拍ごとに跳ねる。後ろの群れは跳ね上がった所でポーズが変わる。
+   * 位置・跳ね方は参考動画（銀の黎明か、黒の晶華か。）で測った。神社の背景（魔宵月）のモブは素材が無いので出さない
+   */
+  private drawMob(c: CanvasRenderingContext2D, beat: number, wall: number) {
+    if (this.pick.down === 5) return;
+    if (this.last.gauge < 100) { this.mobAt = -1; return; }
+    if (this.mobAt < 0) this.mobAt = wall;
+    // 下から 0.15 秒で出てくる
+    const rise = Math.max(0, 1 - (wall - this.mobAt) / 150);
+    const lift = rise * rise * 420;
+    const f = (((beat + MOB_PHASE) % 1) + 1) % 1;
+    const s = Math.sin(f * Math.PI);
+    const mid = 310 - 95 * s + lift;
+    const pose = f > 0.3 && f < 0.7;
+    if (pose) this.put(c, 'mob', 0, mid - 476 + 636 * S, 0, 636, 1280, 319);
+    else this.put(c, 'mob', 0, mid + 317 * S, 0, 317, 1280, 319);
+    this.put(c, 'mob', 0, 745 - 55 * s + lift, 0, 0, 1280, 317);
+  }
+  private mobAt = -1;
 
   /** 下の帯（参考動画では絵を右へ 648px ずらした位置で止まっている） */
   private drawFooter(c: CanvasRenderingContext2D) {
