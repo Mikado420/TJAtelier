@@ -475,7 +475,7 @@ export class TndeSkin {
     this.watch(F, gogo, 60 / bpm);
     const jx = TJX + F.jpos * S;
     // TJAPlayer3 と同じ重ね順
-    this.drawUp(c, wall, beat, clear);
+    this.drawUp(c, wall, beat, clear, now);
     this.drawDown(c, wall, beat, clear, now);
     this.drawFooter(c);
     this.drawChara(c, beat, gogo, F);
@@ -511,7 +511,7 @@ export class TndeSkin {
 
   // ---------- 上の背景 ----------
 
-  private drawUp(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean) {
+  private drawUp(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean, now: number) {
     const u = this.pick.up;
     // 上の背景は 1 秒に 92.4px ずつ左へ流れる（参考動画で測った）
     const sc = (wall / 1000) * 92.4 - this.bgPhase;
@@ -552,13 +552,8 @@ export class TndeSkin {
           }
         }
       }
-      // 下のうろこの帯（イカ・鯛はこの後ろに沈む）
-      const hc = clear ? 234 / 4 : 176 / 3;
-      const hw = hc * S;
-      const k = clear ? '_Clear' : '';
-      this.drawStrip(c, 'hair', clear, 0, hw, sc, (g) => {
-        for (let x = -hw; x < TW + hw * 2; x += hw) this.put(g, `bg/Bg_up/2/Hair${k}`, x, 196, 0, 0, hc, 54);
-      }, [k]);
+      // 下のうろこ（青海波）: 3 段（イカ・鯛はこの後ろに沈む）
+      this.drawScales(c, now, sc, clear, fade);
     } else {
       const tw = 335 * S;
       const o = -(((sc % tw) + tw) % tw);
@@ -601,6 +596,41 @@ export class TndeSkin {
     if (variants.length < 2) { one(base); return; }
     if (!clear || fade < 1) one(base);
     if (clear) this.alpha(c, fade, () => one(variants[1]));
+  }
+
+  /**
+   * 鯛と富士の上の背景の、下のうろこ（青海波）。参考動画（魔宵月）で測った:
+   * 3 段で、段ごとに 1 色。うろこは 82.5px ごとに並び、2 段目は半分ずれる。
+   * 2 秒で 1 往復、まっすぐ上下する（1・3 段目と 2 段目は逆向き）
+   */
+  private drawScales(c: CanvasRenderingContext2D, now: number, sc: number, clear: boolean, fade: number) {
+    const DX = 82.5;
+    // 曲の時刻 0.7 秒（から 2 秒ごと）に 1 段目がいちばん上（参考動画で測った）
+    const u = ((((now - 0.7) % 2) + 2) % 2) / 2;
+    const w = 1 - 2 * Math.abs(2 * u - 1);
+    // [真ん中の上の端の y, 振れ幅, 横のずれ, 絵（ふだん）, 絵（クリア）]
+    const rows: [number, number, number, number, number][] = [
+      [192, 4 * w, 0, 0, 3],
+      [210.5, -10.5 * w, DX / 2, 1, 2],
+      [224.5, 2.5 * w, 0, 0, 1],
+    ];
+    // 地の絵との横の位置の関係も参考動画で測った（27px 右）
+    const o = -(((sc % DX) + DX) % DX) + 27;
+    const one = (kk: string) => {
+      const n = kk ? 4 : 3;
+      const tw = (kk ? 234 : 176) / n;
+      rows.forEach(([y0, dy, shift, t0, t1], r) => {
+        const t = kk ? t1 : t0;
+        c.save();
+        c.translate(o + shift, y0 + dy);
+        this.cached(c, `scale${kk}${r}`, `${t}`, -DX * 2, 0, TW + DX * 4, 54 * S, (g) => {
+          for (let x = -DX * 2; x < TW + DX * 2; x += DX) this.put(g, `bg/Bg_up/2/Hair${kk}`, x, 0, t * tw, 0, tw, 54);
+        });
+        c.restore();
+      });
+    };
+    if (!clear || fade < 1) one('');
+    if (clear) this.alpha(c, fade, () => one('_Clear'));
   }
 
   // ---------- 下の背景・踊り子・帯 ----------
@@ -902,14 +932,14 @@ export class TndeSkin {
 
   private drawJudgeFrame(c: CanvasRenderingContext2D, F: TndeFrame, gogo: boolean, jx: number) {
     const { wall } = F;
-    this.add(c, 1, () => this.put(c, 'notes', jx - HALF, FIELD_Y, 0, 0, 130, 130));
     if (gogo) {
       const n = step(wall, 0, 50) % 7;
       const v = step(wall, this.gogoAt, 18);
       const k = v < FIRE_SCALE.length ? FIRE_SCALE[v] : 1;
-      // 参考動画では炎は足し算で重ねていない
+      // 参考動画では炎は足し算で重ねていない。判定枠は炎の上に見えている
       this.putC(c, 'fx/Fire', jx, JUDGE_Y, 360 * n, 0, 360, 370, k);
     }
+    this.add(c, 1, () => this.put(c, 'notes', jx - HALF, FIELD_Y, 0, 0, 130, 130));
     // 判定枠が光る（良・可、大音符は大きい光）。20 ms ごとに 15 枚
     for (const b of F.fx.bursts) {
       if (b.judge === 'bad') continue;
@@ -1104,13 +1134,15 @@ export class TndeSkin {
     c.textBaseline = 'middle';
     c.font = `16.5px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.fillStyle = '#220432';
-    fitText(c, F.title, 180.5, 471, 228);
+    // 帯の 1P の丸より右の真ん中（字の真ん中が帯の紫の所の真ん中に来る高さ）
+    fitText(c, F.title, 192, 468, 228);
     c.font = `21px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.lineJoin = 'round';
     c.lineWidth = 6;
     c.strokeStyle = '#000';
     c.fillStyle = '#fff';
-    fitText(c, F.name, 215, 500, 168, true);
+    // 白い所の 1P の丸より右の真ん中
+    fitText(c, F.name, 191, 500, 220, true);
     c.restore();
   }
 
@@ -1372,7 +1404,7 @@ export class TndeSkin {
     if (this.titleCache?.key !== key) {
       const cv = this.titleCache?.c ?? document.createElement('canvas');
       const t = cv.getContext('2d')!;
-      const font = `52px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+      const font = `48px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
       t.font = font;
       const w = Math.ceil(t.measureText(key).width) + 24;
       cv.width = w;
@@ -1381,7 +1413,7 @@ export class TndeSkin {
       t.textAlign = 'center';
       t.textBaseline = 'middle';
       t.lineJoin = 'round';
-      t.lineWidth = 16;
+      t.lineWidth = 13;
       t.strokeStyle = '#000';
       t.strokeText(key, w / 2, 47);
       t.fillStyle = '#fff';
@@ -1391,7 +1423,8 @@ export class TndeSkin {
     const cv = this.titleCache.c;
     // 長い曲名は横に縮める（TJAPlayer3 と同じく 990px まで）
     const tw = Math.min(cv.width, 1014);
-    c.drawImage(cv, Math.min(1732 - tw / 2, 1880 - tw), 72 - 47, tw, cv.height);
+    // 字の真ん中が y 67.5 に来る高さ（参考動画で測った）
+    c.drawImage(cv, Math.min(1732 - tw / 2, 1880 - tw), 65 - 47, tw, cv.height);
   }
 
   // ---------- コンボの巻物・連打・風船 ----------
