@@ -38,12 +38,22 @@ export interface TndeFx {
   gogoStart: number;
 }
 
+/** 曲の情報（ジャンルの帯は曲のフォルダ、stage は曲えらびから何曲目か） */
+export interface TndeInfo {
+  title: string;
+  course: string;
+  level: number;
+  genre?: string;
+  folder?: { name: string; color: string; custom: boolean };
+  stage?: number;
+}
+
 export interface TndeFrame {
   game: Game;
   course: Course;
   now: number;
   wall: number;
-  info: { title: string; course: string; level: number; genre?: string };
+  info: TndeInfo;
   /** 判定枠からの距離（4 分音符の数 × ハイスピード） */
   adv: (time: number, beat: number | undefined, n: { bpm: number; scroll: number }) => number;
   advY: (time: number, beat: number | undefined, n: { bpm: number; scrollY?: number }) => number;
@@ -59,6 +69,8 @@ const SE_ROW: Record<string, number> = { ドン: 0, ド: 1, コ: 2, カッ: 3, �
 /** Notes.png の列（130px ごと） */
 const NOTE_COL: Record<string, number> = { don: 1, ka: 2, bigDon: 3, bigKa: 4, roll: 5, bigRoll: 8, balloon: 11 };
 const COURSE_IMG: Record<string, string> = { Easy: 'course/Easy', Normal: 'course/Normal', Hard: 'course/Hard', Oni: 'course/Oni', Edit: 'course/Edit' };
+/** 字の無いジャンルの帯の色（字の縁の色を決める） */
+const GENRE_COL: Record<string, string> = { 1: '#43bfd4', 2: '#ff90d3', 3: '#cd8aed', 4: '#2ae23e', 5: '#ff7029', 6: '#ddac04', 7: '#ffbf00', 8: '#cdcfdd' };
 const GENRES: [RegExp, string][] = [
   [/ポップ|pop/i, '1'], [/アニメ|anime/i, '2'], [/ゲーム|game/i, '3'], [/ボーカロイド|ボカロ|vocaloid/i, '8'], [/キッズ|どうよう|kids/i, '7'],
   [/バラエティ|variety/i, '4'], [/クラシック|classic/i, '6'], [/ナムコ|オリジナル|original/i, '5'],
@@ -102,22 +114,25 @@ const hash = (s: string) => {
 const step = (wall: number, t0: number, ms: number) => Math.floor((wall - t0) / ms);
 
 export class TndeSkin {
-  private imgs = new Map<string, HTMLImageElement>();
-  private loading = new Map<string, Promise<HTMLImageElement | null>>();
+  /** 読み込んだ絵（ImageBitmap にして、描くたびに読み直されないようにする） */
+  private imgs = new Map<string, ImageBitmap | HTMLImageElement>();
+  private loading = new Map<string, Promise<ImageBitmap | HTMLImageElement | null>>();
   private man!: Manifest;
   ready = false;
   private beatTab: { course: Course; cum: number[] } | null = null;
   /** 曲ごとに決める背景（上・下）と踊り子 */
   private pick = { up: 2, down: 5, dancer: 1, key: '' };
+  /** 読み込んである絵の組（背景・踊り子） */
+  private loadedSet = '';
 
   constructor(private readonly base: string) {}
 
-  static async load(base: string) {
+  static async load(base: string, title?: string) {
     const s = new TndeSkin(base);
     const r = await fetch(`${base}skin.json`);
     if (!r.ok) throw new Error('skin.json');
     s.man = await r.json();
-    // プレイ画面の字: 曲名・称号は丸ゴシック、名前は勘亭流
+    // プレイ画面の字: 曲名・称号・名前は勘亭流、ジャンル・曲目は丸ゴシック
     await Promise.all(
       [['TNDE Seurat', 'FOT-Seurat_Pro_B.otf'], ['TNDE Kantei', 'FOT-OedoKtr.otf']].map(async ([name, file]) => {
         try {
@@ -126,9 +141,50 @@ export class TndeSkin {
         } catch { /* 字が無くても描ける */ }
       }),
     );
-    await Promise.all([...Object.keys(s.man.img), ...Object.keys(s.man.anim)].map((k) => s.fetchImg(k)));
+    if (title !== undefined) s.choose(title);
+    await s.sync();
     s.ready = true;
     return s;
+  }
+
+  /** 曲を始める前に、その曲で使う絵を読み込んでおく */
+  async prepare(title: string) {
+    this.choose(title);
+    await this.sync();
+  }
+
+  /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
+  private wants(name: string) {
+    const p = this.pick;
+    let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
+    if (m) return m[1] === String(p.up);
+    m = /^bg\/Bg_down\/([^/]+)\//.exec(name);
+    if (m) return m[1] === String(p.down);
+    if (/^gauge\/(base|fill|rainbow)\d$/.test(name)) return name.endsWith('3');
+    if (/^footer\d$/.test(name)) return name === 'footer1';
+    if (name === 'dancer/In1') return false;
+    if (name === 'dancer/Normal1') return p.dancer === 1;
+    if (name === 'mob') return p.down !== 5;
+    if (/^genre\/\d$/.test(name)) return false;
+    return true;
+  }
+
+  /** 使う絵を読み込み、使わない絵を手放す */
+  private sync() {
+    const set = `${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
+    const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)];
+    if (set !== this.loadedSet) {
+      this.loadedSet = set;
+      for (const n of names) {
+        if (this.wants(n)) continue;
+        const im = this.imgs.get(n);
+        if (im && 'close' in im) im.close();
+        this.imgs.delete(n);
+        this.loading.delete(n);
+      }
+      this.dropCaches();
+    }
+    return Promise.all(names.filter((n) => this.wants(n)).map((n) => this.fetchImg(n))).then(() => {});
   }
 
   private fetchImg(name: string) {
@@ -136,10 +192,16 @@ export class TndeSkin {
     if (p) return p;
     const info = this.man.img[name] ?? this.man.anim[name];
     if (!info) return Promise.resolve(null);
-    p = new Promise<HTMLImageElement | null>((res) => {
+    p = new Promise<ImageBitmap | HTMLImageElement | null>((res) => {
       const im = new Image();
       im.decoding = 'async';
-      im.onload = () => { this.imgs.set(name, im); res(im); };
+      im.onload = async () => {
+        let out: ImageBitmap | HTMLImageElement = im;
+        try { out = await createImageBitmap(im); } catch { /* そのまま使う */ }
+        if (this.loading.get(name) !== p) { if ('close' in out) out.close(); res(null); return; }
+        this.imgs.set(name, out);
+        res(out);
+      };
       im.onerror = () => res(null);
       im.src = this.base + info.f;
     });
@@ -148,9 +210,7 @@ export class TndeSkin {
   }
 
   private img(name: string) {
-    const im = this.imgs.get(name);
-    if (!im) void this.fetchImg(name);
-    return im ?? null;
+    return this.imgs.get(name) ?? null;
   }
 
   /** 絵を 1.5 倍で貼る（sx..sh は絵の中の範囲、x, y は左上） */
@@ -188,7 +248,8 @@ export class TndeSkin {
    * x, y, w, h は 1920×1080 の座標。絵の細かさは今の拡大率に合わせ、key か拡大率が変わったら描き直す
    */
   private caches = new Map<string, { key: string; cv: HTMLCanvasElement }>();
-  private cached(c: CanvasRenderingContext2D, id: string, key: string, x: number, y: number, w: number, h: number, paint: (g: CanvasRenderingContext2D) => void) {
+  /** parts: まとめた絵のうち、この範囲（[x, y, w, h] のいくつか）だけを貼る */
+  private cached(c: CanvasRenderingContext2D, id: string, key: string, x: number, y: number, w: number, h: number, paint: (g: CanvasRenderingContext2D) => void, parts?: number[][]) {
     const t = c.getTransform();
     const k = Math.hypot(t.a, t.b);
     const full = `${key}|${k.toFixed(4)}`;
@@ -205,7 +266,10 @@ export class TndeSkin {
       e = { key: full, cv };
       this.caches.set(id, e);
     }
-    c.drawImage(e.cv, x, y, w, h);
+    if (!parts) { c.drawImage(e.cv, x, y, w, h); return; }
+    const sx = e.cv.width / w;
+    const sy = e.cv.height / h;
+    for (const [px, py, pw, ph] of parts) c.drawImage(e.cv, (px - x) * sx, (py - y) * sy, pw * sx, ph * sy, px, py, pw, ph);
   }
 
   /** まとめた絵を手放す（iPhone はキャンバスの大きさを 0 にしないとメモリがすぐ空かない） */
@@ -313,6 +377,7 @@ export class TndeSkin {
     this.rollTint = { level: 0, count: 0, at: -1e9 };
     this.rollCharas = [];
     this.rollSeries = this.rnd() % 3;
+    this.stageAt = -1;
     this.charaOnce = null;
     this.bannerFx = null;
     this.clearAt = this.gogoAt = this.scoreAt = this.comboAt = this.faceLagAt = this.rollAt = this.rollNumAt = this.balloonNumAt = -1e9;
@@ -397,7 +462,8 @@ export class TndeSkin {
 
   draw(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { game, course, now, wall } = F;
-    this.choose(F.title);
+    this.choose(F.info.title);
+    if (`${this.pick.up}|${this.pick.down}|${this.pick.dancer}` !== this.loadedSet) void this.sync();
     const beat = this.beatOf(course, now);
     const b0 = course.bars[0];
     this.dancePhase = b0 ? (b0.time * b0.bpm) / 60 + 0.55 : 0;
@@ -541,6 +607,14 @@ export class TndeSkin {
 
   private static readonly GLOW: Record<number, number[]> = { 1: [1], 2: [1], 3: [2, 5], 4: [1], 5: [1, 2, 3] };
   private static readonly LAYERS: Record<number, number> = { 1: 2, 2: 2, 3: 8, 4: 3, 5: 6 };
+  /** 光る絵のある範囲（[左, 上, 右, 下]。重ならないように分けた） */
+  private static readonly GLOW_AT: Record<number, number[][]> = {
+    1: [[0, 0, 1280, 225]],
+    2: [[0, 0, 1280, 198]],
+    3: [[186, 0, 1093, 327]],
+    4: [[149, 101, 1274, 173]],
+    5: [[0, 0, 1280, 131], [269, 169, 990, 243], [45, 243, 1234, 310]],
+  };
 
   private drawDown(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean, now: number) {
     const d = this.pick.down;
@@ -556,8 +630,13 @@ export class TndeSkin {
       }
       g.globalAlpha = 1;
     };
-    this.cached(c, 'down0', `${d}`, 0, 540, TW, 540, bake(0.8));
-    if (glow.length) this.alpha(c, (pulse - 0.8) / 0.2, () => this.cached(c, 'down1', `${d}`, 0, 540, TW, 540, bake(1)));
+    // クリアの背景が出きったら、その下は見えないので描かない
+    if (!clear || wall - this.clearAt < 200) {
+      this.cached(c, 'down0', `${d}`, 0, 540, TW, 540, bake(0.8));
+      // 光る絵のある所だけ重ねる（重ならない四角に分けてある。1280×360 の絵の中の位置）
+      const parts = (TndeSkin.GLOW_AT[d] ?? []).map(([x0, y0, x1, y1]) => [x0 * S, 540 + y0 * S, (x1 - x0) * S, (y1 - y0) * S]);
+      if (parts.length) this.alpha(c, (pulse - 0.8) / 0.2, () => this.cached(c, 'down1', `${d}`, 0, 540, TW, 540, bake(1), parts));
+    }
     if (d === 4) this.drawPetals(c, wall);
     if (clear) this.drawClearDown(c, wall, now);
     this.drawRollCharas(c, wall);
@@ -740,7 +819,7 @@ export class TndeSkin {
     const clear = st.gauge >= CLEAR_LINE;
     const name = gogo ? (max ? 'chara/GoGo_Max' : 'chara/GoGo') : max ? 'chara/Clear_Max' : clear ? 'chara/Clear' : 'chara/Normal';
     // ふだんは 4 拍、ゴーゴー・クリアは 2 拍でひと回り（ゴーゴーは参考動画で測った）
-    const beats = name === 'chara/Normal' ? 4 : 2;
+    const beats = name === 'chara/Clear' || name === 'chara/Clear_Max' ? 2 : 4;
     const ph = (((beat / beats) % 1) + 1) % 1;
     this.frame(c, name, ph * this.count(name), 0, 0);
   }
@@ -780,8 +859,13 @@ export class TndeSkin {
       const a = Math.min(255, ((150 - ms / 2) * 255) / 100) / 255;
       this.alpha(c, a, () => this.put(c, name, LANE_X, FIELD_Y));
     };
-    for (const f of F.fx.flashes) flash(f.kind === 'don' ? 'lane/Red' : 'lane/Blue', f.t);
-    for (const b of F.fx.bursts) if (b.judge !== 'bad') flash('lane/Yellow', b.t);
+    // 色ごとに 1 つ（TJAPlayer3 と同じく、叩くたびに最初から光り直す）
+    let don = -1e9, ka = -1e9, hit = -1e9;
+    for (const f of F.fx.flashes) if (f.kind === 'don') don = Math.max(don, f.t); else ka = Math.max(ka, f.t);
+    for (const b of F.fx.bursts) if (b.judge !== 'bad') hit = Math.max(hit, b.t);
+    flash('lane/Red', don);
+    flash('lane/Blue', ka);
+    flash('lane/Yellow', hit);
     this.put(c, 'taiko/frame3', P(329), P(136));
   }
 
@@ -981,7 +1065,13 @@ export class TndeSkin {
       this.put(g, 'taiko/Base', tx, ty);
     });
     // 叩いた面が光る（明るさ 8 から 20 ms ごとに 1 ずつ下がる。濃さは 明るさ × 73 / 255）
+    // 面ごとに 1 つ（叩くたびに最初から光り直す）
+    const last = new Map<string, (typeof F.fx.flashes)[number]>();
     for (const f of F.fx.flashes) {
+      const k = f.kind + f.side;
+      if ((last.get(k)?.t ?? -1e9) <= f.t) last.set(k, f);
+    }
+    for (const f of last.values()) {
       const lv = 8 - step(wall, f.t, 20);
       if (lv <= 0) continue;
       const im = this.img(f.kind === 'don' ? 'taiko/Don' : 'taiko/Ka');
@@ -998,27 +1088,29 @@ export class TndeSkin {
     });
   }
 
-  /** ネームプレート（参考動画で測った位置。段位は無いので、名前の欄を左まで伸ばす） */
+  /**
+   * ネームプレート。NamePlate.png の 54px ごとの段（1P の丸・白い台・称号の帯）を同じ位置に重ねて 1.5 倍で貼る
+   * （参考動画で測った: 段の左上が (-6, 443.5)）。字は勘亭流。段位は無いので出さない
+   */
   private drawNameplate(c: CanvasRenderingContext2D, F: TndeFrame) {
     const im = this.img('nameplate');
     if (!im) return;
-    // 白い台（黒い縁）・称号の紫の帯・1P の丸
-    c.drawImage(im, 1, 163, 219, 53, 48, 448, 271, 76);
-    c.drawImage(im, 5, 329, 210, 27, 53, 453, 260, 30);
-    c.drawImage(im, 3, 3, 50, 48, 0, 449, 75, 72);
+    const row = (r: number) => c.drawImage(im, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
+    row(3);
+    row(6);
+    row(0);
     c.save();
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.font = `19px 'TNDE Seurat', sans-serif`;
-    c.fillStyle = '#3b0d63';
-    fitText(c, F.title, 190, 469, 220);
-    c.font = `30px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    c.font = `16.5px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    c.fillStyle = '#220432';
+    fitText(c, F.title, 180.5, 471, 228);
+    c.font = `21px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.lineJoin = 'round';
-    c.lineWidth = 5;
-    c.strokeStyle = '#fff';
-    c.strokeText(F.name, 196, 502, 220);
-    c.fillStyle = '#000';
-    c.fillText(F.name, 196, 502, 220);
+    c.lineWidth = 6;
+    c.strokeStyle = '#000';
+    c.fillStyle = '#fff';
+    fitText(c, F.name, 215, 500, 168, true);
     c.restore();
   }
 
@@ -1028,7 +1120,7 @@ export class TndeSkin {
     const im = this.img('fx/GoGoSplash');
     if (!im) return;
     const n = Math.floor(im.width / 230);
-    const i = step(wall, this.gogoAt, 15);
+    const i = step(wall, this.gogoAt, 30);
     if (i < 0 || i >= n) return;
     this.add(c, 1, () => {
       for (const [x, y, rot] of SPLASH) {
@@ -1064,11 +1156,11 @@ export class TndeSkin {
       right = P(266 + 35);
       ky = COMBO_SCALE_EX[v];
     } else if (n >= 4) {
+      // 4 桁から: 横だけ 0.83 倍、間隔 29.3、真ん中を 266.7 に（参考動画で測った。縦は 3 桁と同じ大きさ）
       name = 'taiko/Combo_Big';
-      k = 0.8;
-      pad = P(24);
-      bottom = P(270);
-      right = P(268 + 12 + 24 * (n === 4 ? 1 : Math.floor((n - 1) / 2)));
+      k = 0.83;
+      pad = P(29.3);
+      right = P(266.7) + (pad * (n - 1)) / 2;
       ky = COMBO_SCALE_EX[v];
     }
     const im = this.img(name);
@@ -1076,13 +1168,13 @@ export class TndeSkin {
     for (let i = 0; i < n; i++) {
       const d = +digits[n - 1 - i];
       const w = P(40) * k;
-      const h = P(48) * (k + ky);
+      const h = P(48) * (1 + ky);
       c.drawImage(im, d * 40, 0, 40, 48, right - pad * i - w / 2, bottom - h, w, h);
     }
     // 3 桁から: 数字のまわりのきらきら（20 ms ごと、30 コマでひと回り）
     if (n >= 3) {
       const r = step(wall, 0, 20) % 30;
-      const ey = (n === 3 ? bottom : P(270)) - P(48 / 4) * k;
+      const ey = bottom - P(48 / 4) * k;
       for (let i = 0; i < n; i++) {
         const x = right - pad * i;
         // 下の真ん中を基準に置く
@@ -1179,19 +1271,21 @@ export class TndeSkin {
   /** 判定枠の上の火花の輪（足し算・25 ms ごと 7 コマ）と、大音符の光の輪（0.5 倍から広がる） */
   private drawExplosion(c: CanvasRenderingContext2D, F: TndeFrame, jx: number) {
     const { wall } = F;
-    for (const b of F.fx.bursts) {
-      if (b.judge === 'bad') continue;
-      const i = step(wall, b.t, 25);
-      if (i >= 0 && i < 7) {
-        const row = (b.judge === 'good' ? 0 : 260) + (b.big ? 520 : 0);
-        this.add(c, 1, () => this.put(c, 'fx/Explosion', jx - P(130), JUDGE_Y - P(130), i * 260, row, 260, 260));
+    // 足し算で重ねるものは、まとめて 1 回で切り替える
+    const live = F.fx.bursts.filter((b) => b.judge !== 'bad' && wall - b.t >= 0 && wall - b.t < 175);
+    if (!live.length) return;
+    this.add(c, 1, () => {
+      for (const b of live) {
+        const i = step(wall, b.t, 25);
+        if (i >= 0 && i < 7) {
+          const row = (b.judge === 'good' ? 0 : 260) + (b.big ? 520 : 0);
+          this.put(c, 'fx/Explosion', jx - P(130), JUDGE_Y - P(130), i * 260, row, 260, 260);
+        }
+        // 大音符の光の輪は 10 ms ごとに広がる（参考動画で測った）
+        const j = step(wall, b.t, 10);
+        if (b.big && b.judge === 'good' && j >= 0 && j < 10) this.putC(c, 'fx/Explosion_Big', jx, JUDGE_Y, 0, 0, 260, 260, 0.5 + j * 0.05);
       }
-      // 大音符の光の輪は 10 ms ごとに広がる（参考動画で測った）
-      const j = step(wall, b.t, 10);
-      if (b.big && b.judge === 'good' && j >= 0 && j < 10) {
-        this.add(c, 1, () => this.putC(c, 'fx/Explosion_Big', jx, JUDGE_Y, 0, 0, 260, 260, 0.5 + j * 0.05));
-      }
-    }
+    });
   }
 
   /** 風船が割れたときの虹（8 ms ごと。左から現れて、左から消える） */
@@ -1215,16 +1309,70 @@ export class TndeSkin {
   // ---------- 曲名 ----------
 
   private titleCache: { key: string; c: HTMLCanvasElement } | null = null;
+  /** ジャンルと曲目を入れ替える時計の始まり */
+  private stageAt = -1;
 
   private drawTitle(c: CanvasRenderingContext2D, F: TndeFrame) {
-    const g = F.info.genre ?? '';
-    const gk = GENRES.find(([re]) => re.test(g))?.[1];
-    if (gk) this.put(c, `genre/${gk}`, 1518.4, 94.3, 0, 0, undefined, undefined, 1.45);
+    const { wall } = F;
+    const f = F.info.folder;
+    const stage = F.info.stage ?? 0;
+    if (this.stageAt < 0) this.stageAt = wall;
+    // ジャンル（曲のフォルダ）と「○曲目 / ∞曲」を約 4 秒で入れ替える（TJAPlayer3 と同じ数え方。間隔は参考動画で測った）
+    const n = ((((wall - this.stageAt) % 3960) + 3960) % 3960) / 1.98;
+    const songsA = stage <= 0 ? 0 : n < 745 ? 0 : n < 1000 ? (n - 745) / 255 : n < 1745 ? 1 : Math.max(0, 1 - (n - 1745) / 255);
+    const showGenre = !!f && (stage <= 0 || n < 1000 || n >= 1745);
+    // 帯は 1.45 倍で (1518.4, 94.3) に貼る（参考動画で測った）
+    const GX = 1518.4;
+    const GY = 94.3;
+    const GK = 1.45;
+    if (showGenre && f) {
+      this.cached(c, 'genre', `${f.name}|${f.color}|${f.custom}`, GX, GY, 295 * GK, 33 * GK, (g) => {
+        const gk = f.custom ? undefined : GENRES.find(([re]) => re.test(f.name))?.[1];
+        let col = f.color;
+        if (gk && this.img(`genre/b${gk}`)) {
+          this.put(g, `genre/b${gk}`, GX, GY, 0, 0, undefined, undefined, GK);
+          col = GENRE_COL[gk];
+        } else {
+          // 帯の形（字の無い帯と同じ: 左右が丸い 202×22）をフォルダの色で塗る
+          g.fillStyle = col;
+          const x0 = GX + 47 * GK, y0 = GY + 6 * GK, w = 202 * GK, h = 22 * GK, r = h / 2;
+          g.beginPath();
+          g.arc(x0 + r, y0 + r, r, Math.PI / 2, (Math.PI * 3) / 2);
+          g.arc(x0 + w - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
+          g.closePath();
+          g.fill();
+        }
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.font = `21.5px 'TNDE Seurat', sans-serif`;
+        g.lineJoin = 'round';
+        g.lineWidth = 5;
+        g.strokeStyle = shade(col, 0.18);
+        g.fillStyle = '#fff';
+        fitText(g, f.name, GX + 147.5 * GK, GY + 17 * GK, 190 * GK, true);
+      });
+    }
+    if (songsA > 0) {
+      this.alpha(c, songsA, () => this.cached(c, 'songs', `${stage}`, GX, GY, 295 * GK, 33 * GK, (g) => {
+        this.put(g, 'genre/Songs', GX, GY, 0, 0, undefined, undefined, GK);
+        g.textAlign = 'right';
+        g.textBaseline = 'middle';
+        g.font = `24px 'TNDE Seurat', sans-serif`;
+        g.lineJoin = 'round';
+        g.lineWidth = 4.5;
+        g.strokeStyle = '#000';
+        g.fillStyle = '#fff';
+        g.strokeText(String(stage), 1655, 121.5);
+        g.fillText(String(stage), 1655, 121.5);
+        g.strokeText('∞', 1807, 121.5);
+        g.fillText('∞', 1807, 121.5);
+      }));
+    }
     const key = F.info.title;
     if (this.titleCache?.key !== key) {
-      const cv = document.createElement('canvas');
+      const cv = this.titleCache?.c ?? document.createElement('canvas');
       const t = cv.getContext('2d')!;
-      const font = `52px 'TNDE Seurat', sans-serif`;
+      const font = `52px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
       t.font = font;
       const w = Math.ceil(t.measureText(key).width) + 24;
       cv.width = w;
@@ -1241,7 +1389,9 @@ export class TndeSkin {
       this.titleCache = { key, c: cv };
     }
     const cv = this.titleCache.c;
-    c.drawImage(cv, Math.min(1732 - cv.width / 2, 1880 - cv.width), 72 - 47);
+    // 長い曲名は横に縮める（TJAPlayer3 と同じく 990px まで）
+    const tw = Math.min(cv.width, 1014);
+    c.drawImage(cv, Math.min(1732 - tw / 2, 1880 - tw), 72 - 47, tw, cv.height);
   }
 
   // ---------- コンボの巻物・連打・風船 ----------
@@ -1324,14 +1474,23 @@ export class TndeSkin {
   }
 }
 
-function fitText(c: CanvasRenderingContext2D, t: string, x: number, y: number, max: number) {
+/** 幅が max を超えるときは横に縮めて書く（stroke = 先に縁を描く） */
+function fitText(c: CanvasRenderingContext2D, t: string, x: number, y: number, max: number, stroke = false) {
   const w = c.measureText(t).width;
-  if (w <= max) c.fillText(t, x, y);
-  else {
-    c.save();
-    c.translate(x, y);
-    c.scale(max / w, 1);
-    c.fillText(t, 0, 0);
-    c.restore();
-  }
+  c.save();
+  c.translate(x, y);
+  if (w > max) c.scale(max / w, 1);
+  if (stroke) c.strokeText(t, 0, 0);
+  c.fillText(t, 0, 0);
+  c.restore();
+}
+
+
+/** 色を暗くする（k = 残す明るさ） */
+function shade(hex: string, k: number) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return '#1a1a1a';
+  const n = parseInt(m[1], 16);
+  const f = (v: number) => Math.round(v * k).toString(16).padStart(2, '0');
+  return `#${f(n >> 16)}${f((n >> 8) & 255)}${f(n & 255)}`;
 }

@@ -94,7 +94,7 @@ const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#
 /** ポップアップのフォルダの行（色・階層の深さ・入っているか） */
 type PopFolder = { color: string; depth: number; on: boolean };
 
-function folderColor(key: string, custom?: Record<string, string>) {
+export function folderColor(key: string, custom?: Record<string, string>) {
   if (key === ALL) return '#4d9fbe';
   if (key === UNCAT) return '#5a6670';
   // genre.ini の GenreColor で決まった色

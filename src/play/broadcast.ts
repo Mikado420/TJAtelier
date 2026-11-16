@@ -12,6 +12,10 @@ export interface PlayInfo {
   maker?: string;
   /** ジャケットの画像（object URL） */
   jacket?: string;
+  /** 曲のフォルダの名前と色（custom = genre.ini で決まった色） */
+  folder?: { name: string; color: string; custom: boolean };
+  /** 曲えらびから何曲目か（0 = 曲えらびから遊んでいない） */
+  stage?: number;
 }
 
 const COURSE: Record<string, [string, string]> = {

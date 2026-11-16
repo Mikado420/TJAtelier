@@ -34,8 +34,9 @@ import { bufferChannels, isOgg, oggName, pcmToOgg } from './audio/toOgg';
 import { oggDuration } from './audio/duration';
 import { boostWithLimiter, oggSampleRate } from './audio/loudness';
 import { loadAudio, loadChart } from './io/storage';
-import { addFolder, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
-import { Home } from './home/home';
+import { addFolder, listFolderColors, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
+import { Home, folderColor } from './home/home';
+import type { PlayInfo } from './play/broadcast';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
@@ -2653,6 +2654,8 @@ async function startTest(fromStart = lastTestFromStart) {
     sub: ed.chart.subtitle,
     maker: hdrOf(ed.chart, 'MAKER') || hdrOf(ed.chart, `NOTESDESIGNER${Math.max(0, (COURSE_NAMES as readonly string[]).indexOf(ed.course.name))}`) || undefined,
     jacket: currentJacket?.url,
+    folder: currentSongId ? await folderOf(currentSongId).catch(() => undefined) : undefined,
+    stage: stageNo,
   });
 }
 
@@ -2810,6 +2813,18 @@ function audioLength(a: AudioFile): Promise<number> {
   });
 }
 
+/** この起動で、曲えらびから遊んだ曲の数（プレイ画面の「○曲目」） */
+let stageNo = 0;
+/** 曲のフォルダ: 曲えらびで開いているフォルダ。すべての一覧からなら、曲が入っている最初のフォルダ */
+async function folderOf(id: string): Promise<PlayInfo['folder']> {
+  const e = (await listSongs()).find((x) => x.id === id);
+  const open = home.currentFolder;
+  const key = open && e?.folders.includes(open) ? open : e?.folders[0];
+  const colors = await listFolderColors().catch(() => ({}) as Record<string, string>);
+  if (!key) return { name: '未分類', color: '#5a6670', custom: false };
+  return { name: key.split('/').pop()!, color: folderColor(key, colors), custom: !!colors[key] };
+}
+
 /** 一覧の曲をエディタで開く（play ならそのままテストプレイ） */
 async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   const data = await loadSongData(id);
@@ -2819,6 +2834,7 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
     if (ci >= 0) data.courseIndex = ci;
   }
   playFromHome = mode === 'play';
+  if (playFromHome) stageNo++;
   clearTimeout(saveTimer);
   stopPlayback();
   if (collab.active) collab.close(false);

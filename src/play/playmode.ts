@@ -443,7 +443,7 @@ export class PlayMode {
     this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
     this.resetRes();
-    await this.applySkin();
+    await this.applySkin(info.title);
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
@@ -626,7 +626,7 @@ export class PlayMode {
   private tnde: TndeSkin | null = null;
   private tndeLoad: Promise<void> | null = null;
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
-  private applySkin() {
+  private applySkin(title?: string) {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
     if (!want) {
@@ -634,11 +634,12 @@ export class PlayMode {
       R.tnde = null;
       return Promise.resolve();
     }
+    // 曲ごとに使う背景・踊り子の絵だけを読み込んでおく（ほかは手放す。iPhone は絵のメモリが足りないと描くたびに読み直して重くなる）
     if (this.tnde) {
       R.tnde = this.tnde;
-      return Promise.resolve();
+      return title === undefined ? Promise.resolve() : this.tnde.prepare(title);
     }
-    this.tndeLoad ??= TndeSkin.load('skins/tnde/').then(
+    this.tndeLoad ??= TndeSkin.load('skins/tnde/', title).then(
       (s) => {
         this.tnde = s;
         if (this.settings.skin === 'tnde') {
@@ -648,7 +649,7 @@ export class PlayMode {
       },
       () => { this.tndeLoad = null; },
     );
-    return this.tndeLoad;
+    return this.tndeLoad.then(() => (title !== undefined ? this.tnde?.prepare(title) : undefined));
   }
 
   applySettings() {

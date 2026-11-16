@@ -3,7 +3,7 @@ import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type 
 import { starSlots, STAR_RED } from '../chart/stars';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
 import { pixelRatio } from '../orient';
-import { TndeSkin, TW, TH } from './tnde';
+import { TndeSkin, TW, TH, type TndeInfo } from './tnde';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
 
 /**
@@ -878,7 +878,7 @@ export class Renderer {
   private hasBranch = false;
   private hasYOf: Course | null = null;
 
-  draw(game: Game, course: Course, now: number, info: { title: string; course: string; level: number; genre?: string }) {
+  draw(game: Game, course: Course, now: number, info: TndeInfo) {
     const bars = course.bars;
     const ctx = this.ctx;
     const wall = performance.now();
@@ -979,7 +979,7 @@ export class Renderer {
   }
 
   /** TNDE スキンで 1 フレーム描く（1920×1080 の座標を、この画面の基準座標に合わせて縮める） */
-  private drawTnde(game: Game, course: Course, now: number, wall: number, info: { title: string; course: string; level: number; genre?: string }) {
+  private drawTnde(game: Game, course: Course, now: number, wall: number, info: TndeInfo) {
     const ctx = this.ctx;
     const k = REF_W / TW;
     ctx.setTransform(this.dpr * this.s, 0, 0, this.dpr * this.s, this.dpr * this.ox, this.dpr * this.oy);
