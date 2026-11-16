@@ -36,6 +36,34 @@ export class AudioEngine {
     this.applyMix();
   }
 
+  // ---------- 録画 ----------
+  private recDest: MediaStreamAudioDestinationNode | null = null;
+  /** 録画にだけ入れる打音（アプリが鳴らした打音は Web の音に入らないため） */
+  private recHit: GainNode | null = null;
+  /** 録画用の音（鳴っている音すべて） */
+  recordStream(): MediaStream | null {
+    if (typeof this.ctx.createMediaStreamDestination !== 'function') return null;
+    if (!this.recDest) {
+      this.recDest = this.ctx.createMediaStreamDestination();
+      if (this.limiter) this.limiter.connect(this.recDest);
+      else for (const g of [this.musicGain, this.sfxGain, this.metroGain, this.uiGain]) g.connect(this.recDest);
+      this.recHit = this.ctx.createGain();
+      this.recHit.connect(this.recDest);
+    }
+    return this.recDest.stream;
+  }
+  /** 打音を録画にだけ入れる */
+  recordHit(kind: 'don' | 'ka') {
+    if (!this.recHit) return;
+    this.recHit.gain.value = this.sfxGain.gain.value;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.customHit[kind] ?? this.builtinHit(kind);
+    const g = this.ctx.createGain();
+    g.gain.value = this.hitNorm(kind);
+    src.connect(g).connect(this.recHit);
+    src.start();
+  }
+
   // ---------- 音量（自動で揃える） ----------
   // 音源・打音・メトロノームの「聞こえる大きさ」を測って、どれも同じ大きさ（TARGET）になるように音量を決め、
   // そこに設定の比率（初期値 1 : 1 : 1.2）を掛ける。

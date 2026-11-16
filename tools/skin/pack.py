@@ -116,6 +116,53 @@ for k in ['Normal', 'In']:
         anim('dancer/%s%d' % (k, i), '2_Dancer/%s/%d' % (k, i))
 for f in sorted(os.listdir(os.path.join(G, '1_Chara/1P'))):
     anim('chara/' + f, '1_Chara/1P/' + f, step=2)
+
+# 曲の終わりの演出（クリア・フルコンボ・ドンだフルコンボ）
+E9 = '9_End/'
+img('end/clearChara', E9 + 'Clear/Clear_Chara.png')
+img('end/clearText', E9 + 'Clear/Clear_Text.png')
+img('end/star', E9 + 'Clear/Star.png')
+img('end/fcLoop', E9 + 'FullCombo/FullCombo_Loop.png')
+for f in ['Bachi', 'Bachi_Flush', 'Bachi_God', 'Bachi_God_Flush', 'Donda_Text', 'Donda_Text_Effect', 'Donda_Text_Rainbow_Effect']:
+    img('end/dfc/' + f, E9 + 'DondaFullCombo/%s.png' % f)
+for f in ['L', 'R']:
+    img('end/dfc/fan' + f, E9 + 'DondaFullCombo/Fan/%s.png' % f)
+# 金の背景は絵の中の帯だけを切り出す（置く位置は x, y）
+_g = rd(os.path.join(G, E9 + 'DondaFullCombo/BackGold.png'))
+_ys, _xs = np.nonzero(_g[:, :, 3] > 0)
+_g = _g[_ys.min():_ys.max() + 1, _xs.min():_xs.max() + 1]
+man['img']['end/dfc/gold'] = {'f': wr('end/dfc/gold', _g, True), 'w': _g.shape[1], 'h': _g.shape[0], 'x': int(_xs.min()), 'y': int(_ys.min())}
+# フルコンボの連番は、絵のある所だけを切り出して 1 枚にまとめる（[元の x, y, 幅, 高さ, まとめた絵の x, y]）
+_fs = [rd(os.path.join(G, E9 + 'FullCombo/%d.png' % k)) for k in range(66)]
+_rects = []
+for im in _fs:
+    ys, xs = np.nonzero(im[:, :, 3] > 0)
+    _rects.append((int(xs.min()), int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)) if len(xs) else (0, 0, 0, 0))
+_W = 2048
+_H = 2048
+_pages = [[]]
+_x = _y = _rowh = 0
+_place = []
+for (x0, y0, w, h) in _rects:
+    if _x + w > _W: _x = 0; _y += _rowh + 1; _rowh = 0
+    if _y + h > _H: _pages.append([]); _x = _y = _rowh = 0
+    _place.append((len(_pages) - 1, _x, _y)); _x += w + 1; _rowh = max(_rowh, h)
+_sheets = [np.zeros((_H, _W, 4), np.uint8) for _ in _pages]
+_frames = []
+for im, (x0, y0, w, h), (pg, px, py) in zip(_fs, _rects, _place):
+    if w: _sheets[pg][py:py + h, px:px + w] = im[y0:y0 + h, x0:x0 + w]
+    _frames.append([x0, y0, w, h, px, py, pg])
+for pg, sh in enumerate(_sheets):
+    ys = np.nonzero(sh[:, :, 3].max(1))[0]
+    sh = sh[:ys.max() + 1]
+    man['img']['end/fc%d' % pg] = {'f': wr('end/fc%d' % pg, sh, True), 'w': _W, 'h': sh.shape[0]}
+man['img']['end/fc0']['frames'] = _frames
+man['img']['end/fc0']['pages'] = len(_sheets)
+# 声
+_S = os.path.join(SRC, '..', 'Sounds')
+for n, f in [('clear', 'Clear.ogg'), ('fc', 'Full combo.ogg'), ('dfc', 'Donda Full Combo.ogg')]:
+    os.makedirs(os.path.join(OUT, 'se'), exist_ok=True)
+    shutil.copy(os.path.join(_S, f), os.path.join(OUT, 'se', n + '.ogg'))
 # ネームプレート・字
 OVR = sys.argv[3] if len(sys.argv) > 3 else ''
 def pick(f):

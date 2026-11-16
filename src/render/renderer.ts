@@ -2,6 +2,8 @@ import { beatAt, jposAt, lyricAt, scrollAhead, scrollBase, type Course, type Not
 import { CLEAR_LINE, type Game, type HitKind, type Judge, type JudgeEvent, type NoteState } from '../engine/game';
 import { starSlots, STAR_RED } from '../chart/stars';
 import { drawEndFx, END_HOLD, type EndKind } from './endfx';
+/** TNDE スキンが自分で演出する終わり方 */
+const TNDE_END = new Set<string>(['clear', 'fc', 'allgood']);
 import { pixelRatio } from '../orient';
 import { TndeSkin, TW, TH, type TndeInfo, type PlateStyle } from './tnde';
 import { BIG_SCALE, clearTextCache, drawCachedText, drawAny, drawBalloon, drawNoteHead, isBig, outlinedText } from './notes';
@@ -831,7 +833,13 @@ export class Renderer {
   /** fade: 帯を見せきったら消す（#END の後ろの音符が、その後に流れてくるのが見えるように） */
   showEnd(kind: EndKind, fade = false) {
     this.endFx = { kind, t: performance.now(), fade };
+    // TNDE スキンの演出は 7 秒見せてから 1.8 秒で暗くする（動画用の画面は暗くしない）
+    if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
     return END_HOLD[kind];
+  }
+  /** スキンの演出を使うか（声を鳴らすかどうか） */
+  skinEnd(kind: EndKind) {
+    return (this.skinOn || this.skinLane) && TNDE_END.has(kind);
   }
 
   reset() {
@@ -1015,6 +1023,7 @@ export class Renderer {
       profile: this.plate.profile,
       laneOnly,
       bgMode: this.videoMode,
+      end: this.endFx,
     });
     } catch (e) {
       // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）
@@ -1022,7 +1031,8 @@ export class Renderer {
     }
     ctx.restore();
     if (!laneOnly) this.drawLyric(this.vis, course, now);
-    this.drawEnd(this.vis, wall);
+    // クリア・フルコンボ・ドンだフルコンボはスキンの演出（クリア失敗はいつもの帯）
+    if (!this.endFx || !TNDE_END.has(this.endFx.kind)) this.drawEnd(this.vis, wall);
     ctx.restore();
     if (this.touch && !laneOnly) {
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);

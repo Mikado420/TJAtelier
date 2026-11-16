@@ -3,6 +3,7 @@ import type { Course } from '../chart/types';
 import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
+import { Recorder } from './recorder';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
@@ -46,6 +47,8 @@ export interface PlaySettings {
   passiveTouch?: boolean;
   /** プレイ中のポーズボタンを出す（出さないときは上の真ん中に触れるとポーズ） */
   pauseButton?: boolean;
+  /** 自動録画（曲の始まりから結果の前までを動画にする） */
+  autoRecord?: boolean;
   /** 左上に FPS を出す */
   showFps?: boolean;
   /** コマが落ちるときは、絵の細かさを自動で下げる */
@@ -141,6 +144,7 @@ export class PlayMode {
         if (!this.active || this.paused || !this.game || this.auto || this.spectating) return;
         // 打音をいちばん先に鳴らす（判定や絵の処理で遅れないように）。アプリが鳴らしたときは鳴らさない
         if (this.hitOn && !silent) this.audio.playHit(kind);
+        else if (this.hitOn && this.recorder.active) this.audio.recordHit(kind);
         this.renderer.pushHit(kind, side);
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
@@ -313,6 +317,7 @@ export class PlayMode {
 
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
+    this.recorder.discard();
     this.stopVideo();
     this.bc.hide();
     this.root.classList.add('hidden');
@@ -442,6 +447,12 @@ export class PlayMode {
     this.canvasEl.style.visibility = 'hidden';
     this.firstFrame = true;
     this.root.classList.remove('hidden');
+    // 自動録画: 読み込みの画面から録り始める
+    this.recorder.discard();
+    this.recTitle = info.title;
+    if (this.settings.autoRecord && !this.calibrating && !this.spectating) {
+      if (!this.recorder.start(this.root, this.audio.recordStream())) this.onError('この端末では録画できません');
+    }
     // プレイ中は後ろのエディタを描かない・重ねて表示しない（プレイ画面に全部の力を使う）
     document.body.classList.add('playing');
     this.result.classList.add('hidden');
@@ -571,7 +582,10 @@ export class PlayMode {
         this.endWall = performance.now();
         const st = game.stats;
         const fc = st.bad === 0 && game.totalHitNotes > 0;
-        this.endHold = this.renderer.showEnd(fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail', (this.cur?.tailEnd ?? 0) > 0);
+        const kind = fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
+        this.endHold = this.renderer.showEnd(kind, (this.cur?.tailEnd ?? 0) > 0);
+        // TNDE スキン: 「クリア成功！」「フルコンボだドン！」などの声
+        if (this.renderer.skinEnd(kind)) this.audio.playUi(`tnde:${kind}`);
       }
       // 帯を出したら、曲が終わっても帯を見せきってから結果へ
       if (this.endWall ? performance.now() - this.endWall > this.endHold && now > (this.cur?.tailEnd ?? 0) + 1 : now > endAt) {
@@ -637,8 +651,13 @@ export class PlayMode {
   /** TNDE スキン（初めて使うときに読み込む） */
   private tnde: TndeSkin | null = null;
   private tndeLoad: Promise<void> | null = null;
+  /** 自動録画 */
+  private recorder = new Recorder();
+  /** 録れた動画を渡す（保存・共有） */
+  onRecorded: (blob: Blob, name: string) => void = () => {};
   /** スキンの用意ができてから最初のコマを描くまで（ゲーム画面を隠しておく） */
   private firstFrame = false;
+  private recTitle = '';
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
   /** アプリを開いたときに、スキンの絵（曲で変わらないもの）を裏で読み込み始める */
   preloadSkin() {
@@ -661,6 +680,7 @@ export class PlayMode {
     this.tndeLoad ??= TndeSkin.load('skins/tnde/', title).then(
       (s) => {
         this.tnde = s;
+        for (const [k, f] of [['clear', 'clear'], ['fc', 'fc'], ['allgood', 'dfc']]) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${f}.ogg`);
         if (this.settings.skin === 'tnde') {
           R.tnde = s;
           R.resize();
@@ -1139,6 +1159,10 @@ export class PlayMode {
 
   finish() {
     if (!this.active) return;
+    if (this.recorder.active) {
+      const name = `${(this.recTitle || 'play').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')}`;
+      void this.recorder.stop().then((r) => { if (r) this.onRecorded(r.blob, `${name}.${r.ext}`); });
+    }
     this.stopVideo();
     this.hidePause();
     this.active = false;

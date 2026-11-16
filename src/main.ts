@@ -89,6 +89,8 @@ const settings = {
   restZone: IS_IOS,
   passiveTouch: false,
   pauseButton: true,
+  /** 自動録画 */
+  autoRecord: false,
   /** 動画用の画面 */
   broadcast: false,
   /** プレイ中に左上へ FPS を出す */
@@ -283,6 +285,8 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
+// 自動録画の動画は、曲が終わったら共有シートで保存する
+play.onRecorded = (blob, name) => download(blob, name);
 // スキンの絵は、最初の画面が出たあとに裏で読み込み始める（最初の曲を早く始められるように）
 setTimeout(() => play.preloadSkin(), 1500);
 // プレイ画面などの文字（マキナス 4 Flat。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
@@ -1648,7 +1652,7 @@ function renderSheet() {
     $('sheetTitle').textContent = '設定';
     const t = settingsTab;
     const pane =
-      t === 'play' ? `<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
+      t === 'play' ? `${recRow()}<h4 class="st-h">叩き方</h4><div class="st-row"><span>オート</span>${autoBtn(settings.auto)}</div>${hitRow()}
           <h4 class="st-h">譜面</h4>${chartRows()}
           <h4 class="st-h">見た目</h4>${skinRow()}
           <div class="st-btns">
@@ -2016,6 +2020,9 @@ function profileRows() {
     <div class="st-row"><span>枠</span>${seg('danFrame', DAN_FRAMES, p.danFrame)}</div>
     <div class="st-row"><span>合格</span>${seg('danPass', DAN_PASSES, p.danPass, 'two')}</div>` : ''}`;
 }
+/** 自動録画の欄 */
+const recRow = () =>
+  `<h4 class="st-h">録画</h4><div class="st-row"><span>自動録画</span><div class="st-seg two">${[['0', 'オフ'], ['1', 'オン']].map(([v, l]) => `<button data-rec="${v}" class="${(v === '1') === !!settings.autoRecord ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
 /** プロフィールを保存して、プレイ画面に伝える */
 function saveProfile() {
   saveSettings();
@@ -2118,6 +2125,12 @@ $('sheetBody').addEventListener('click', (e) => {
   if (br) onBranchModeClick(br);
   const pb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-prof]');
   if (pb) onProfileClick(pb);
+  const rb = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-rec]');
+  if (rb) {
+    settings.autoRecord = rb.dataset.rec === '1';
+    saveSettings();
+    renderSheet();
+  }
 });
 $('sheetBody').addEventListener('change', (e) => {
   const el = e.target as HTMLInputElement;

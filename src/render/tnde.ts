@@ -99,6 +99,8 @@ export interface TndeFrame {
   title: string;
   /** ネームプレートの見た目（称号の帯・段位） */
   profile?: PlateStyle;
+  /** 曲の終わりの演出（t = 始まった時刻 ms） */
+  end?: { kind: string; t: number } | null;
 }
 
 /** SENotes.png の行 */
@@ -207,7 +209,17 @@ export class TndeSkin {
     if (name === 'dancer/Normal1') return p.dancer === 1;
     if (name === 'mob') return p.down !== 5;
     if (/^genre\/\d$/.test(name)) return false;
+    if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
     return true;
+  }
+
+  /** 曲の終わりの演出の絵は、要りそうになってから読み込む（clear・fc・dfc） */
+  private endWant = new Set<string>();
+  needEnd(kinds: string[]) {
+    let add = false;
+    for (const k of kinds) if (!this.endWant.has(k)) { this.endWant.add(k); add = true; }
+    if (!add) return;
+    for (const n of Object.keys(this.man.img)) if (n.startsWith('end/') && this.endWant.has(endGroup(n))) void this.fetchImg(n);
   }
 
   /** 使う絵を読み込み、使わない絵を手放す */
@@ -530,6 +542,17 @@ export class TndeSkin {
     const { game, course, now, wall } = F;
     this.choose(F.info.title);
     if (`${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}` !== this.loadedSet) void this.sync();
+    // 曲の半分を過ぎたら、終わりの演出の絵を読み込み始める（フルコンボの連番はフルコンボできそうなときだけ）
+    {
+      const half = this.lastNote(course) * 0.5;
+      const st = game.stats;
+      if (now > half || F.end) {
+        const k = ['clear'];
+        if (st.bad === 0) k.push(st.ok === 0 ? 'dfc' : 'fc');
+        if (F.end) k.push(END_GROUP[F.end.kind] ?? 'clear');
+        this.needEnd(k);
+      }
+    }
     const beat = this.beatOf(course, now);
     const b0 = course.bars[0];
     this.dancePhase = b0 ? (b0.time * b0.bpm) / 60 + 0.55 : 0;
@@ -568,6 +591,7 @@ export class TndeSkin {
       this.drawFlyers(c, F, jx);
     }
     this.drawExplosion(c, F, jx);
+    this.drawEndFx(c, F);
     if (all) {
       this.drawTitle(c, F);
       this.drawComboBanner(c, wall);
@@ -575,6 +599,17 @@ export class TndeSkin {
     this.drawRoll(c, F);
     this.drawJudgeText(c, F, jx);
     if (all) this.drawBalloonChara(c, F);
+    // 演出の 7 秒後から 1.8 秒で暗くして、結果の画面へ
+    if (all && F.end && END_KINDS.has(F.end.kind)) {
+      const a = (wall - F.end.t - END_FADE_AT) / END_FADE;
+      if (a > 0) {
+        c.save();
+        c.globalAlpha = Math.min(1, a);
+        c.fillStyle = '#000';
+        c.fillRect(0, 0, TW, TH);
+        c.restore();
+      }
+    }
   }
 
   private bpmAt(course: Course, now: number) {
@@ -708,6 +743,227 @@ export class TndeSkin {
     };
     if (!clear || fade < 1) one('');
     if (clear) this.alpha(c, fade, () => one('_Clear'));
+  }
+
+  private lastNoteOf: { c: Course; t: number } | null = null;
+  private lastNote(course: Course) {
+    if (this.lastNoteOf?.c !== course) {
+      let t = 0;
+      for (const n of course.notes) if (!n.dummy) t = Math.max(t, n.endTime ?? n.time);
+      this.lastNoteOf = { c: course, t };
+    }
+    return this.lastNoteOf.t;
+  }
+
+  // ---------- 曲の終わりの演出（参考動画で 1 コマずつ測った） ----------
+
+  private drawEndFx(c: CanvasRenderingContext2D, F: TndeFrame) {
+    const e = F.end;
+    if (!e) return;
+    const t = F.wall - e.t;
+    if (t < 0) return;
+    if (e.kind === 'clear') this.drawClearFx(c, t);
+    else if (e.kind === 'fc') this.drawFcFx(c, t);
+    else if (e.kind === 'allgood') this.drawDfcFx(c, t);
+  }
+
+  /** クリアの「クリア成功」の字（1 文字ずつ、ふくらみながら出る） */
+  private clearLetters(c: CanvasRenderingContext2D, t: number, start: number, gap: number) {
+    for (let j = 0; j < 5; j++) {
+      const lt = t - start - j * gap;
+      if (lt < 0) continue;
+      const i = Math.floor(lt / FRAME);
+      const ky = i < LETTER_K.length ? LETTER_K[i] : 1;
+      const a = i < LETTER_A.length ? LETTER_A[i] : 1;
+      const h = 90 * S * ky;
+      this.alpha(c, a, () => this.put(c, 'end/clearText', LETTER_X[j], 450 - h, j * 90, 0, 90, 90, S, S * ky));
+    }
+  }
+
+  /** 字の白い光（白い字を重ねる） */
+  private clearLettersWhite(c: CanvasRenderingContext2D, a: number) {
+    if (a <= 0) return;
+    this.alpha(c, a, () => {
+      for (let j = 0; j < 5; j++) this.put(c, 'end/clearText', LETTER_X[j], 447 - 90 * S, j * 90, 90, 90, 90);
+    });
+  }
+
+  /** 星のきらめき（7 つが順に、ふくらんでから消える。くり返す） */
+  private stars(c: CanvasRenderingContext2D, t: number, start: number) {
+    if (t < start) return;
+    const ct = (t - start) % STAR_PERIOD;
+    for (const [x, y, k, at] of STARS) {
+      const st = ct - at;
+      const grow = k * 10 * FRAME;
+      if (st < 0 || st > grow + 75) continue;
+      const s = st < grow ? (st / grow) * k : k;
+      const a = st < grow ? 1 : 1 - (st - grow) / 75;
+      const w = 61 * s;
+      this.alpha(c, a, () => this.put(c, 'end/star', x - w / 2, y - w / 2, 0, 0, 61, 61, s));
+    }
+  }
+
+  /** バチを持った 2 人（クリア）。cell: 絵の列、L・R の位置 */
+  private clearChara(c: CanvasRenderingContext2D, cell: number, l: number[], r: number[], a = 1) {
+    this.alpha(c, a, () => {
+      this.put(c, 'end/clearChara', l[0], l[1], cell * 180, 0, 180, 180);
+      this.put(c, 'end/clearChara', r[0], r[1], cell * 180, 180, 180, 180);
+    });
+  }
+
+  private drawClearFx(c: CanvasRenderingContext2D, t: number) {
+    // 2 人: 真ん中に現れて、左右に分かれ、バチを掲げる
+    if (t < 142) this.clearChara(c, 1, [1030, 267], [1092, 266], t / 142);
+    else if (t < 717) {
+      const p = Math.min(1, (t - 142) / 441);
+      const q = 1 - (1 - p) * (1 - p);
+      this.clearChara(c, 0, [1025 - 328 * q, 266], [1105 + 325 * q, 267]);
+    } else {
+      const [cell, l, r] = CLEAR_POSE.find(([at]) => t >= at)!.slice(1) as [number, number[], number[]];
+      this.clearChara(c, cell, l, r);
+    }
+    this.clearLetters(c, t, 317, 50);
+    // 字が白く光る
+    this.clearLettersWhite(c, t < 1000 ? 0 : t < 1183 ? (t - 1000) / 183 : 1 - (t - 1183) / 192);
+    this.stars(c, t, 1758);
+  }
+
+  private drawFcFx(c: CanvasRenderingContext2D, t: number) {
+    // フルコンボは連番の絵（33 ms ごと）。終わったら最後の絵と、光る字（50 ms ごと）
+    const meta = this.man.img['end/fc0'] as unknown as { frames: number[][] } | undefined;
+    if (!meta) return;
+    const n = meta.frames.length;
+    const k = Math.min(n - 1, Math.floor(t / 33));
+    if (t > 2300) this.confetti(c, t - 2300);
+    const [x0, y0, w, h, px, py, pg] = meta.frames[k];
+    const im = this.img(`end/fc${pg}`);
+    if (im && w) c.drawImage(im, px, py, w, h, 495 + x0 * S, 75 + y0 * S, w * S, h * S);
+    if (t >= n * 33) {
+      const j = Math.floor((t - n * 33) / 50) % 2 ? 2 : 0;
+      this.put(c, 'end/fcLoop', 495, 294, 0, j * 155, 950, 155);
+    }
+  }
+
+  /** 紙ふぶき（フルコンボ・ドンだフルコンボ）。レーンの真ん中あたりの上から舞い落ちる */
+  private confetti(c: CanvasRenderingContext2D, t: number) {
+    const N = 26;
+    for (let i = 0; i < N; i++) {
+      const life = 1800 + (hash(`c${i}`) % 900);
+      const born = (hash(`b${i}`) % 2400);
+      const lt = t - born;
+      if (lt < 0) continue;
+      const cyc = Math.floor(lt / life);
+      const u = (lt % life) / life;
+      const h = hash(`p${i}_${cyc}`);
+      const x = 800 + (h % 760) + Math.sin(u * 7 + i) * 18;
+      const y = 280 + u * 250;
+      const a = u < 0.1 ? u / 0.1 : u > 0.8 ? (1 - u) / 0.2 : 1;
+      const col = CONFETTI[h % CONFETTI.length];
+      c.save();
+      c.globalAlpha = a;
+      c.translate(x, y);
+      c.rotate(u * 9 + i);
+      c.scale(1, Math.cos(u * 11 + i));
+      c.fillStyle = col;
+      c.fillRect(-6, -4, 12, 8);
+      c.restore();
+    }
+  }
+
+  /** ドンだフルコンボのバチお（Bachi.png: 151×168、上の段が左、下の段が右）。右は左と真ん中で対称（x の和が 2190） */
+  private dfcChara(c: CanvasRenderingContext2D, name: string, cell: number, lx: number, y: number, a = 1, ry = y) {
+    this.alpha(c, a, () => {
+      this.put(c, name, lx, y, cell * 151, 0, 151, 168);
+      this.put(c, name, 2190 - lx, ry, cell * 151, 168, 151, 168);
+    });
+  }
+
+  private drawDfcFx(c: CanvasRenderingContext2D, t: number) {
+    const B = 'end/dfc/Bachi';
+    const lerp = (a: number, b: number, p: number) => a + (b - a) * Math.max(0, Math.min(1, p));
+    // 金の背景（1158〜1342 ms で出る）
+    const gold = this.man.img['end/dfc/gold'] as unknown as { x: number; y: number } | undefined;
+    if (gold && t > 1158) this.alpha(c, Math.min(1, (t - 1158) / 184), () => this.put(c, 'end/dfc/gold', gold.x * S, gold.y * S));
+    if (t > 2300) this.confetti(c, t - 2300);
+    // 扇（棒が出てから、ひらく）
+    if (t > 1192) {
+      const fa = Math.min(1, (t - 1192) / 66);
+      const cell = t < 1325 ? 0 : t < 1358 ? 1 : t < 1375 ? 2 : t < 1392 ? 3 : 4;
+      const dy = t < 1258 ? (1 - fa) * -15 : 0;
+      this.alpha(c, fa, () => {
+        this.put(c, 'end/dfc/fanL', 570, 298 + dy, cell * 221, 0, 221, 143);
+        this.put(c, 'end/dfc/fanR', 1513, 297 + dy, cell * 221, 0, 221, 143);
+      });
+    }
+    // バチお
+    if (t < 192) this.dfcChara(c, B, 0, 1050, 278, t / 192);
+    else if (t < 792) {
+      const p = Math.min(1, (t - 192) / 450);
+      this.dfcChara(c, B, 1, 1065 - 329 * (1 - (1 - p) * (1 - p)), 276);
+    } else if (t < 1042) {
+      const [cell, x, y] = DFC_POSE.find(([at]) => t >= at)!.slice(1);
+      this.dfcChara(c, B, cell, x, y);
+    } else if (t < 1342) {
+      // しゃがんで白く光る
+      const y = lerp(280, 292, (t - 1042) / 100);
+      const w = 0.55 * Math.min(1, (t - 1042) / 200);
+      this.dfcChara(c, B, 5, 734, y);
+      this.alpha(c, w, () => {
+        this.put(c, 'end/dfc/Bachi_Flush', 734 + 75 * S / 2 - 75 * S / 2, y, 0, 0, 151, 168);
+        this.put(c, 'end/dfc/Bachi_Flush', 2190 - 734, y, 0, 168, 151, 168);
+      });
+    } else if (t < 1742) {
+      // 上へ跳んで、白く光って消える
+      const p = Math.min(1, (t - 1342) / 316);
+      const x = 734 - 169 * p;
+      const y = 65 + 158 * (1 - p) * (1 - p);
+      const w = t < 1658 ? 0 : Math.min(1, (t - 1658) / 50);
+      const a = t < 1675 ? 1 : 1 - (t - 1675) / 67;
+      this.alpha(c, a, () => {
+        this.dfcChara(c, B, 5, x, y);
+        this.alpha(c, w, () => {
+          this.put(c, 'end/dfc/Bachi_Flush', x, y, 0, 0, 151, 168);
+          this.put(c, 'end/dfc/Bachi_Flush', 2190 - x, y, 0, 168, 151, 168);
+        });
+      });
+    }
+    // 神さまのバチお: 白く光って現れ、落ちてきて着地、そのあと 1.65 秒ごとに跳ぶ
+    if (t >= 1700) {
+      let x = 435;
+      let y = 278;
+      if (t < 2008) {
+        const p = Math.max(0, (t - 1742) / 266);
+        x = 515 - 80 * p;
+        y = 80 + 199 * p * p;
+      } else if (t < 2108) y = t < 2075 ? 291 : 278;
+      else if (t > 3875) y = godJump(((t - 3875) % 1650) / FRAME);
+      const a = Math.min(1, (t - 1700) / 140);
+      const w = t < 1792 ? 1 : Math.max(0, 1 - (t - 1792) / 92);
+      this.alpha(c, a, () => {
+        this.put(c, 'end/dfc/Bachi_God', x, y, 0, 0, 151, 168);
+        this.put(c, 'end/dfc/Bachi_God', 2190 - x, y, 0, 168, 151, 168);
+        this.alpha(c, w, () => {
+          this.put(c, 'end/dfc/Bachi_God_Flush', x, y, 0, 0, 151, 168);
+          this.put(c, 'end/dfc/Bachi_God_Flush', 2190 - x, y, 0, 168, 151, 168);
+        });
+      });
+    }
+    // 「クリア成功」→ 白く光る →「ドンだフルコンボ!!」
+    if (t < 1300) this.clearLetters(c, t, 400, 46);
+    if (t < 1325) this.clearLettersWhite(c, t < 1108 ? 0 : Math.min(1, (t - 1108) / 134));
+    const DX = 713;
+    const DY = 277;
+    if (t >= 1258) {
+      const white = t < 1300 ? (t - 1258) / 42 : t < 1600 ? 1 : Math.max(0, 1 - (t - 1600) / 110);
+      const col = t < 1600 ? 0 : Math.min(1, (t - 1600) / 110);
+      // 虹のふち（字の後ろ）。出たときは字の上にも重ねて、すぐに引く
+      if (col > 0) this.alpha(c, col, () => this.put(c, 'end/dfc/Donda_Text_Rainbow_Effect', DX, DY));
+      this.alpha(c, col, () => this.put(c, 'end/dfc/Donda_Text', DX, DY));
+      const over = t < 1708 ? 0 : t < 1842 ? 0.6 * (1 - (t - 1708) / 134) : 0;
+      if (over > 0) this.alpha(c, over, () => this.put(c, 'end/dfc/Donda_Text_Rainbow_Effect', DX, DY));
+      this.alpha(c, white, () => this.put(c, 'end/dfc/Donda_Text_Effect', DX, DY));
+    }
+    this.stars(c, t, 1400);
   }
 
   // ---------- 下の背景・踊り子・帯 ----------
@@ -1744,4 +2000,53 @@ async function loadBitmap(url: string): Promise<ImageBitmap | HTMLImageElement |
     im.onerror = () => { clearTimeout(t); res(null); };
     im.src = url;
   });
+}
+
+/** 1 コマ（60 fps） */
+const FRAME = 1000 / 60;
+/** 演出が始まってから暗くし始めるまで・暗くなるまで（参考動画で測った） */
+const END_FADE_AT = 7000;
+const END_FADE = 1800;
+const END_KINDS = new Set(['clear', 'fc', 'allgood']);
+/** 演出の種類 → 読み込む絵の組 */
+const END_GROUP: Record<string, string> = { clear: 'clear', fc: 'fc', allgood: 'dfc' };
+function endGroup(name: string) {
+  if (name.startsWith('end/dfc/')) return 'dfc';
+  if (name.startsWith('end/fc')) return 'fc';
+  return 'clear';
+}
+/** 「クリア成功」の字の左の端（1 文字 135px。下の端は y 450） */
+const LETTER_X = [949, 1035, 1124, 1224, 1331];
+/** 字の縦のふくらみと濃さ（1 コマごと。TJAPlayer3 と同じ表） */
+const LETTER_K = [1.04, 1.11, 1.15, 1.19, 1.23, 1.26, 1.3, 1.31, 1.32, 1.32, 1.32, 1.3, 1.3, 1.26, 1.25, 1.19, 1.15, 1.11, 1.05, 1.0];
+const LETTER_A = [43, 85, 128, 170, 213, 255].map((v) => v / 255);
+/** クリアの 2 人のポーズ（始まってからの ms・絵の列・左・右の位置） */
+const CLEAR_POSE: [number, number, number[], number[]][] = [
+  [950, 5, [725, 264], [1405, 263]],
+  [883, 4, [727, 266], [1406, 266]],
+  [833, 3, [701, 229], [1430, 227]],
+  [783, 2, [703, 230], [1429, 227]],
+  [717, 1, [693, 268], [1440, 266]],
+];
+/** ドンだフルコンボのバチおのポーズ（ms・絵の列・左の x・y） */
+const DFC_POSE: number[][] = [
+  [1025, 5, 734, 280],
+  [958, 4, 733, 278],
+  [892, 3, 744, 244],
+  [858, 2, 746, 244],
+  [792, 0, 702, 278],
+  [0, 1, 736, 276],
+];
+/** 星（真ん中の x・y、いちばん大きいとき、くり返しの中で出る時刻 ms） */
+const STARS: number[][] = [
+  [1206, 311, 0.9, 0], [1388, 311, 0.92, 83], [1025, 312, 0.9, 167], [1088, 457, 1.0, 250],
+  [1443, 442, 0.46, 383], [1310, 457, 1.0, 500], [966, 441, 0.25, 533],
+];
+const STAR_PERIOD = 1575;
+const CONFETTI = ['#ff4fa3', '#3d8bff', '#38d66b', '#9b5cff', '#ff3b3b', '#2fd8e0', '#ffcf3a'];
+/** 神さまのバチおの跳ね方（1 コマごとの y。参考動画で測った） */
+const GOD_JUMP = [278, 281, 285, 288, 290, 291, 292, 292, 292, 292, 292, 292, 292, 290, 287, 285, 280, 275, 269, 265, 261, 257, 254, 251, 248, 246, 244, 242, 241, 240, 240, 240, 240, 241, 242, 244, 246, 249, 251, 254, 257, 260, 264, 268, 273, 277, 282, 286, 288, 289, 289, 285, 282, 280, 278];
+function godJump(f: number) {
+  const i = Math.floor(f);
+  return i < GOD_JUMP.length ? GOD_JUMP[i] : 278;
 }
