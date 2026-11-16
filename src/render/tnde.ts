@@ -295,7 +295,17 @@ export class TndeSkin {
       const cv = e?.cv ?? document.createElement('canvas');
       cv.width = Math.max(1, Math.ceil(w * k));
       cv.height = Math.max(1, Math.ceil(h * k));
-      const g = cv.getContext('2d')!;
+      const g = cv.getContext('2d');
+      // 絵のメモリが足りないとき（iPhone は canvas の合計に上限がある）は、まとめずにそのまま描く
+      if (!g) {
+        cv.width = cv.height = 0;
+        this.caches.delete(id);
+        c.save();
+        if (parts) { c.beginPath(); for (const [px, py, pw, ph] of parts) c.rect(px, py, pw, ph); c.clip(); }
+        paint(c);
+        c.restore();
+        return;
+      }
       g.setTransform(k, 0, 0, k, -x * k, -y * k);
       g.clearRect(x, y, w, h);
       g.imageSmoothingEnabled = true;
@@ -1098,10 +1108,17 @@ export class TndeSkin {
     const key = `${sx},${sy},${sw},${sh},${lv}`;
     let cv = this.tinted.get(key);
     if (!cv) {
+      // 色を変えた絵は 48 枚まで（古いものから手放す）
+      if (this.tinted.size >= 48) {
+        const [k0, old] = this.tinted.entries().next().value!;
+        old.width = old.height = 0;
+        this.tinted.delete(k0);
+      }
       cv = document.createElement('canvas');
       cv.width = sw;
       cv.height = sh;
-      const t = cv.getContext('2d')!;
+      const t = cv.getContext('2d');
+      if (!t) { c.drawImage(im, sx, sy, sw, sh, x, y, dw, dh); return; }
       const gg = Math.round(255 * (1 - lv / 20));
       t.drawImage(im, sx, sy, sw, sh, 0, 0, sw, sh);
       t.globalCompositeOperation = 'multiply';
@@ -1188,7 +1205,8 @@ export class TndeSkin {
     const row = (r: number) => at(im, r);
     row(3);
     const base = pf.titleStyle === 'wood' ? 4 : pf.titleStyle === 'gold' || pf.titleStyle === 'goldc' ? 5 : 6;
-    if ((pf.titleStyle === 'goldc' || pf.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(pf.titleColor)) at(this.recolored(im, base, pf.titleColor), base);
+    const rc = (pf.titleStyle === 'goldc' || pf.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(pf.titleColor) ? this.recolored(im, base, pf.titleColor) : null;
+    if (rc) c.drawImage(rc, 0, 0, 220, 54, -6, 443.5, 330, 81);
     else row(base);
     const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
     if (dan) {
@@ -1238,10 +1256,12 @@ export class TndeSkin {
     const k = Math.hypot(c.getTransform().a, c.getTransform().b) || 1;
     const W = 120;
     const H = 40;
-    const cv = document.createElement('canvas');
+    // 段位の字の下書き（1 枚を使い回す）
+    const cv = (this.danCv ??= document.createElement('canvas'));
     cv.width = Math.ceil(W * k);
     cv.height = Math.ceil(H * k);
-    const g = cv.getContext('2d')!;
+    const g = cv.getContext('2d');
+    if (!g) return;
     g.scale(k, k);
     g.font = `${size}px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     g.textAlign = 'center';
@@ -1264,6 +1284,8 @@ export class TndeSkin {
     c.drawImage(cv, cx - W / 2, 500 - H / 2, W, H);
   }
 
+  private danCv: HTMLCanvasElement | null = null;
+
   /** 色を指定した称号の帯（明るさ・光沢はそのままで色だけ変える）。色ごとに 1 枚作っておく */
   private recolorCache = new Map<string, HTMLCanvasElement>();
   private recolored(im: CanvasImageSource, r: number, hex: string) {
@@ -1272,10 +1294,11 @@ export class TndeSkin {
     if (cv) return cv;
     cv = document.createElement('canvas');
     cv.width = 220;
-    cv.height = 54 * 12;
-    const g = cv.getContext('2d', { willReadFrequently: true })!;
-    g.drawImage(im, 0, r * 54, 220, 54, 0, r * 54, 220, 54);
-    const d = g.getImageData(0, r * 54, 220, 54);
+    cv.height = 54;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.drawImage(im, 0, r * 54, 220, 54, 0, 0, 220, 54);
+    const d = g.getImageData(0, 0, 220, 54);
     const px = d.data;
     const n = parseInt(hex.slice(1), 16);
     const [th, ts, tv] = rgbToHsv((n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
@@ -1290,8 +1313,8 @@ export class TndeSkin {
       px[i + 1] = gg * 255;
       px[i + 2] = bb * 255;
     }
-    g.putImageData(d, 0, r * 54);
-    if (this.recolorCache.size > 8) this.recolorCache.clear();
+    g.putImageData(d, 0, 0);
+    if (this.recolorCache.size > 8) { for (const x of this.recolorCache.values()) x.width = x.height = 0; this.recolorCache.clear(); }
     this.recolorCache.set(key, cv);
     return cv;
   }
@@ -1555,7 +1578,8 @@ export class TndeSkin {
     const key = F.info.title;
     if (this.titleCache?.key !== key) {
       const cv = this.titleCache?.c ?? document.createElement('canvas');
-      const t = cv.getContext('2d')!;
+      const t = cv.getContext('2d');
+      if (!t) return;
       const font = `48px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
       t.font = font;
       const w = Math.ceil(t.measureText(key).width) + 24;

@@ -1002,7 +1002,8 @@ export class Renderer {
     ctx.save();
     ctx.scale(k, (REF_H / TH));
     const labels = this.labelsFor(game);
-    this.tnde!.draw(ctx, {
+    try {
+      this.tnde!.draw(ctx, {
       game, course, now, wall, info,
       adv: (t, b, n) => scrollAhead(this.scrollMode, { time: t, bpm: n.bpm, scroll: n.scroll, beat: b }, now, this.beatNow) * this.speed,
       advY: (t, b, n) => (n.scrollY ? scrollBase(this.scrollMode, { time: t, bpm: n.bpm, beat: b }, now, this.beatNow) * n.scrollY * this.speed : 0),
@@ -1015,6 +1016,10 @@ export class Renderer {
       laneOnly,
       bgMode: this.videoMode,
     });
+    } catch (e) {
+      // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）
+      console.error(e);
+    }
     ctx.restore();
     if (!laneOnly) this.drawLyric(this.vis, course, now);
     this.drawEnd(this.vis, wall);

@@ -3265,3 +3265,4 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .st-seg.five { grid-template-columns: repeat(5, 1fr); }
 
 .st-nav button span { white-space: nowrap; min-width: 0; }
+.sheet-body .st-nav button[data-sttab="prof"] span { display: inline-block; transform: scaleX(0.84); transform-origin: left center; }

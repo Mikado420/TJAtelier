@@ -446,7 +446,8 @@ export class PlayMode {
     this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
     this.resetRes();
-    await this.applySkin(info.title);
+    // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
+    await Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
