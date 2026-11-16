@@ -356,6 +356,12 @@ export class Renderer {
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
   plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
+  /** 録画用: 毎コマ、消す代わりに後ろの絵（背景・動画など）を描く */
+  underlay: ((c: CanvasRenderingContext2D) => void) | null = null;
+  /** 後ろに置く、動かない背景の canvas */
+  get background() {
+    return this.bg;
+  }
   /** 今の画面を TNDE スキンで描くか（ひとりで遊ぶふつうの画面。背景の動画があれば、その所の背景は描かない） */
   private get skinOn() {
     return !!this.tnde?.ready && !this.broadcast && !this.preview && !this.spectate && !this.opponents.length;
@@ -927,9 +933,13 @@ export class Renderer {
     }
     this.wasGogo = gogo;
 
-    // 背景は後ろの canvas に描いてあるので、手前は消すだけ
+    // 背景は後ろの canvas に描いてあるので、手前は消すだけ（録画: 後ろに重ねる絵をここに描いて、1 枚の絵にする）
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.underlay) {
+      ctx.save();
+      this.underlay(ctx);
+      ctx.restore();
+    } else ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.skinOn || this.skinLane) {
       this.drawTnde(game, course, now, wall, info, this.skinLane);
       return;

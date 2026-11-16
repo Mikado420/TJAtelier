@@ -134,6 +134,30 @@ export class Mp4Writer {
     }
   }
 
+  /** 音を sec 秒までにする（それより後のかたまりは目次から外す） */
+  trimAudio(sec: number) {
+    const t = this.a;
+    if (!t) return;
+    const max = Math.round(sec * t.timescale);
+    if (t.pcm) {
+      let acc = 0;
+      const keep: { at: number; n: number }[] = [];
+      for (const c of t.chunks) {
+        if (acc >= max) break;
+        const n = Math.min(c.n, max - acc);
+        keep.push({ at: c.at, n });
+        acc += n;
+      }
+      t.chunks = keep;
+      t.pcm = acc;
+      return;
+    }
+    let acc = 0;
+    let k = 0;
+    while (k < t.durs.length && acc < max) acc += t.durs[k++];
+    t.sizes.length = t.durs.length = t.chunks.length = k;
+  }
+
   /** 仕上げて 1 つのファイルにする */
   finish(): Blob {
     this.flush();

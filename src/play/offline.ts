@@ -11,6 +11,7 @@ import type { PlateStyle, TndeSkin } from '../render/tnde';
 import { buildAutoEvents } from './auto';
 import { BroadcastPainter, type PlayInfo } from './broadcast';
 import { Mp4Writer, aacConfig, type AudioCodec } from './mp4';
+import { VideoSource } from './vsource';
 
 export interface OfflineJob {
   course: Course;
@@ -125,6 +126,20 @@ function withClock<T>(ms: number, fn: () => T): T {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** エンコーダーの待ちが max 以下になるまで待つ */
+function drained(enc: VideoEncoder | AudioEncoder, max: number) {
+  return new Promise<void>((res) => {
+    const check = () => {
+      if (enc.encodeQueueSize > max && enc.state === 'configured') return;
+      enc.removeEventListener('dequeue', check);
+      clearInterval(t);
+      res();
+    };
+    enc.addEventListener('dequeue', check);
+    const t = setInterval(check, 4);
+  });
+}
+
 function waitEvent(el: EventTarget, ev: string, ms: number) {
   return new Promise<void>((res) => {
     const done = () => {
@@ -172,29 +187,39 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
   const acfg = await pickAudio(audio.ctx.sampleRate);
 
   // オートで最後まで叩いたときの結果（演出の絵を前もって読み込むため）
+  // 打音もここで決めておく（音は映像と並べて先に作る）
   const allAuto = buildAutoEvents(course.notes);
   const sim = new Game(course.notes, { ...course, fixed: job.fixed });
+  const hitAt: { kind: 'don' | 'ka' | 'balloon'; t: number }[] = [];
   for (const e of allAuto) {
     sim.update(e.t);
     if (e.note && !sim.active(e.note)) continue;
     sim.hit(e.kind, e.t);
+    if (job.hitOn) {
+      hitAt.push({ kind: e.kind, t: e.t });
+      if (e.pop) hitAt.push({ kind: 'balloon', t: e.t });
+    }
   }
+  sim.update(1e9);
   const kindOf = (g: Game) => {
     const st = g.stats;
     const fc = st.bad === 0 && g.totalHitNotes > 0;
     return fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
   };
   const tnde = job.view.tnde;
+  // 終わりの演出の絵は、描いている間に読み込む（演出の少し前に待つ）
+  let endP: Promise<unknown> | null = null;
   if (tnde) {
     await tnde.prepare(info.title);
-    sim.update(1e9);
-    await Promise.race([tnde.loadEnd(kindOf(sim)), sleep(15000)]);
+    endP = Promise.race([tnde.loadEnd(kindOf(sim)), sleep(15000)]);
   }
 
   const S = getStage(W, H);
   const R = S.R;
   let painter: BroadcastPainter | null = null;
   let video: HTMLVideoElement | null = null;
+  let vsrc: VideoSource | null = null;
+  let vimg: VideoFrame | null = null;
   let bgImg: HTMLImageElement | null = null;
   const ve = new VideoEncoder({
     output: (chunk, meta) => {
@@ -227,7 +252,11 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     R.movie = !!vmode;
     R.videoMode = vmode || (img ? 'full' : '');
     R.resize();
-    if (vmode && job.video) video = await openVideo(job.video.url);
+    // 背景の動画: 頭から順にデコードする（できない形式は video 要素で 1 コマずつ位置を合わせる）
+    if (vmode && job.video) {
+      vsrc = await VideoSource.open(job.video.url);
+      if (!vsrc) video = await openVideo(job.video.url);
+    }
     if (img && job.bgImage) {
       bgImg = new Image();
       bgImg.src = job.bgImage;
@@ -238,10 +267,6 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       await painter.prepare(course, info, audio.buffer, audio.musicDuration, !!vmode || img, R.frame.s);
     }
 
-    const out = document.createElement('canvas');
-    out.width = W;
-    out.height = H;
-    const g = out.getContext('2d', { alpha: false })!;
 
     // プレイと同じ時刻の決め方
     const first = (course.notes[0]?.time ?? 0) - 1;
@@ -262,8 +287,16 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     const W0 = 1_000_000;
     withClock(W0 - 1, () => R.reset());
 
-    const hits: { kind: 'don' | 'ka' | 'balloon'; at: number }[] = [];
+    // 音: 映像を描いている間に、別の所で混ぜて AAC にしておく
+    const hits = hitAt.map((h) => ({ kind: h.kind, at: h.t - t0 }));
     const ui: { name: string; at: number }[] = [];
+    let iFx = 0;
+    while (!(t0 + iFx / FPS > fxAt)) iFx++;
+    const endKind = kindOf(sim);
+    if (R.skinEnd(endKind)) ui.push({ name: `tnde:${endKind}`, at: iFx / FPS });
+    const mixLen = guess + 2;
+    const audP = audio.renderMix({ length: mixLen, rate: acfg.rate, musicAt: -t0, hits, ui }).then((mix) => encodeAudio(mix, acfg, mux, job));
+    audP.catch(() => {});
     let ai = 0;
     let side: 'L' | 'R' = 'L';
     let endWall = 0;
@@ -282,7 +315,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       r = { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
       return r;
     };
-    const cover = (src: CanvasImageSource, sw: number, sh: number, r: { x: number; y: number; w: number; h: number }) => {
+    const cover = (g: CanvasRenderingContext2D, src: CanvasImageSource, sw: number, sh: number, r: { x: number; y: number; w: number; h: number }) => {
       if (!sw || !sh) return;
       const k = Math.max(r.w / sw, r.h / sh);
       const w = sw * k;
@@ -294,7 +327,51 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       g.drawImage(src, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h);
       g.restore();
     };
-    const layers = [...S.box.querySelectorAll('canvas')];
+    // 後ろの絵（黒 → 背景の動画・画像と暗くする幕 → 背景 → 動画用の画面）は、ゲームの canvas に毎コマ先に描く。
+    // 重ね直す canvas を作らずに、ゲームの canvas をそのまま動画のコマにする
+    let nowCur = t0;
+    const moving = !!video || !!vsrc;
+    const black = !moving && !bgImg && !!tnde && !R.broadcast;
+    let under: HTMLCanvasElement | null = null;
+    const makeUnder = () => {
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const g = c.getContext('2d', { alpha: false })!;
+      g.fillStyle = '#000';
+      g.fillRect(0, 0, W, H);
+      if (bgImg?.naturalWidth) {
+        cover(g, bgImg, bgImg.naturalWidth, bgImg.naturalHeight, { x: 0, y: 0, w: W, h: H });
+        g.fillStyle = `rgba(0,0,0,${dimA})`;
+        g.fillRect(0, 0, W, H);
+      }
+      const bg = R.background;
+      if (bg?.width) g.drawImage(bg, 0, 0, W, H);
+      return c;
+    };
+    R.underlay = (g) => {
+      if (black) {
+        g.fillStyle = '#000';
+        g.fillRect(0, 0, W, H);
+      } else if (moving) {
+        g.fillStyle = '#000';
+        g.fillRect(0, 0, W, H);
+        const r = vRect();
+        if (vimg) cover(g, vimg, vimg.displayWidth, vimg.displayHeight, r);
+        else if (video) cover(g, video, video.videoWidth, video.videoHeight, r);
+        g.fillStyle = `rgba(0,0,0,${dimA})`;
+        g.fillRect(r.x, r.y, r.w, r.h);
+        const bg = R.background;
+        if (bg?.width) g.drawImage(bg, 0, 0, W, H);
+      } else {
+        under ??= makeUnder();
+        g.globalCompositeOperation = 'copy';
+        g.drawImage(under, 0, 0);
+        g.globalCompositeOperation = 'source-over';
+      }
+      painter?.draw(g, R.frame, nowCur);
+    };
+    let yieldAt = performance.now();
 
     for (let i = 0; ; i++) {
       if (job.cancelled()) throw new RecordCancelled();
@@ -302,9 +379,15 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       const now = t0 + i / FPS;
       const wall = W0 + (i * 1000) / FPS;
       // 背景の動画（位置を合わせてから）
-      if (video && job.video) await seekVideo(video, now + job.video.offset);
+      if (vsrc && job.video) vimg = await vsrc.frameAt(now + job.video.offset);
+      else if (video && job.video) await seekVideo(video, now + job.video.offset);
+      if (endP && i + FPS >= iFx) {
+        await endP;
+        endP = null;
+      }
+      nowCur = now;
       const done = withClock(wall, () => {
-        // オート: 時刻になった打撃を判定に渡す（打音は録画の音に入れる）
+        // オート: 時刻になった打撃を判定に渡す
         while (ai < allAuto.length && allAuto[ai].t <= now) {
           const e = allAuto[ai++];
           game.update(e.t);
@@ -312,10 +395,6 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
           side = side === 'L' ? 'R' : 'L';
           R.pushHit(e.kind, side);
           game.hit(e.kind, e.t);
-          if (job.hitOn) {
-            hits.push({ kind: e.kind, at: e.t - t0 });
-            if (e.pop) hits.push({ kind: 'balloon', at: e.t - t0 });
-          }
         }
         game.update(now);
         R.draw(game, course, now, info);
@@ -323,35 +402,18 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
           endWall = wall;
           const kind = kindOf(game);
           endHold = R.showEnd(kind, tailEnd > 0);
-          if (R.skinEnd(kind)) ui.push({ name: `tnde:${kind}`, at: now - t0 });
         }
         return endWall ? wall - endWall > endHold && now > tailEnd + 1 : now > endAt && now > fxAt;
       });
-      // 重ねる: 黒 → 背景の動画・画像（暗くする幕）→ 背景 → 動画用の画面 → ゲーム
-      g.fillStyle = '#000';
-      g.fillRect(0, 0, W, H);
-      if (video) {
-        const r = vRect();
-        cover(video, video.videoWidth, video.videoHeight, r);
-        g.fillStyle = `rgba(0,0,0,${dimA})`;
-        g.fillRect(r.x, r.y, r.w, r.h);
-      } else if (bgImg?.naturalWidth) {
-        cover(bgImg, bgImg.naturalWidth, bgImg.naturalHeight, { x: 0, y: 0, w: W, h: H });
-        g.fillStyle = `rgba(0,0,0,${dimA})`;
-        g.fillRect(0, 0, W, H);
-      }
-      layers.forEach((c, k) => {
-        if (k === layers.length - 1 && painter) painter.draw(g, R.frame, now);
-        if (c.width && c.height) g.drawImage(c, 0, 0, W, H);
-      });
-      const vf = new VideoFrame(out, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
+      const vf = new VideoFrame(S.cv, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
       ve.encode(vf, { keyFrame: i % (FPS * 2) === 0 });
       vf.close();
-      // 詰まらないように待つ（画面も時々描き直せるように）
-      while (ve.encodeQueueSize > 6) await sleep(2);
-      if (i % 6 === 0) {
-        job.onProgress(Math.min(0.97, (i / FPS / guess) * 0.92));
+      // エンコーダーが詰まったら少し待つ。進み具合の画面は 0.1 秒ごとに描き直す
+      if (ve.encodeQueueSize > 8) await drained(ve, 4);
+      if (performance.now() - yieldAt > 100) {
+        job.onProgress(Math.min(0.98, i / FPS / guess));
         await sleep(0);
+        yieldAt = performance.now();
       }
       if (done) break;
     }
@@ -360,19 +422,18 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     const frames = mux.videoFrames;
     const length = frames / FPS;
 
-    // 音
-    job.onProgress(0.93);
-    const mix = await audio.renderMix({ length, rate: acfg.rate, musicAt: -t0, hits, ui });
-    if (job.cancelled()) throw new RecordCancelled();
-    job.onProgress(0.95);
-    await encodeAudio(mix, acfg, mux, job);
+    // 音（映像より長く作ったぶんは切る）
+    await audP;
+    mux.trimAudio(length);
     job.onProgress(1);
     const blob = mux.finish();
     mux = null as unknown as Mp4Writer;
     return { blob, ext: blob.type === 'video/quicktime' ? 'mov' : 'mp4', audio: acfg.kind };
   } finally {
+    R.underlay = null;
     if (ve.state !== 'closed') ve.close();
     painter?.dispose();
+    vsrc?.close();
     if (video) {
       video.removeAttribute('src');
       video.load();
@@ -425,7 +486,7 @@ async function encodeAudio(mix: AudioBuffer, a: { kind: AudioCodec['kind']; rate
       const ad = new AudioData({ format: 'f32-planar', sampleRate: a.rate, numberOfFrames: m, numberOfChannels: 2, timestamp: Math.round((o / a.rate) * 1e6), data });
       ae.encode(ad);
       ad.close();
-      while (ae.encodeQueueSize > 16) await sleep(1);
+      if (ae.encodeQueueSize > 16) await drained(ae, 8);
     }
     await ae.flush();
     if (err) throw err;

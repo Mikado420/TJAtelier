@@ -479,7 +479,7 @@ export class PlayMode {
     this.perf = { frames: 0, work: 0, workMax: 0, gapMax: 0, slow: 0, last: 0 };
     // 終わりの帯は、音源と譜面がどちらも終わってから
     // TNDE スキン: 本家と同じく、最後の音符を叩き終えたらすぐ演出を出す
-    const fxAt = this.calibrating ? lastTime + 0.4 : this.settings.skin === 'tnde' ? Math.min(this.endFxTime(lastTime, course.endTime), lastTime + 0.5) : this.endFxTime(lastTime, course.endTime);
+    const fxAt = this.calibrating ? lastTime + 0.4 : this.endFxTime(lastTime, course.endTime);
     this.cur = { course, info, endAt, clicks: clicks ?? [], fxAt, tailEnd };
     this.endWall = 0;
     this.timeFloor = -Infinity;
@@ -496,16 +496,14 @@ export class PlayMode {
   } | null = null;
 
   /**
-   * クリア・フルコンボなどの帯を出す時刻。
-   * - 音源が無い: 最後の音符の少し後
-   * - 音源が鳴り終わった（後ろが無音）: 鳴り終わり（と最後の音符の遅いほう）の 2 秒後
-   * - 最後の音符の後も音源が鳴り続ける: 最後の音符の 10 秒後（鳴り終わりのほうが早ければそちら）
+   * クリア・フルコンボなどの演出を出す時刻（そのあと結果へ）。
+   * - 音源がある: 音源が終わった 1 秒後か、最後の音符の 8 秒後の早いほう
+   * - 音源が無い: 最後の音符の 1 秒後
    * - #END の後ろに音符がある: #END の時刻（その音符は演出の後に流れてくる）
    */
   private endFxTime(lastNote: number, endTime?: number) {
-    const buf = this.audio.buffer;
-    let t = lastNote + 0.4;
-    if (buf && this.audio.musicDuration > 0) t = Math.min(Math.max(audibleEnd(buf), lastNote) + 2, lastNote + 10);
+    const music = this.audio.musicDuration;
+    let t = music > 0 ? Math.max(lastNote + 0.4, Math.min(music + 1, lastNote + 8)) : lastNote + 1;
     // #END の後ろに音符がある: #END の所で出す（その後ろの音符は、演出の後に流れてくる）
     if (endTime !== undefined) t = Math.max(lastNote + 0.4, Math.min(t, endTime));
     return t;
@@ -684,7 +682,7 @@ export class PlayMode {
       },
       fixed: fix,
       hitOn: this.hitOn,
-      fxAt: (last) => (tnde ? Math.min(this.endFxTime(last, course.endTime), last + 0.5) : this.endFxTime(last, course.endTime)),
+      fxAt: (last) => this.endFxTime(last, course.endTime),
       video: this.videoUrl ? { url: this.videoUrl, offset: this.videoOffset } : null,
       bgImage: this.bgImgUrl || null,
       dim: this.settings.videoDim ?? 0.5,
@@ -1503,18 +1501,3 @@ export class PlayMode {
   }
 }
 
-/** 音源の、聞こえる音が鳴り終わる時刻（秒。後ろの無音を除く）。曲ごとに一度だけ測る */
-const audibleCache = new WeakMap<AudioBuffer, number>();
-function audibleEnd(buf: AudioBuffer): number {
-  const c = audibleCache.get(buf);
-  if (c !== undefined) return c;
-  const TH = 0.003; // およそ -50dB
-  const chs = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
-  let end = 0;
-  const step = Math.max(1, Math.floor(buf.sampleRate / 2000));
-  for (let i = buf.length - 1; i >= 0; i -= step) {
-    if (chs.some((d) => Math.abs(d[i]) > TH)) { end = i / buf.sampleRate; break; }
-  }
-  audibleCache.set(buf, end);
-  return end;
-}
