@@ -727,14 +727,10 @@ function menuTiles(tab: MenuTab): Tile[] {
     return [
       { head: '読み込み' },
       { label: '読み込む', icon: 'open', primary: true, run: () => void fileAction('open') },
-      { label: '音源', icon: 'audio', run: () => void fileAction('audio') },
       { label: '切り貼り', icon: 'cut', run: () => void fileAction('cut') },
-      { label: '新規', icon: 'new', run: () => void fileAction('new') },
-      { label: 'サンプル', icon: 'sample', run: () => void fileAction('sample') },
       { head: '書き出し' },
       { label: '.tja 保存', icon: 'save', run: () => void fileAction('saveTja') },
       { label: '.zip 保存', icon: 'zip', run: () => void fileAction('saveZip') },
-      { label: 'コピー', icon: 'copy', run: () => void fileAction('copy') },
     ];
   }
   return [
@@ -2246,6 +2242,24 @@ async function importFiles(files: File[], mode: 'any' | 'audio') {
   busy('譜面を読んでいます…');
   const r = await loadFiles(files);
   const folder = home.visible ? home.currentFolder : '';
+  // エディタで読み込んだのが音源だけ・TJA だけなら、今の曲のそれだけを置き換える
+  if ((currentSongId || collab.active) && !home.visible && mode === 'any') {
+    if (!r.songs.length && r.audios.length === 1) {
+      if (!collab.canChangeAudio()) { busyEnd(); return; }
+      mode = 'audio';
+    } else if (r.songs.length === 1 && !r.audios.length && !r.songs[0].audio && !r.songs[0].video && !r.songs[0].jacket && !r.songs[0].bgImage) {
+      busyEnd();
+      const chart = r.songs[0].chart;
+      if (!chart.courses.length) { toast('#START〜#END が見つかりません'); return; }
+      // 音源はそのまま（TJA に WAVE: が無ければ今の音源の名前）
+      if (!chart.wave) chart.wave = ed.chart.wave;
+      stopPlayback();
+      ed.replaceChart(chart);
+      closeSheet();
+      toast(`譜面を「${chart.title || '（無題）'}」に置き換えました`);
+      return;
+    }
+  }
   // mp4 だけの曲があれば、音だけにするか動画も使うかを先に聞く
   let mp4Mode: 'audio' | 'video' | null = null;
   if (r.songs.some((x) => x.video?.fromAudio) || r.audios.some((x) => isVideoName(x.name))) {
