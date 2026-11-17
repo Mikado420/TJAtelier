@@ -88,8 +88,8 @@ function waitAck(key: string, ms: number) {
  * 大きいファイル（録画した動画など）を、少しずつ読みながら送る。アプリは届いた所から順にファイルへ書き足す。
  * どちらも全部をメモリにためないので、大きくても落ちない
  */
-async function streamSave(host: RN, blob: Blob, name: string, mime: string, stage?: { id: string; stop: () => boolean }): Promise<'ok' | 'old'> {
-  const id = stage?.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+async function streamSave(host: RN, blob: Blob, name: string, mime: string): Promise<'ok' | 'old'> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const total = Math.max(1, Math.ceil(blob.size / PART));
   const started = waitAck(`${id}:-1`, 8000);
   host.postMessage(JSON.stringify({ type: 'fileStart', id, name, mime, size: blob.size, total }));
@@ -100,43 +100,13 @@ async function streamSave(host: RN, blob: Blob, name: string, mime: string, stag
     if (pending.length >= AHEAD) {
       if (!(await pending.shift()!)) throw new Error('アプリが受け取れませんでした');
     }
-    if (stage?.stop()) throw new Error('stopped');
     const bytes = new Uint8Array(await blob.slice(i * PART, Math.min(blob.size, (i + 1) * PART)).arrayBuffer());
     pending.push(waitAck(`${id}:${i}`, 60000));
     host.postMessage(JSON.stringify({ type: 'filePart', id, part: i, data: toBase64(bytes) }));
   }
   for (const p of pending) if (!(await p)) throw new Error('アプリが受け取れませんでした');
   const ended = waitAck(`${id}:end`, 30000);
-  host.postMessage(JSON.stringify({ type: 'fileEnd', id, mime, defer: !!stage }));
+  host.postMessage(JSON.stringify({ type: 'fileEnd', id, mime }));
   if (!(await ended)) throw new Error('アプリが受け取れませんでした');
   return 'ok';
-}
-
-/**
- * 先にアプリへ渡しておく（v12 から）。共有シートは開かず、nativeShow で開く。
- * 録画した動画は大きいので、結果画面を見ている間に渡しておき、「動画を保存」ですぐ開けるようにする
- */
-export function nativeStage(blob: Blob, name: string, mime = blob.type || 'application/octet-stream') {
-  const host = rn();
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  let stopped = false;
-  const done: Promise<boolean> =
-    host && nativeAppVersion() >= 12
-      ? streamSave(host, blob, name, mime, { id, stop: () => stopped }).then((r) => r === 'ok', () => false)
-      : Promise.resolve(false);
-  return {
-    done,
-    /** 共有シートを開く（開けたら true） */
-    async show() {
-      if (!host || !(await done)) return false;
-      const ok = waitAck(`${id}:show`, 8000);
-      host.postMessage(JSON.stringify({ type: 'fileShow', id }));
-      return ok;
-    },
-    /** 渡すのをやめて、アプリの中の写しも消す */
-    drop() {
-      stopped = true;
-      host?.postMessage(JSON.stringify({ type: 'fileDrop', id }));
-    },
-  };
 }

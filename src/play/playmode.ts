@@ -3,9 +3,7 @@ import type { Course } from '../chart/types';
 import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
-import { LiveRecorder } from './liverec';
 import { GlBlur } from './glblur';
-import { BroadcastPainter } from './broadcast';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
@@ -92,11 +90,6 @@ export interface PlaySettings {
   videoDimBottom?: number;
   /** 下に出す動画の縁取りの色 */
   videoFrame?: 'white' | 'black';
-  /** 遊びながら録画する（終わったら結果画面で保存できる） */
-  recOn?: boolean;
-  /** 録画の画質（縦の大きさ）と 1 秒のコマ数 */
-  recRes?: 1080 | 720;
-  recFps?: 60 | 30;
   /** 動画用の画面（レーンを下に、上に曲の情報・ジャケット） */
   broadcast?: boolean;
   /** 譜面分岐: 自動・普通・玄人・達人に固定 */
@@ -178,7 +171,6 @@ export class PlayMode {
         if (pt) this.renderer.pushTouch(kind, pt.x, pt.y);
         // 叩いた瞬間の時刻で判定（処理が遅れてもずれない）
         const hitT = this.time(at);
-        if (this.hitOn) this.rec?.hit(kind, hitT);
         this.pushTap(kind, side, hitT);
         const r = this.game.hit(kind, hitT, pt?.ring);
         if (this.settings.showTiming) {
@@ -237,7 +229,6 @@ export class PlayMode {
    * 途中から入っても、その時刻の位置から流れる
    */
   async startOnline(course: Course, info: PlayInfo, zeroPerf: number, hooks: OnlineHooks) {
-    this.dropRecording();
     this.online = hooks;
     this.outbox = [];
     this.tapbox = [];
@@ -348,7 +339,6 @@ export class PlayMode {
 
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
-    this.dropRecording();
     this.stopVideo();
     this.bc.hide();
     this.root.classList.add('hidden');
@@ -440,7 +430,6 @@ export class PlayMode {
   async start(course: Course, fromTime: number, info: PlayInfo, clicks?: number[]) {
     this.lastArgs = [course, fromTime, info, clicks];
     if (!clicks) this.calibrating = false;
-    this.dropRecording();
     this.hidePause();
     // fromTime が 0 以下なら曲の最初から（最初の音符が 1 秒より前なら、その 1 秒前から）
     const first = (course.notes[0]?.time ?? 0) - 1;
@@ -488,7 +477,6 @@ export class PlayMode {
     this.resetRes();
     // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
     await Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
-    await this.prepareRec(course, info);
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
@@ -605,7 +593,6 @@ export class PlayMode {
         this.canvasEl.style.visibility = '';
       }
       if (this.renderer.broadcast) this.bc.update(now);
-      if (this.rec) this.recFrame(now);
       const w = performance.now() - t0;
       P.frames++;
       P.work += w;
@@ -618,12 +605,7 @@ export class PlayMode {
         const kind = fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
         this.endHold = this.renderer.showEnd(kind, (this.cur?.tailEnd ?? 0) > 0);
         // TNDE スキン: 「クリア成功！」「フルコンボだドン！」などの声
-        if (this.renderer.skinEnd(kind)) {
-          this.audio.playUi(`tnde:${kind}`);
-          this.rec?.sound(`tnde:${kind}`, now);
-        }
-        // 録画: 演出を見せている間に、音を先に作っておく（録り終えたらすぐ保存できるように）
-        this.rec?.prepareAudio(this.audio, Math.max(now + this.endHold / 1000, (this.cur?.tailEnd ?? 0) + 1) + 1.5);
+        if (this.renderer.skinEnd(kind)) this.audio.playUi(`tnde:${kind}`);
       }
       // 帯を出したら、曲が終わっても帯を見せきってから結果へ
       // 演出を出す前に曲が終わっても、演出を見せてから結果へ（演出の時刻より前には終えない）
@@ -698,180 +680,6 @@ export class PlayMode {
     if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});
   }
 
-  // ---------- 録画（遊びながら） ----------
-
-  /** 録画中の係（録っていなければ null） */
-  private rec: LiveRecorder | null = null;
-  /** 動画用の画面の、レーン以外の部分を録画に描く係 */
-  private recPainter: BroadcastPainter | null = null;
-  /** 最後まで遊んで録り終えた動画（結果画面で保存する。作っている途中のこともある） */
-  private recFile: Promise<{ blob: Blob; ext: string } | null> | null = null;
-
-  /** 録り終えた動画（無ければ null） */
-  get recording() {
-    return this.recFile;
-  }
-  /** 録り終えた動画ができ始めたとき・捨てたとき（null） */
-  onRecording: (p: Promise<{ blob: Blob; ext: string } | null> | null) => void = () => {};
-
-  /** 録画がオンなら、録画の係を用意する（プレイの絵の細かさも録画に合わせる） */
-  private async prepareRec(course: Course, info: PlayInfo) {
-    this.renderer.minFrameH = 0;
-    if (!this.settings.recOn || this.calibrating || this.online) return;
-    const rec = await LiveRecorder.create(this.settings.recRes ?? 1080, this.settings.recFps ?? 60, this.audio.ctx.sampleRate).catch(() => null);
-    if (!rec) {
-      this.onError('この端末では録画できません');
-      return;
-    }
-    this.rec = rec;
-    this.renderer.minFrameH = rec.H;
-    if (this.renderer.broadcast) {
-      const p = new BroadcastPainter();
-      const backdrop = !!this.videoMode || !!this.bgImgUrl;
-      try {
-        await p.prepare(course, info, this.audio.buffer, this.audio.musicDuration, backdrop, Math.min(rec.W / 2000, rec.H / 1125));
-        this.recPainter = p;
-      } catch {
-        p.dispose();
-      }
-    }
-  }
-
-  /** 今のコマを録る（録れなくなったら、録画だけやめてプレイは続ける） */
-  private recFrame(now: number) {
-    const rec = this.rec;
-    if (!rec) return;
-    try {
-      rec.frame(now, (g, W, H) => this.paintRec(g, W, H, now));
-    } catch (e) {
-      rec.fail(String((e as Error)?.message ?? e));
-    }
-    if (rec.failed) {
-      this.onError(`録画をやめました（${rec.failed}）`);
-      this.endRec();
-      rec.discard();
-    }
-  }
-
-  /** 録画の係を外す（録ったものはそのまま） */
-  private endRec() {
-    if (this.recUnder) this.recUnder.width = this.recUnder.height = 0;
-    this.recUnder = null;
-    this.recUnderKey = '';
-    this.rec = null;
-    this.renderer.minFrameH = 0;
-    this.recPainter?.dispose();
-    this.recPainter = null;
-  }
-
-  /** 録画をやめて、録ったものも捨てる */
-  dropRecording() {
-    const rec = this.rec;
-    this.endRec();
-    rec?.discard();
-    if (this.recFile) this.onRecording(null);
-    this.recFile = null;
-    this.result.querySelector('#saveVideo')?.classList.add('hidden');
-  }
-
-  /** 録画のコマ: 画面と同じ重なり（黒 → 背景の動画・画像と暗くする幕 → 背景 → 動画用の画面 → ゲーム）を、16:9 の枠で切り抜いて描く */
-  /** 録画の後ろの絵（背景の動画・画像・暗くする幕・背景）。動画のコマが変わったときだけ描き直す */
-  private recUnder: HTMLCanvasElement | null = null;
-  private recUnderKey = '';
-
-  private paintRec(g: CanvasRenderingContext2D, W: number, H: number, now: number) {
-    const R = this.renderer;
-    const cv = this.canvasEl;
-    const cr = cv.getBoundingClientRect();
-    const F = R.frame;
-    const k = W / Math.max(1, R.frameSize.w);
-    const ox = cr.left + F.x;
-    const oy = cr.top + F.y;
-    const v = this.video;
-    const shown = (el: HTMLElement | null): el is HTMLElement => !!el && el.isConnected && !el.classList.contains('hidden');
-    const moving = !!this.videoMode && shown(v);
-    const key = [W, H, cr.left, cr.top, cr.width, cr.height, F.x, F.y, F.s, this.videoMode, moving ? (this.vFrame ? this.vFrame.media : v!.currentTime) : '', v?.readyState ?? 0,
-      this.dimOf(false), this.dimOf(true), this.settings.videoFrame, R.bgBlank, shown(this.bgImg), this.bgImg?.naturalWidth ?? 0, R.background?.width ?? 0, this.blurKey].join('|');
-    let u = this.recUnder;
-    if (!u || u.width !== W || u.height !== H || key !== this.recUnderKey) {
-      u ??= this.recUnder = document.createElement('canvas');
-      if (u.width !== W || u.height !== H) {
-        u.width = W;
-        u.height = H;
-      }
-      this.recUnderKey = key;
-      const ug = u.getContext('2d', { alpha: false });
-      if (ug) this.paintRecUnder(ug, W, H, ox, oy, k);
-    }
-    g.globalCompositeOperation = 'copy';
-    g.drawImage(u, 0, 0);
-    g.globalCompositeOperation = 'source-over';
-    this.recPainter?.draw(g, { x: 0, y: 0, s: Math.min(W / 2000, H / 1125) }, now);
-    g.drawImage(cv, (cr.left - ox) * k, (cr.top - oy) * k, cr.width * k, cr.height * k);
-  }
-
-  /** 録画の後ろの絵: 黒 → 全面+下のぼかした動画 → 背景の動画と暗くする幕・縁取り → 背景の画像 → 背景 */
-  private paintRecUnder(g: CanvasRenderingContext2D, W: number, H: number, ox: number, oy: number, k: number) {
-    const R = this.renderer;
-    const place = (el: Element) => {
-      const r = el.getBoundingClientRect();
-      return { x: (r.left - ox) * k, y: (r.top - oy) * k, w: r.width * k, h: r.height * k };
-    };
-    const shown = (el: HTMLElement | null): el is HTMLElement => !!el && el.isConnected && !el.classList.contains('hidden');
-    const cover = (src: CanvasImageSource, sw: number, sh: number, r: { x: number; y: number; w: number; h: number }) => {
-      if (!sw || !sh || r.w <= 0 || r.h <= 0) return;
-      const kk = Math.max(r.w / sw, r.h / sh);
-      g.save();
-      g.beginPath();
-      g.rect(r.x, r.y, r.w, r.h);
-      g.clip();
-      g.drawImage(src, r.x + (r.w - sw * kk) / 2, r.y + (r.h - sh * kk) / 2, sw * kk, sh * kk);
-      g.restore();
-    };
-    const shade = (el: HTMLElement) => {
-      const a = parseFloat(el.style.opacity || getComputedStyle(el).opacity) || 0;
-      if (a <= 0) return;
-      const r = place(el);
-      g.fillStyle = `rgba(0,0,0,${a})`;
-      g.fillRect(r.x, r.y, r.w, r.h);
-    };
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, W, H);
-    // 全面+下のぼかした動画（もうぼかしてあるので、そのまま広げて描く）
-    const bl = this.vblur;
-    const bc = this.vblurCv;
-    if (shown(bl) && bc?.width) {
-      const r = place(bl);
-      g.drawImage(bc, r.x, r.y, r.w, r.h);
-    }
-    const v = this.video;
-    if (this.videoMode && shown(v)) {
-      const vr = place(v);
-      if (v.readyState >= 2) cover(v, v.videoWidth, v.videoHeight, vr);
-      if (shown(this.vdim)) shade(this.vdim);
-      // 下に出す動画の縁取り（画面と同じく、枠の外側に）
-      if (v.style.boxShadow) {
-        const lw = this.frameLine() * k;
-        g.fillStyle = this.settings.videoFrame === 'black' ? '#000' : '#fff';
-        g.fillRect(vr.x - lw, vr.y - lw, vr.w + lw * 2, lw);
-        g.fillRect(vr.x - lw, vr.y + vr.h, vr.w + lw * 2, lw);
-        g.fillRect(vr.x - lw, vr.y, lw, vr.h);
-        g.fillRect(vr.x + vr.w, vr.y, lw, vr.h);
-      }
-    }
-    const im = this.bgImg;
-    if (shown(im) && im.naturalWidth) {
-      cover(im, im.naturalWidth, im.naturalHeight, place(im));
-      if (shown(this.bgDim)) shade(this.bgDim);
-    }
-    const bg = R.background;
-    if (bg?.width && bg.isConnected && !R.bgBlank) {
-      const r = place(bg);
-      g.drawImage(bg, r.x, r.y, r.w, r.h);
-    }
-  }
-
   private applySkin(title?: string) {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
@@ -930,7 +738,7 @@ export class PlayMode {
     this.res = { at: 0, frames: 0, slow: 0, last: 0, gaps: [] };
   }
   private watchRes(t: number) {
-    if (this.settings.autoRes === false || this.renderer.dprCap <= 2 || this.rec) return;
+    if (this.settings.autoRes === false || this.renderer.dprCap <= 2) return;
     const R = this.res;
     if (R.last) {
       const gap = t - R.last;
@@ -1473,11 +1281,7 @@ export class PlayMode {
       if (!on || e.t < now - 0.05) continue;
       if (e.note && g && !g.active(e.note)) continue;
       this.audio.scheduleHit(e.kind, e.t, this.ownPan);
-      this.rec?.hit(e.kind, e.t);
-      if (e.pop) {
-        this.audio.scheduleHit('balloon', e.t, this.ownPan);
-        this.rec?.hit('balloon', e.t);
-      }
+      if (e.pop) this.audio.scheduleHit('balloon', e.t, this.ownPan);
     }
   }
 
@@ -1505,20 +1309,6 @@ export class PlayMode {
     this.nativeOn = false;
     postNative({ type: 'hitgeo', on: false });
     cancelAnimationFrame(this.raf);
-    const rec = this.rec;
-    this.endRec();
-    // 録画: 最後まで遊んだら、音を入れてファイルにする（結果画面の「動画を保存」で保存する）
-    if (rec && !this.online && !this.calibrating) {
-      this.recFile = rec.end(this.audio).catch(
-        (e) => {
-          this.onError(`録画できませんでした（${(e as Error)?.message ?? e}）`);
-          this.result.querySelector('#saveVideo')?.classList.add('hidden');
-          return null;
-        },
-      );
-      this.onRecording(this.recFile);
-    } else rec?.discard();
-    this.result.querySelector('#saveVideo')?.classList.toggle('hidden', !this.recFile);
     this.audio.stop();
     const g = this.game;
     if (!g) return;
@@ -1819,7 +1609,6 @@ export class PlayMode {
     // 途中でやめたときは結果も記録も出さずに止める（最後まで遊んだときは finish 済み）
     if (this.active && !this.online) this.stopQuietly();
     else this.finish();
-    this.dropRecording();
     this.root.classList.add('hidden');
     document.body.classList.remove('playing');
     this.result.classList.add('hidden');

@@ -26,10 +26,6 @@ export interface HomeHost {
   online(): void;
   /** 譜面情報を出す */
   analyze(id: string, course?: string): void;
-  /** 遊びながら録画するか */
-  recording(): boolean;
-  /** 録画の設定を開く */
-  recSettings(): void;
   toast(msg: string): void;
   /** 試聴を鳴らす音の仕組み */
   audio: AudioEngine;
@@ -142,7 +138,6 @@ function bestMap(): Record<string, { score: number; crown: Crown }> {
 /** 背景の動画がある曲の印 */
 const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>';
 const ICON_INFO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>';
-const ICON_REC = '<svg class="ic-rec" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>';
 const VIDEO_ICON = '<svg class="hr-vid" viewBox="0 0 24 24" role="img" aria-label="動画あり"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>';
 
 const ICON = {
@@ -747,7 +742,6 @@ export class Home {
           <div class="hdf-side">
             <button data-df="back" aria-label="曲えらびにもどる"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
             <button data-df="opt" aria-label="設定"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
-            <button data-df="rec" class="hdf-rec ${this.host.recording() ? 'on' : ''}" aria-label="録画">${ICON_REC}</button>
             <button data-df="edit" class="hdf-narrow" aria-label="エディタ">${ICON_EDIT}</button>
             <button data-df="info" class="hdf-narrow" aria-label="譜面情報">${ICON_INFO}</button>
           </div>
@@ -765,11 +759,6 @@ export class Home {
   }
 
   /** BPM・長さ（2 段）の数字が欄の幅に収まらなければ、文字を小さくする（画面に出てから測る） */
-  /** 録画ボタンの見た目を、録画のオン・オフに合わせる */
-  syncRec() {
-    for (const b of this.el.querySelectorAll<HTMLElement>('[data-df="rec"]')) b.classList.toggle('on', this.host.recording());
-  }
-
   private fitDiffStats() {
     requestAnimationFrame(() => {
       const st = document.querySelector<HTMLElement>('#homeDiff .hdf-st');
@@ -873,7 +862,6 @@ export class Home {
     else if (a === 'opt') this.host.settings();
     else if (a === 'edit' && this.diffSong) { const id = this.diffSong.id; const c = this.diffCourse || undefined; this.closeDiff(); this.stopPreview(); void this.host.open(id, 'edit', c); }
     else if (a === 'info' && this.diffSong) this.host.analyze(this.diffSong.id, this.diffCourse || undefined);
-    else if (a === 'rec') this.host.recSettings();
     else if (a === 'sp-' || a === 'sp+') {
       const v = Math.round((o.speed + (a === 'sp+' ? 0.1 : -0.1)) * 10) / 10;
       this.host.setPlayOpt('speed', Math.max(0.1, Math.min(10, v)));

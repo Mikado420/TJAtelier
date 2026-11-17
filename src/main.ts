@@ -3,7 +3,7 @@ import { audioKey, loadDrums, saveDrums } from './audio/drumCache';
 import { mountGridBg } from './ui/gridBg';
 import { OnlineScreen } from './online/online';
 import { loadBest, saveBest } from './home/home';
-import { canNativeSave, nativeAppVersion, nativeSave, nativeStage, onNativeSaveError } from './io/nativeSave';
+import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
 import { branchPath, COURSE_NAMES, contentEnd, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
@@ -89,10 +89,6 @@ const settings = {
   restZone: IS_IOS,
   passiveTouch: false,
   pauseButton: true,
-  /** 遊びながら録画する・録画の画質（縦の大きさ）・1 秒のコマ数 */
-  recOn: false,
-  recRes: 1080 as 1080 | 720,
-  recFps: 60 as 60 | 30,
   /** 動画用の画面 */
   broadcast: false,
   /** プレイ中に左上へ FPS を出す */
@@ -294,7 +290,6 @@ document.addEventListener('pointerdown', (e) => {
   audio.playUi('tap');
 }, true);
 const play = new PlayMode($('play'), $<HTMLCanvasElement>('game'), $('result'), audio, settings);
-// 自動録画の動画は、曲が終わったら共有シートで保存する
 // スキンの絵は、最初の画面が出たあとに裏で読み込み始める（最初の曲を早く始められるように）
 setTimeout(() => play.preloadSkin(), 1500);
 // プレイ画面などの文字（マキナス 4 Flat。もじワク研究）。canvas に描くので、起動したらすぐ読み込む。
@@ -1506,7 +1501,7 @@ function toggleBigAtPos() {
 
 // ---------- シート ----------
 
-type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch' | 'rec';
+type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch';
 let sheet: SheetKind | null = null;
 
 function openSheet(kind: SheetKind) {
@@ -1524,8 +1519,6 @@ function openSheet(kind: SheetKind) {
   $('sheet').classList.toggle('info', kind === 'analysis' || kind === 'settings');
   // 譜面情報は画面いっぱいに、情報・譜面の流れ・譜面画像を 1 画面で
   $('sheet').classList.toggle('an', kind === 'analysis');
-  // 録画の設定は真ん中に小さく
-  $('sheet').classList.toggle('rec', kind === 'rec');
   document.body.classList.toggle('tja-open', kind === 'events');
   setTjaPortrait(kind === 'events');
   renderSheet();
@@ -1658,14 +1651,6 @@ function renderSheet() {
         <button data-act="dupCourse">複製</button>
         <button data-act="delCourse" class="danger" ${c.courses.length <= 1 ? 'disabled' : ''}>削除</button>
       </div>`}`;
-  } else if (sheet === 'rec') {
-    $('sheetTitle').textContent = '録画';
-    const seg = (k: string, opts: [string, string][], cur: string) =>
-      `<div class="st-row"><span>${k}</span><div class="st-seg two">${opts.map(([v, l]) => `<button data-recset="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
-    body.innerHTML =
-      seg('録画', [['on:0', 'オフ'], ['on:1', 'オン']], `on:${settings.recOn ? 1 : 0}`) +
-      seg('画質', [['res:1080', '1080p'], ['res:720', '720p']], `res:${settings.recRes}`) +
-      seg('コマ数', [['fps:60', '60fps'], ['fps:30', '30fps']], `fps:${settings.recFps}`);
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
     const t = settingsTab;
@@ -2187,16 +2172,6 @@ $('sheetBody').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest('button');
   if (!b) return;
   const d = b.dataset;
-  if (d.recset) {
-    const [k, v] = d.recset.split(':');
-    if (k === 'on') settings.recOn = v === '1';
-    else if (k === 'res') settings.recRes = v === '720' ? 720 : 1080;
-    else if (k === 'fps') settings.recFps = v === '30' ? 30 : 60;
-    saveSettings();
-    renderSheet();
-    home.syncRec();
-    return;
-  }
   if (d.act) void fileAction(d.act);
   else if (d.course) ed.selectCourse(Number(d.course));
   else if (d.off) ed.mutate(() => { ed.chart.offset = Number((ed.chart.offset + Number(d.off)).toFixed(4)); });
@@ -2904,40 +2879,6 @@ $('pauseBack').addEventListener('click', () => {
   }
 });
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
-/** 録画した動画の名前（音源と同じ。拡張子だけ変える。音源が無ければ曲名） */
-const recName = (ext: string) => `${safeName((ed.chart.wave || '').split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '') || ed.chart.title || '譜面')}.${ext}`;
-/** アプリの中: 録画した動画を、結果画面を見ている間に先にアプリへ渡しておく（「動画を保存」ですぐ開ける） */
-let recStage: ReturnType<typeof nativeStage> | null = null;
-play.onRecording = (p) => {
-  recStage?.drop();
-  recStage = null;
-  if (!p || !canNativeSave() || nativeAppVersion() < 12) return;
-  const name = recName('mp4');
-  let stage: ReturnType<typeof nativeStage> | null = null;
-  const holder = { drop: () => { stage?.drop(); }, done: Promise.resolve(false), show: async () => false } as ReturnType<typeof nativeStage>;
-  recStage = holder;
-  void p.then((r) => {
-    if (!r || recStage !== holder) return;
-    stage = nativeStage(r.blob, recName(r.ext) || name);
-    holder.done = stage.done;
-    holder.show = () => stage!.show();
-  });
-};
-// 結果画面の「動画を保存」: 録画した動画を保存・共有する（作り終えるまで待つ）
-$('saveVideo').addEventListener('click', async () => {
-  const p = play.recording;
-  if (!p) return;
-  busy('動画を用意しています…');
-  const r = await p;
-  // 先にアプリへ渡していれば、渡し終えるのを待って開く
-  const st = recStage;
-  if (r && st && (await st.done) && (await st.show())) {
-    busyEnd();
-    return;
-  }
-  busyEnd();
-  if (r) download(r.blob, recName(r.ext));
-});
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
 play.onError = (msg) => toast(msg);
@@ -3130,8 +3071,6 @@ const home = new Home({
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
   online: () => online.open(),
-  recording: () => !!settings.recOn,
-  recSettings: () => openSheet('rec'),
   analyze: (id, course) => void (async () => {
     const d = await loadSongData(id);
     if (!d) { toast('譜面を読み込めませんでした'); return; }
