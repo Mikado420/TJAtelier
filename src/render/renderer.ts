@@ -277,10 +277,10 @@ export class Renderer {
     this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
-    // 録画中: 16:9 の枠が録画の縦の大きさより細かく描かれるようにする（小さく描いて引き伸ばすと粗くなる）
+    // 録画中: 16:9 の枠を録画の縦の大きさちょうどで描く（小さく描いて引き伸ばすと粗く、大きく描くと重い）
     if (this.minFrameH > 0) {
       const fh = Math.min(w / REF_W, h / REF_H) * REF_H;
-      if (fh > 0) this.dpr = Math.max(this.dpr, Math.min(4, this.minFrameH / fh));
+      if (fh > 0) this.dpr = Math.min(4, this.minFrameH / fh);
     }
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
@@ -358,7 +358,7 @@ export class Renderer {
   get frameSize() {
     return { w: REF_W * this.frame.s, h: REF_H * this.frame.s };
   }
-  /** 録画中: 16:9 の枠を、少なくともこの縦の大きさ（端末の px）で描く。変えたら resize() */
+  /** 録画中: 16:9 の枠を、この縦の大きさ（端末の px）ちょうどで描く。変えたら resize() */
   minFrameH = 0;
 
   /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */

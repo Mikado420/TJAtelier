@@ -3,7 +3,7 @@ import { audioKey, loadDrums, saveDrums } from './audio/drumCache';
 import { mountGridBg } from './ui/gridBg';
 import { OnlineScreen } from './online/online';
 import { loadBest, saveBest } from './home/home';
-import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
+import { canNativeSave, nativeAppVersion, nativeSave, nativeStage, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
 import { branchPath, COURSE_NAMES, contentEnd, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
@@ -2904,16 +2904,39 @@ $('pauseBack').addEventListener('click', () => {
   }
 });
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
+/** 録画した動画の名前（音源と同じ。拡張子だけ変える。音源が無ければ曲名） */
+const recName = (ext: string) => `${safeName((ed.chart.wave || '').split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '') || ed.chart.title || '譜面')}.${ext}`;
+/** アプリの中: 録画した動画を、結果画面を見ている間に先にアプリへ渡しておく（「動画を保存」ですぐ開ける） */
+let recStage: ReturnType<typeof nativeStage> | null = null;
+play.onRecording = (p) => {
+  recStage?.drop();
+  recStage = null;
+  if (!p || !canNativeSave() || nativeAppVersion() < 12) return;
+  const name = recName('mp4');
+  let stage: ReturnType<typeof nativeStage> | null = null;
+  const holder = { drop: () => { stage?.drop(); }, done: Promise.resolve(false), show: async () => false } as ReturnType<typeof nativeStage>;
+  recStage = holder;
+  void p.then((r) => {
+    if (!r || recStage !== holder) return;
+    stage = nativeStage(r.blob, recName(r.ext) || name);
+    holder.done = stage.done;
+    holder.show = () => stage!.show();
+  });
+};
 // 結果画面の「動画を保存」: 録画した動画を保存・共有する（作り終えるまで待つ）
 $('saveVideo').addEventListener('click', async () => {
   const p = play.recording;
   if (!p) return;
   busy('動画を用意しています…');
   const r = await p;
+  // 先にアプリへ渡していれば、渡し終えるのを待って開く
+  const st = recStage;
+  if (r && st && (await st.done) && (await st.show())) {
+    busyEnd();
+    return;
+  }
   busyEnd();
-  // ファイルの名前は音源と同じ（拡張子だけ変える）。音源が無ければ曲名
-  const base = (ed.chart.wave || '').split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '') || ed.chart.title || '譜面';
-  if (r) download(r.blob, `${safeName(base)}.${r.ext}`);
+  if (r) download(r.blob, recName(r.ext));
 });
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す

@@ -5,7 +5,7 @@
  */
 import type { AudioEngine, HitSound } from '../audio/audio';
 import { Mp4Writer } from './mp4';
-import { encodeAudio, pickAudio, pickVideo, type AudioPick } from './recaudio';
+import { encodeAudio, pickAudio, pickVideo, type AudioOut, type AudioPick } from './recaudio';
 
 const toU8 = (d: AllowSharedBufferSource) => (ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d)).slice();
 
@@ -136,6 +136,38 @@ export class LiveRecorder {
     if (this.active) this.ui.push({ name, t });
   }
 
+  /** 音を混ぜて形式に合わせる（曲の時刻 until まで） */
+  private makeAudio(audio: AudioEngine, until: number): Promise<{ au: AudioOut; length: number }> {
+    const t0 = this.t0 ?? 0;
+    const length = Math.max(0.1, until - t0);
+    const hits = this.hits.map((h) => ({ kind: h.kind, at: h.t - t0 })).filter((h) => h.at >= 0);
+    const ui = this.ui.map((u) => ({ name: u.name, at: u.t - t0 })).filter((u) => u.at >= 0);
+    const tA = performance.now();
+    return audio
+      .renderMix({ length: length + 0.5, rate: this.apick.rate, musicAt: -t0, hits, ui })
+      .then((mix) => encodeAudio(mix, this.apick, length, () => this.closed && !this.ending, this.diag))
+      .then((au) => {
+        this.diag.audioMs = Math.round(performance.now() - tA);
+        this.diag.hits = hits.length;
+        return { au, length };
+      });
+  }
+
+  /** 先に作っておいた音（曲の時刻 until まで） */
+  private early: Promise<{ au: AudioOut; length: number } | null> | null = null;
+  private ending = false;
+  private earlyHits = 0;
+
+  /**
+   * 終わりの演出が始まったら、音を先に作り始める（このあと叩く音は無いので、録り終えるのを待たずに作れる）。
+   * until = 録り終えそうな曲の時刻（少し長めに）
+   */
+  prepareAudio(audio: AudioEngine, until: number) {
+    if (!this.active || this.early || this.t0 === null) return;
+    this.earlyHits = this.hits.length + this.ui.length;
+    this.early = this.makeAudio(audio, until).catch(() => null);
+  }
+
   /** 録り終えて、音を入れたファイルを作る */
   async end(audio: AudioEngine): Promise<{ blob: Blob; ext: string }> {
     if (this.closed) throw new Error('closed');
@@ -146,19 +178,15 @@ export class LiveRecorder {
       await this.enc.flush();
       if (this.failed) throw new Error(this.failed);
       const length = (this.last + 1) / this.fps;
-      const t0 = this.t0;
       this.diag.frames = this.last + 1;
-      const tA = performance.now();
-      const mix = await audio.renderMix({
-        length: length + 0.5,
-        rate: this.apick.rate,
-        musicAt: -t0,
-        hits: this.hits.map((h) => ({ kind: h.kind, at: h.t - t0 })).filter((h) => h.at >= 0),
-        ui: this.ui.map((u) => ({ name: u.name, at: u.t - t0 })).filter((u) => u.at >= 0),
-      });
-      this.diag.hits = this.hits.length;
-      const au = await encodeAudio(mix, this.apick, length, () => false, this.diag);
-      this.diag.audioMs = Math.round(performance.now() - tA);
+      this.ending = true;
+      const tW = performance.now();
+      // 先に作った音が、録った長さに足りていて、そのあとに鳴らした音が無ければ使う（長いぶんは切る）
+      const pre = this.early ? await this.early : null;
+      const useEarly = !!pre && pre.length >= length && this.hits.length + this.ui.length === this.earlyHits;
+      this.diag.earlyAudio = useEarly;
+      const au = trimAudio(useEarly ? pre!.au : (await this.makeAudio(audio, this.t0 + length)).au, length);
+      this.diag.audioWaitMs = Math.round(performance.now() - tW);
       this.mux.setAudio(au.codec, au.rate);
       for (const c of au.chunks) this.mux.addAudio(c.data, c.frames);
       this.mux.note(JSON.stringify(this.diag));
@@ -183,4 +211,23 @@ export class LiveRecorder {
     this.hits = [];
     this.ui = [];
   }
+}
+
+/** 音を length 秒までにする */
+function trimAudio(au: AudioOut, length: number): AudioOut {
+  const total = Math.round(length * au.rate);
+  const out: AudioOut['chunks'] = [];
+  let acc = 0;
+  for (const c of au.chunks) {
+    if (acc >= total) break;
+    if (au.codec.kind === 'pcm' && acc + c.frames > total) {
+      const n = total - acc;
+      out.push({ data: c.data.subarray(0, n * 4), frames: n });
+      acc += n;
+      break;
+    }
+    out.push(c);
+    acc += c.frames;
+  }
+  return { ...au, chunks: out };
 }

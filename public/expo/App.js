@@ -156,7 +156,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -249,6 +249,8 @@ export default function App() {
   const files = useRef({});
   /** 順に書き足しているファイル（id ごと） */
   const streams = useRef({});
+  // 書き終えて、共有シートを開くのを待っているファイル（v12: 録画した動画を先に受け取っておく）
+  const ready = useRef({});
 
   const onMessage = useCallback((e) => {
     try {
@@ -313,6 +315,11 @@ export default function App() {
           return;
         }
         ack(m.id, 'end');
+        // 先に受け取っておくだけ（「動画を保存」を押したときに fileShow で開く）
+        if (m.defer) {
+          ready.current[m.id] = { ...st, mime: m.mime || st.mime };
+          return;
+        }
         Sharing.shareAsync(st.file.uri, { mimeType: m.mime || st.mime, dialogTitle: st.safe })
           .catch((err) => {
             Alert.alert('保存できませんでした', String((err && err.message) || err));
@@ -321,6 +328,41 @@ export default function App() {
             // アプリの中の写しは、次に大きいファイルを受け取るときに消す（共有先が後から読むことがあるので、すぐには消さない）
             lastStream = st.file;
           });
+        return;
+      }
+      if (m.type === 'fileShow') {
+        const st = ready.current[m.id];
+        if (!st) return;
+        ack(m.id, 'show');
+        Sharing.shareAsync(st.file.uri, { mimeType: st.mime, dialogTitle: st.safe })
+          .catch((err) => {
+            Alert.alert('保存できませんでした', String((err && err.message) || err));
+          })
+          .finally(() => {
+            // もう一度保存できるように、次に別のファイルを受け取るときまで残す
+            lastStream = st.file;
+          });
+        return;
+      }
+      if (m.type === 'fileDrop') {
+        const st = streams.current[m.id] || ready.current[m.id];
+        delete streams.current[m.id];
+        delete ready.current[m.id];
+        if (st) {
+          try {
+            st.close?.();
+          } catch {
+            // 閉じている
+          }
+          try {
+            const d = st.file.parentDirectory;
+            if (d && /\/rec-\d+\/?$/.test(d.uri)) d.delete();
+            else if (st.file.exists) st.file.delete();
+          } catch {
+            // 消せなくてもよい（次に受け取るときに消す）
+            lastStream = st.file;
+          }
+        }
         return;
       }
       if (m.type === 'file') {

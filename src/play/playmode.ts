@@ -621,6 +621,8 @@ export class PlayMode {
           this.audio.playUi(`tnde:${kind}`);
           this.rec?.sound(`tnde:${kind}`, now);
         }
+        // 録画: 演出を見せている間に、音を先に作っておく（録り終えたらすぐ保存できるように）
+        this.rec?.prepareAudio(this.audio, Math.max(now + this.endHold / 1000, (this.cur?.tailEnd ?? 0) + 1) + 1.5);
       }
       // 帯を出したら、曲が終わっても帯を見せきってから結果へ
       // 演出を出す前に曲が終わっても、演出を見せてから結果へ（演出の時刻より前には終えない）
@@ -708,6 +710,8 @@ export class PlayMode {
   get recording() {
     return this.recFile;
   }
+  /** 録り終えた動画ができ始めたとき・捨てたとき（null） */
+  onRecording: (p: Promise<{ blob: Blob; ext: string } | null> | null) => void = () => {};
 
   /** 録画がオンなら、録画の係を用意する（プレイの絵の細かさも録画に合わせる） */
   private async prepareRec(course: Course, info: PlayInfo) {
@@ -750,6 +754,9 @@ export class PlayMode {
 
   /** 録画の係を外す（録ったものはそのまま） */
   private endRec() {
+    if (this.recUnder) this.recUnder.width = this.recUnder.height = 0;
+    this.recUnder = null;
+    this.recUnderKey = '';
     this.rec = null;
     this.renderer.minFrameH = 0;
     this.recPainter?.dispose();
@@ -761,11 +768,16 @@ export class PlayMode {
     const rec = this.rec;
     this.endRec();
     rec?.discard();
+    if (this.recFile) this.onRecording(null);
     this.recFile = null;
     this.result.querySelector('#saveVideo')?.classList.add('hidden');
   }
 
   /** 録画のコマ: 画面と同じ重なり（黒 → 背景の動画・画像と暗くする幕 → 背景 → 動画用の画面 → ゲーム）を、16:9 の枠で切り抜いて描く */
+  /** 録画の後ろの絵（背景の動画・画像・暗くする幕・背景）。動画のコマが変わったときだけ描き直す */
+  private recUnder: HTMLCanvasElement | null = null;
+  private recUnderKey = '';
+
   private paintRec(g: CanvasRenderingContext2D, W: number, H: number, now: number) {
     const R = this.renderer;
     const cv = this.canvasEl;
@@ -774,6 +786,32 @@ export class PlayMode {
     const k = W / Math.max(1, R.frameSize.w);
     const ox = cr.left + F.x;
     const oy = cr.top + F.y;
+    const v = this.video;
+    const shown = (el: HTMLElement | null): el is HTMLElement => !!el && el.isConnected && !el.classList.contains('hidden');
+    const moving = !!this.videoMode && shown(v);
+    const key = [W, H, cr.left, cr.top, cr.width, cr.height, F.x, F.y, F.s, this.videoMode, moving ? (this.vFrame ? this.vFrame.media : v!.currentTime) : '', v?.readyState ?? 0,
+      this.dimOf(false), this.dimOf(true), this.settings.videoFrame, R.bgBlank, shown(this.bgImg), this.bgImg?.naturalWidth ?? 0, R.background?.width ?? 0, this.blurKey].join('|');
+    let u = this.recUnder;
+    if (!u || u.width !== W || u.height !== H || key !== this.recUnderKey) {
+      u ??= this.recUnder = document.createElement('canvas');
+      if (u.width !== W || u.height !== H) {
+        u.width = W;
+        u.height = H;
+      }
+      this.recUnderKey = key;
+      const ug = u.getContext('2d', { alpha: false });
+      if (ug) this.paintRecUnder(ug, W, H, ox, oy, k);
+    }
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(u, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    this.recPainter?.draw(g, { x: 0, y: 0, s: Math.min(W / 2000, H / 1125) }, now);
+    g.drawImage(cv, (cr.left - ox) * k, (cr.top - oy) * k, cr.width * k, cr.height * k);
+  }
+
+  /** 録画の後ろの絵: 黒 → 全面+下のぼかした動画 → 背景の動画と暗くする幕・縁取り → 背景の画像 → 背景 */
+  private paintRecUnder(g: CanvasRenderingContext2D, W: number, H: number, ox: number, oy: number, k: number) {
+    const R = this.renderer;
     const place = (el: Element) => {
       const r = el.getBoundingClientRect();
       return { x: (r.left - ox) * k, y: (r.top - oy) * k, w: r.width * k, h: r.height * k };
@@ -796,6 +834,7 @@ export class PlayMode {
       g.fillStyle = `rgba(0,0,0,${a})`;
       g.fillRect(r.x, r.y, r.w, r.h);
     };
+    g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
     // 全面+下のぼかした動画（もうぼかしてあるので、そのまま広げて描く）
@@ -830,8 +869,6 @@ export class PlayMode {
       const r = place(bg);
       g.drawImage(bg, r.x, r.y, r.w, r.h);
     }
-    this.recPainter?.draw(g, { x: 0, y: 0, s: Math.min(W / 2000, H / 1125) }, now);
-    g.drawImage(cv, (cr.left - ox) * k, (cr.top - oy) * k, cr.width * k, cr.height * k);
   }
 
   private applySkin(title?: string) {
@@ -1440,6 +1477,7 @@ export class PlayMode {
           return null;
         },
       );
+      this.onRecording(this.recFile);
     } else rec?.discard();
     this.result.querySelector('#saveVideo')?.classList.toggle('hidden', !this.recFile);
     this.audio.stop();
