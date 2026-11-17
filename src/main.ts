@@ -2892,7 +2892,9 @@ $('saveVideo').addEventListener('click', async () => {
   busy('動画を用意しています…');
   const r = await p;
   busyEnd();
-  if (r) download(r.blob, `${safeName(ed.chart.title || '譜面')}_${ed.course.name}.${r.ext}`);
+  // ファイルの名前は音源と同じ（拡張子だけ変える）。音源が無ければ曲名
+  const base = (ed.chart.wave || '').split(/[\\/]/).pop()!.replace(/\.[^.]+$/, '') || ed.chart.title || '譜面';
+  if (r) download(r.blob, `${safeName(base)}.${r.ext}`);
 });
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す

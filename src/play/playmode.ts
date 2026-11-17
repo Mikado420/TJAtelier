@@ -807,7 +807,7 @@ export class PlayMode {
     this.tndeLoad ??= TndeSkin.load('skins/tnde/', title).then(
       (s) => {
         this.tnde = s;
-        for (const [k, f] of [['clear', 'clear'], ['fc', 'fc'], ['allgood', 'dfc']]) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${f}.ogg`);
+        for (const [k, f] of [['clear', 'clear'], ['fc', 'fc'], ['allgood', 'dfc']]) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${f}.ogg`, true);
         if (this.settings.skin === 'tnde') {
           R.tnde = s;
           R.resize();

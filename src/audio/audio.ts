@@ -86,10 +86,7 @@ export class AudioEngine {
       for (const u of o.ui) {
         const b = this.uiBufs.get(u.name);
         if (!b) continue;
-        const s = ctx.createBufferSource();
-        s.buffer = b;
-        s.connect(ui);
-        s.start(Math.max(0, u.at));
+        this.uiSource(ctx, u.name, b, ui).start(Math.max(0, u.at));
       }
     }
     return ctx.startRendering();
@@ -107,23 +104,40 @@ export class AudioEngine {
 
   // ---------- 画面の音 ----------
   private uiBufs = new Map<string, AudioBuffer>();
-  /** 画面の音を読み込む（失敗しても何もしない） */
-  async loadUi(name: string, url: string) {
+  /** 大きさを揃えて鳴らす画面の音の倍率（演出の声: 曲と同じくらいの聞こえる大きさにする） */
+  private uiNorm = new Map<string, number>();
+  /** 画面の音を読み込む（失敗しても何もしない）。voice = 曲と同じくらいの大きさに揃える */
+  async loadUi(name: string, url: string, voice = false) {
     try {
       const res = await fetch(url);
       if (!res.ok) return;
-      this.uiBufs.set(name, await this.ctx.decodeAudioData(await res.arrayBuffer()));
+      const buf = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      this.uiBufs.set(name, buf);
+      if (voice) {
+        const lv = AudioEngine.level(buf, false);
+        // 画面の音の音量（0.6 倍）のぶんも戻し、流れている曲より大きく（2 倍）聞こえるように
+        if (lv > 0) this.uiNorm.set(name, Math.min(12, (AudioEngine.TARGET * 2) / lv / 0.6));
+      }
     } catch { /* 鳴らせない */ }
+  }
+  /** 画面の音を ctx で鳴らす（大きさを揃える音は、間に音量を挟む） */
+  private uiSource(ctx: BaseAudioContext, name: string, buf: AudioBuffer, out: AudioNode) {
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const k = this.uiNorm.get(name);
+    if (k) {
+      const g = ctx.createGain();
+      g.gain.value = k;
+      src.connect(g).connect(out);
+    } else src.connect(out);
+    return src;
   }
   /** 画面の音を鳴らす */
   playUi(name: string) {
     const buf = this.uiBufs.get(name);
     if (!buf || this.mix.ui <= 0) return;
     if (this.ctx.state !== 'running') void this.ctx.resume();
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(this.uiGain);
-    src.start();
+    this.uiSource(this.ctx, name, buf, this.uiGain).start();
   }
 
   /** 音量の比率（音源・打音・メトロノーム）を変える */

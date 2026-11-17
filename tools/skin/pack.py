@@ -68,8 +68,19 @@ for f in ['1P_Line', 'Soul', 'Fire', '1P_Explosion', 'Gauge_Update']:
 # 演出
 for f in ['Fire', 'Rainbow', 'GoGoSplash', 'BigStar', 'MiniStar', 'Slash']:
     img('fx/' + f, '10_Effects/%s.png' % f, lossy=f == 'GoGoSplash')
-for f in ['Explosion', 'Explosion_Big', 'FireWorks']:
-    img('fx/' + f, '10_Effects/Hit/%s.png' % f, lossy=f == 'FireWorks')
+for f in ['Explosion', 'Explosion_Big']:
+    img('fx/' + f, '10_Effects/Hit/%s.png' % f)
+def glow(im):
+    """黒い地の光の絵を、地が透けるようにする（明るさを不透明度に。足し算で重ねたときの見た目は同じで、
+    後ろが透けている所（背景の動画など）に重ねても黒い四角が出ない）"""
+    rgb = im[:, :, :3].astype(np.float32)
+    a = rgb.max(axis=2, keepdims=True)
+    out = np.zeros_like(im)
+    out[:, :, :3] = np.clip(rgb * 255 / np.maximum(a, 1), 0, 255).astype(np.uint8)
+    out[:, :, 3:] = (a * im[:, :, 3:].astype(np.float32) / 255).astype(np.uint8)
+    return out
+_fw = glow(rd(os.path.join(G, '10_Effects/Hit/FireWorks.png')))
+man['img']['fx/FireWorks'] = {'f': wr('fx/FireWorks', _fw, True), 'w': _fw.shape[1], 'h': _fw.shape[0]}
 for f in ['Good', 'Good_Big', 'Great', 'Great_Big']:
     anim('fx/' + f, '10_Effects/Hit/' + f, lossy=False)
 for i in range(3):

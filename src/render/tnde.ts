@@ -294,6 +294,14 @@ export class TndeSkin {
     c.drawImage(im, sx * q, sy * q, w * q, h * q, x, y, w * kx, h * ky);
   }
 
+  /** レーンの絵を貼る。絵は 1 px ほど右端に届かないので、横は画面の右端までちょうどに伸ばす（ky = 縦の倍率） */
+  private putLane(c: CanvasRenderingContext2D, name: string, y: number, ky = 1) {
+    const im = this.img(name);
+    if (!im) return;
+    const q = this.man.img[name]?.k ?? 1;
+    this.put(c, name, LANE_X, y, 0, 0, undefined, undefined, (TW - LANE_X) / (im.width / q), S * ky);
+  }
+
   /** 絵の範囲を、(cx, cy) を中心に k 倍（1.5 倍の上にさらに）で貼る */
   private putC(c: CanvasRenderingContext2D, name: string, cx: number, cy: number, sx: number, sy: number, sw: number, sh: number, k = 1) {
     const w = sw * S * k;
@@ -1212,29 +1220,29 @@ export class TndeSkin {
 
   private drawLane(c: CanvasRenderingContext2D, F: TndeFrame, gogo: boolean) {
     const { wall } = F;
-    this.put(c, 'lane/Background_Main', LANE_X, FIELD_Y);
+    this.putLane(c, 'lane/Background_Main', FIELD_Y);
     // 譜面分岐のある譜面: 分岐ごとのレーンの色（切り替わるときは、前の色の上に新しい色を重ねていく）
     const br = F.branch;
     const BASE = ['lane/Base_Normal', 'lane/Base_Expert', 'lane/Base_Master'];
     if (br) {
-      if (br.p < 1) this.put(c, BASE[br.from], LANE_X, FIELD_Y);
-      if (br.p > 0) this.alpha(c, br.p, () => this.put(c, BASE[br.cur], LANE_X, FIELD_Y));
+      if (br.p < 1) this.putLane(c, BASE[br.from], FIELD_Y);
+      if (br.p > 0) this.alpha(c, br.p, () => this.putLane(c, BASE[br.cur], FIELD_Y));
     }
     if (gogo) {
       // ゴーゴーのレーンは縦にひらいて出てくる（18 ms ごと）
       const v = step(wall, this.gogoAt, 18);
       const [ky, dy] = v <= 4 ? [0.2, 54] : v <= 5 ? [0.4, 40] : v <= 6 ? [0.6, 26] : v <= 8 ? [0.8, 13] : [1, 0];
-      this.put(c, 'lane/Background_GoGo', LANE_X, FIELD_Y + P(dy), 0, 0, undefined, undefined, S, S * ky);
+      this.putLane(c, 'lane/Background_GoGo', FIELD_Y + P(dy), ky);
     }
-    this.put(c, 'lane/Background_Sub', LANE_X, P(326));
+    this.putLane(c, 'lane/Background_Sub', P(326));
     // 分岐の名前（普通譜面・玄人譜面・達人譜面）: 前の名前は上へ抜けて消え、新しい名前は下から入ってくる
     if (br) {
       const TEXT = ['lane/Text_Normal', 'lane/Text_Expert', 'lane/Text_Master'];
-      if (br.p >= 1) this.put(c, TEXT[br.cur], LANE_X, FIELD_Y);
+      if (br.p >= 1) this.putLane(c, TEXT[br.cur], FIELD_Y);
       else {
         const d = P(20);
-        this.alpha(c, 1 - br.p, () => this.put(c, TEXT[br.from], LANE_X, FIELD_Y - d * br.p));
-        this.alpha(c, br.p, () => this.put(c, TEXT[br.cur], LANE_X, FIELD_Y + d * (1 - br.p)));
+        this.alpha(c, 1 - br.p, () => this.putLane(c, TEXT[br.from], FIELD_Y - d * br.p));
+        this.alpha(c, br.p, () => this.putLane(c, TEXT[br.cur], FIELD_Y + d * (1 - br.p)));
       }
     }
     // 叩いた色（ドン 赤・カッ 青）と、音符を叩けたとき（黄）。0.1 秒そのまま、次の 0.1 秒で半分まで薄くなって消える
@@ -1242,7 +1250,7 @@ export class TndeSkin {
       const ms = wall - t;
       if (ms < 0 || ms >= 200) return;
       const a = Math.min(255, ((150 - ms / 2) * 255) / 100) / 255;
-      this.alpha(c, a, () => this.put(c, name, LANE_X, FIELD_Y));
+      this.alpha(c, a, () => this.putLane(c, name, FIELD_Y));
     };
     // 色ごとに 1 つ（TJAPlayer3 と同じく、叩くたびに最初から光り直す）
     let don = -1e9, ka = -1e9, hit = -1e9;
