@@ -58,16 +58,7 @@ for i in range(4):
     img('taiko/frame%d' % i, '6_Taiko/Frame/1P/%d/1P_Frame.png' % i)
 for f in ['Easy', 'Normal', 'Hard', 'Oni', 'Edit']:
     img('course/' + f, '4_CourseSymbol/%s.png' % f)
-for f in sorted(os.listdir(os.path.join(G, '13_Genre'))):
-    if f[:-4].isdigit():
-        # ジャンルの帯から字を消したもの（フォルダの名前を書く）。帯は一色なので、字の無い左の列で塗り、左右を折り返す
-        im = rd(os.path.join(G, '13_Genre', f))
-        b = im.copy()
-        b[:, 64:148] = im[:, 64:65]
-        b[:, 148:] = b[:, :148][:, ::-1][:, :b.shape[1] - 148]
-        man['img']['genre/b' + f[:-4]] = {'f': wr('genre/b' + f[:-4], b, False), 'w': b.shape[1], 'h': b.shape[0]}
-    else:
-        img('genre/' + f[:-4], '13_Genre/' + f)
+# ジャンルの帯・曲目の帯は図形と字で描く（絵は使わない）
 # ゲージ
 for i in range(4):
     img('gauge/base%d' % i, '7_Gauge/Gauge/1P/%d/1P_Base.png' % i)

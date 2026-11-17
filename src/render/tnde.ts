@@ -231,7 +231,6 @@ export class TndeSkin {
     if (name === 'dancer/In1') return false;
     if (name === 'dancer/Normal1') return p.dancer === 1;
     if (name === 'mob') return p.down !== 5;
-    if (/^genre\/\d$/.test(name)) return false;
     if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
     return true;
   }
@@ -1867,47 +1866,57 @@ export class TndeSkin {
     const GX = 1518.4;
     const GY = 94.3;
     const GK = 1.45;
+    // 帯は絵を拡大すると粗くなるので、同じ形（左右が丸い 202.5×22.7、縦の真ん中は 16.65）を図形で描く
+    const bx = GX + 46.5 * GK, by = GY + 5.3 * GK, bw = 202.5 * GK, bh = 22.7 * GK;
+    const cy = by + bh / 2;
+    const pill = (g: CanvasRenderingContext2D) => {
+      const r = bh / 2;
+      g.beginPath();
+      g.arc(bx + r, cy, r, Math.PI / 2, (Math.PI * 3) / 2);
+      g.arc(bx + bw - r, cy, r, -Math.PI / 2, Math.PI / 2);
+      g.closePath();
+    };
     if (showGenre && f) {
       this.cached(c, 'genre', `${f.name}|${f.color}|${f.custom}`, GX, GY, 295 * GK, 33 * GK, (g) => {
         const gk = f.custom ? undefined : GENRES.find(([re]) => re.test(f.name))?.[1];
-        let col = f.color;
-        if (gk && this.img(`genre/b${gk}`)) {
-          this.put(g, `genre/b${gk}`, GX, GY, 0, 0, undefined, undefined, GK);
-          col = GENRE_COL[gk];
-        } else {
-          // 帯の形（字の無い帯と同じ: 左右が丸い 202×22）をフォルダの色で塗る
-          g.fillStyle = col;
-          const x0 = GX + 47 * GK, y0 = GY + 6 * GK, w = 202 * GK, h = 22 * GK, r = h / 2;
-          g.beginPath();
-          g.arc(x0 + r, y0 + r, r, Math.PI / 2, (Math.PI * 3) / 2);
-          g.arc(x0 + w - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
-          g.closePath();
-          g.fill();
-        }
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
+        const col = gk ? GENRE_COL[gk] : f.color;
+        g.fillStyle = col;
+        pill(g);
+        g.fill();
         g.font = `21.5px 'TNDE Seurat', sans-serif`;
         g.lineJoin = 'round';
         g.lineWidth = 5;
         g.strokeStyle = shade(col, 0.18);
         g.fillStyle = '#fff';
-        fitText(g, f.name, GX + 147.5 * GK, GY + 17 * GK, 190 * GK, true);
+        midText(g, f.name, GX + 147.5 * GK, cy, 'center', 190 * GK);
       });
     }
     if (songsA > 0) {
       this.alpha(c, songsA, () => this.cached(c, 'songs', `${stage}`, GX, GY, 295 * GK, 33 * GK, (g) => {
-        this.put(g, 'genre/Songs', GX, GY, 0, 0, undefined, undefined, GK);
-        g.textAlign = 'right';
-        g.textBaseline = 'middle';
+        g.save();
+        pill(g);
+        g.clip();
+        g.fillStyle = '#fff';
+        g.fillRect(bx, by, bw, bh);
+        // 右の水色は斜めに切る（上 165.3 → 下 156.3）
+        g.fillStyle = '#c7dff6';
+        g.beginPath();
+        g.moveTo(GX + 165.3 * GK, by);
+        g.lineTo(bx + bw, by);
+        g.lineTo(bx + bw, by + bh);
+        g.lineTo(GX + 156.3 * GK, by + bh);
+        g.closePath();
+        g.fill();
+        g.restore();
         g.font = `24px 'TNDE Seurat', sans-serif`;
         g.lineJoin = 'round';
         g.lineWidth = 4.5;
         g.strokeStyle = '#000';
         g.fillStyle = '#fff';
-        g.strokeText(String(stage), 1655, 121.5);
-        g.fillText(String(stage), 1655, 121.5);
-        g.strokeText('∞', 1807, 121.5);
-        g.fillText('∞', 1807, 121.5);
+        midText(g, String(stage), 1655, cy, 'right');
+        midText(g, '曲目', GX + 114.5 * GK, cy, 'center');
+        midText(g, '∞', 1807, cy, 'right');
+        midText(g, '曲', GX + 213.5 * GK, cy, 'center');
       }));
     }
     const key = F.info.title;
@@ -2019,6 +2028,20 @@ export class TndeSkin {
 }
 
 /** 幅が max を超えるときは横に縮めて書く（stroke = 先に縁を描く） */
+/** 字の見た目の上下の真ん中を y に合わせて書く（縁取りつき。max より長ければ横に縮める） */
+function midText(c: CanvasRenderingContext2D, t: string, x: number, y: number, align: CanvasTextAlign, max = Infinity) {
+  c.textAlign = align;
+  c.textBaseline = 'alphabetic';
+  const m = c.measureText(t);
+  const by = y + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+  c.save();
+  c.translate(x, by);
+  if (m.width > max) c.scale(max / m.width, 1);
+  c.strokeText(t, 0, 0);
+  c.fillText(t, 0, 0);
+  c.restore();
+}
+
 function fitText(c: CanvasRenderingContext2D, t: string, x: number, y: number, max: number, stroke = false) {
   const w = c.measureText(t).width;
   c.save();
