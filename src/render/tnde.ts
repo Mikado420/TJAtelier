@@ -312,7 +312,17 @@ export class TndeSkin {
   /** 絵を貼る。絵の中の範囲は元の絵の px で書き、細かくしてある絵はその倍率で読む */
   private di(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
     const q = this.qOf(im);
-    if (a.length === 8) c.drawImage(im, a[0] * q, a[1] * q, a[2] * q, a[3] * q, a[4], a[5], a[6], a[7]);
+    if (a.length === 8) {
+      // 1.5 倍の絵は端が 1 px 足りないことがある。はみ出して切り出すと iPhone では何も描かれないので、絵の中に収める
+      let [sx, sy, sw, sh] = [a[0] * q, a[1] * q, a[2] * q, a[3] * q];
+      let [dw, dh] = [a[6], a[7]];
+      const W = (im as { width: number }).width;
+      const H = (im as { height: number }).height;
+      if (sx + sw > W) { const w = W - sx; dw *= w / sw; sw = w; }
+      if (sy + sh > H) { const h = H - sy; dh *= h / sh; sh = h; }
+      if (sw <= 0 || sh <= 0) return;
+      c.drawImage(im, sx, sy, sw, sh, a[4], a[5], dw, dh);
+    }
     else if (a.length === 4) c.drawImage(im, a[0], a[1], a[2], a[3]);
     else c.drawImage(im, a[0], a[1], this.lw(im), this.lh(im));
   }
