@@ -365,6 +365,8 @@ export class Renderer {
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
   plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
+  /** 背景の canvas に何も描いていない（録画で重ねなくてよい） */
+  bgBlank = false;
   /** 後ろに置く、動かない背景の canvas */
   get background() {
     return this.bg;
@@ -507,9 +509,11 @@ export class Renderer {
     c.beginPath();
     c.rect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
     c.clip();
+    this.bgBlank = false;
     if (this.skinOn) {
       // 背景の動画を下だけに出すとき: レーンより下を透かす
       if (vm === 'bottom') c.clearRect(V.x0, TEXT_BOTTOM, V.x1 - V.x0, V.y1 - TEXT_BOTTOM);
+      this.bgBlank = vm === 'full' && !(this.touch && this.padVisible && !this.broadcast) && !this.restZone;
       c.restore();
       this.finishBackground(c, bg);
       return;

@@ -42,9 +42,13 @@ function fit169(r: { x: number; y: number; w: number; h: number }) {
   return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
 }
 
-/** 全面+下の、全面の動画のぼかし（画面の px）。動画は縮めずに、画面と同じ細かさ（2 倍まで）で描いてぼかす */
+/**
+ * 全面+下の、全面の動画のぼかし（画面の px）。画面の半分の細かさの canvas に、ぼかしながら描く
+ * （ぼけ方は画面の細かさでぼかしたときとほぼ同じで、描く量は 1/4。録画にもそのまま使う）
+ */
 const BLUR = 3;
-/** ぼかしで端が薄くならないよう、枠の外にはみ出して描く幅（枠の外は切り落とす） */
+const BLUR_Q = 2;
+/** ぼかしで端が薄くならないよう、枠の外まで広げて描く幅（画面の px） */
 const BLUR_PAD = BLUR * 3;
 
 export interface PlaySettings {
@@ -794,19 +798,12 @@ export class PlayMode {
     };
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
+    // 全面+下のぼかした動画（もうぼかしてあるので、そのまま広げて描く）
     const bl = this.vblur;
     const bc = this.vblurCv;
     if (shown(bl) && bc?.width) {
       const r = place(bl);
-      const rc = place(bc);
-      g.save();
-      g.beginPath();
-      g.rect(r.x, r.y, r.w, r.h);
-      g.clip();
-      // 画面と同じぼかし（使えない端末では、半分の細かさの絵を広げたぼけ方だけ）
-      if ('filter' in g) g.filter = `blur(${BLUR * k}px)`;
-      g.drawImage(bc, rc.x, rc.y, rc.w, rc.h);
-      g.restore();
+      g.drawImage(bc, r.x, r.y, r.w, r.h);
     }
     const v = this.video;
     if (this.videoMode && shown(v)) {
@@ -829,7 +826,7 @@ export class PlayMode {
       if (shown(this.bgDim)) shade(this.bgDim);
     }
     const bg = R.background;
-    if (bg?.width && bg.isConnected) {
+    if (bg?.width && bg.isConnected && !R.bgBlank) {
       const r = place(bg);
       g.drawImage(bg, r.x, r.y, r.w, r.h);
     }
@@ -996,7 +993,6 @@ export class PlayMode {
         blur.className = 'play-vblur hidden';
         blur.setAttribute('aria-hidden', 'true');
         const bcv = document.createElement('canvas');
-        bcv.style.filter = `blur(${BLUR}px)`;
         blur.append(bcv);
         this.vblurCv = bcv;
         this.root.prepend(dim);
@@ -1076,7 +1072,10 @@ export class PlayMode {
     R.movie = !!vmode;
     const v = this.video;
     this.vblur?.classList.toggle('hidden', vmode !== 'both');
-    if (vmode !== 'both' && this.vblurCv) this.vblurCv.width = this.vblurCv.height = 0;
+    if (vmode !== 'both' && this.vblurCv) {
+      this.vblurCv.width = this.vblurCv.height = 0;
+      this.blurKey = '';
+    }
     if (v) {
       v.classList.toggle('hidden', !vmode);
       this.vdim?.classList.toggle('hidden', !vmode);
@@ -1092,7 +1091,7 @@ export class PlayMode {
 
   /** 下に出す動画の縁取りの太さ（画面の px） */
   private frameLine() {
-    return Math.max(1, Math.round(this.renderer.frame.s * 6 * 2) / 2);
+    return Math.max(1, Math.round(this.renderer.frame.s * 4 * 2) / 2);
   }
 
   /** 動画の明るさ（bottom = 下に出す動画） */
@@ -1101,33 +1100,67 @@ export class PlayMode {
     return Math.max(0.1, Math.min(1, v ?? 0.5));
   }
 
+  /** ぼかした絵を作った動画の位置と大きさ・暗さ（同じなら描き直さない） */
+  private blurKey = '';
+  /** canvas でぼかしを使えるか（使えなければ、縮めて広げることでぼかす） */
+  private canFilter: boolean | null = null;
+  /** ぼかしを使えないときの、間の小さな canvas */
+  private blurTmp: HTMLCanvasElement | null = null;
+
   /**
-   * 全面+下: 動画を画面と同じ細かさの canvas に描き（枠より BLUR_PAD 広く）、なめらかにぼかして全面に出す。
-   * 枠の外（左右の帯）にははみ出さない。暗さは canvas の中で暗くする
+   * 全面+下: 動画を、画面の半分の細かさの canvas にぼかしながら描いて全面に出す。動画のコマが変わったときだけ描く。
+   * 枠の外（左右の帯）にははみ出さない。暗さも canvas の中で付ける
    */
   private paintBlur() {
     const box = this.vblur;
     const c = this.vblurCv;
     const v = this.video;
-    if (!box || !c || !v || this.videoMode !== 'both' || v.readyState < 2) return;
-    const W = box.clientWidth + BLUR_PAD * 2;
-    const H = box.clientHeight + BLUR_PAD * 2;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.max(8, Math.round(W * dpr));
-    const h = Math.max(8, Math.round(H * dpr));
+    if (!box || !c || !v || this.videoMode !== 'both' || v.readyState < 2 || !v.videoWidth) return;
+    const W = box.clientWidth;
+    const H = box.clientHeight;
+    const w = Math.max(8, Math.round(W / BLUR_Q));
+    const h = Math.max(8, Math.round(H / BLUR_Q));
+    const dim = 1 - this.dimOf(false);
+    // 動画のコマ（コマが出た通知が無い端末では再生位置）が変わったときだけ描く
+    const key = `${this.vFrame ? this.vFrame.media : v.currentTime}|${w}x${h}|${dim}`;
+    if (key === this.blurKey) return;
+    this.blurKey = key;
     if (c.width !== w || c.height !== h) {
       c.width = w;
       c.height = h;
-      Object.assign(c.style, { left: `${-BLUR_PAD}px`, top: `${-BLUR_PAD}px`, width: `${W}px`, height: `${H}px` });
+      Object.assign(c.style, { left: '0px', top: '0px', width: '100%', height: '100%' });
     }
     const g = c.getContext('2d');
-    if (!g || !v.videoWidth) return;
-    const k = Math.max(w / v.videoWidth, h / v.videoHeight);
+    if (!g) return;
+    if (this.canFilter === null) {
+      g.filter = 'blur(1px)';
+      this.canFilter = g.filter === 'blur(1px)';
+      g.filter = 'none';
+    }
+    // 動画は枠より BLUR_PAD 広く描く（端がぼけて薄くならないように）
+    const pad = BLUR_PAD / BLUR_Q;
+    const k = Math.max((w + pad * 2) / v.videoWidth, (h + pad * 2) / v.videoHeight);
+    const dw = v.videoWidth * k;
+    const dh = v.videoHeight * k;
     try {
-      g.drawImage(v, (w - v.videoWidth * k) / 2, (h - v.videoHeight * k) / 2, v.videoWidth * k, v.videoHeight * k);
+      if (this.canFilter) {
+        g.filter = `blur(${BLUR / BLUR_Q}px)`;
+        g.drawImage(v, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        g.filter = 'none';
+      } else {
+        // ぼかしが使えない: さらに半分に縮めてから広げる
+        const t = (this.blurTmp ??= document.createElement('canvas'));
+        const tw = Math.max(4, Math.round(w / 2));
+        const th = Math.max(4, Math.round(h / 2));
+        if (t.width !== tw || t.height !== th) { t.width = tw; t.height = th; }
+        t.getContext('2d')?.drawImage(v, (tw - dw / 2) / 2, (th - dh / 2) / 2, dw / 2, dh / 2);
+        g.drawImage(t, 0, 0, w, h);
+      }
     } catch { /* 描けないコマ */ }
-    g.fillStyle = `rgba(0,0,0,${1 - this.dimOf(false)})`;
-    g.fillRect(0, 0, w, h);
+    if (dim > 0) {
+      g.fillStyle = `rgba(0,0,0,${dim})`;
+      g.fillRect(0, 0, w, h);
+    }
   }
 
   /**
@@ -1146,7 +1179,7 @@ export class PlayMode {
     };
     set(v, r);
     set(this.vdim, r);
-    // 下に出す動画には縁取り（白か黒。16:9 の枠の高さ 1125 に対して 6 の太さ）
+    // 下に出す動画には縁取り（白か黒。16:9 の枠の高さ 1125 に対して 4 の太さ）
     if (v) v.style.boxShadow = t ? `0 0 0 ${this.frameLine()}px ${this.settings.videoFrame === 'black' ? '#000' : '#fff'}` : '';
     // 全面+下: ぼかした動画は、全面のときの動画と同じ所（左右の帯はそのまま）
     set(this.vblur, fit169(full));
