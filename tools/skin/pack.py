@@ -183,7 +183,7 @@ for f in ['FOT-Seurat_Pro_B.otf', 'FOT-OedoKtr.otf']:
     shutil.copy(pick(f), os.path.join(OUT, f))
 # 称号のキラキラ（参考動画から取り出した 120 コマの光。スキンの素材ではないので、作り直しても残す）
 if os.path.exists(os.path.join(OUT, 'fx/TitleShine.webp')):
-    man['img']['fx/TitleShine'] = {'f': 'fx/TitleShine.webp', 'w': 3000, 'h': 696}
+    man['img']['fx/TitleShine'] = {'f': 'fx/TitleShine.webp', 'w': 3300, 'h': 1272}
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w'), ensure_ascii=False, separators=(',', ':'))
 # 難易度マーク（選曲画面の大きなマークと大江戸勘亭流の字で、4 倍の細かさに作る）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

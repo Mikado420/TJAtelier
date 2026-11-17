@@ -1575,13 +1575,13 @@ export class TndeSkin {
 
   /**
    * 金・紫の称号のキラキラ（帯の上、字の下）。参考動画から取り出した光を、2 秒（120 コマ）でひと回り貼る。
-   * 絵は横 10 コマずつ・1 コマ 300×58 で、1920×1080 の (30, 440) から
+   * 絵は横 10 コマずつ・1 コマ 330×106 で、1920×1080 の (30, 392) から
    */
   private drawTitleShine(c: CanvasRenderingContext2D, wall: number) {
     const sh = this.img('fx/TitleShine');
     if (!sh) return;
     const i = Math.floor((((wall * 0.06) % 120) + 120) % 120);
-    this.di(c, sh, (i % 10) * 300, Math.floor(i / 10) * 58, 300, 58, 30, 440, 300, 58);
+    this.di(c, sh, (i % 10) * 330, Math.floor(i / 10) * 106, 330, 106, 30, 392, 330, 106);
   }
 
   /**
