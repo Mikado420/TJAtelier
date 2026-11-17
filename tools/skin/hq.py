@@ -8,7 +8,7 @@ skin.json の各絵に k（細かさの倍率）を書き、描くときは元�
 pack.py で作り直したあとに動かす（もう細かくしてある絵は飛ばす）。
 （waifu2x のモデル: https://github.com/nagadomi/nunif/releases の waifu2x_onnx_models_20230504.zip）
 """
-import json, os, sys
+import json, os, sys, time
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -99,9 +99,9 @@ def rd(p):
     return im
 
 
-def wr(rel, im, lossy):
+def wr(rel, im, lossy, qual=92):
     p = os.path.join(OUT, rel)
-    cv2.imwrite(p, im, [cv2.IMWRITE_WEBP_QUALITY, 92 if lossy else 101])
+    cv2.imwrite(p, im, [cv2.IMWRITE_WEBP_QUALITY, qual if lossy else 101])
 
 
 man = json.load(open(os.path.join(OUT, 'skin.json'), encoding='utf-8'))
@@ -198,5 +198,97 @@ for k, a in list(man['anim'].items()):
     a.update({'w': fw2, 'h': fh2, 'n': len(ims), 'k': 1.5})
     json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
 
+# iPhone（Safari）は 500 万画素を超える絵を粗く読み込み、切り出す位置がずれる。
+# 大きな絵は 1 枚 420 万画素・横 4096 px までに分ける（ファイル名も変えて、古い絵が残らないように）
+LIMIT, MAXW = 4_200_000, 4096
+
+
+def split_anims():
+    for k, a in man['anim'].items():
+        if not a.get('k') or a.get('pages'):
+            continue
+        q = a['k']
+        p = os.path.join(OUT, a['f'])
+        sheet = rd(p)
+        W, H = round(a['w'] * q), round(a['h'] * q)
+        cells = [sheet[(i // a['cols']) * H:(i // a['cols']) * H + H, (i % a['cols']) * W:(i % a['cols']) * W + W] for i in range(a['n'])]
+        cols = max(1, min(a['n'], MAXW // W))
+        rows = max(1, LIMIT // (cols * W * H))
+        per = cols * rows
+        base = a['f'][:-5]
+        files = []
+        for pg in range(-(-a['n'] // per)):
+            part = cells[pg * per:(pg + 1) * per]
+            r = -(-len(part) // cols)
+            out = np.zeros((r * H, min(cols, len(part)) * W, 4), np.uint8)
+            for j, cl in enumerate(part):
+                out[(j // cols) * H:(j // cols) * H + H, (j % cols) * W:(j % cols) * W + W] = cl
+            f = '%s-%d.webp' % (base, pg)
+            wr(f, out, True, 95)
+            files.append(f)
+        os.remove(p)
+        a.update({'f': files[0], 'cols': cols, 'per': per, 'pages': files})
+        print(k, len(files), 'pages', flush=True)
+
+
+def split_fc():
+    meta = man['img'].get('end/fc0')
+    if not meta or not meta.get('k') or meta.get('split'):
+        return
+    q = meta['k']
+    old = [rd(os.path.join(OUT, man['img']['end/fc%d' % i]['f'])) for i in range(meta['pages'])]
+    # コマを切り出して、棚に並べるように詰め直す
+    cells = []
+    for fr in meta['frames']:
+        if not fr[2]:
+            cells.append(None)
+            continue
+        px, py, pg, sw, sh = fr[4], fr[5], fr[6], fr[7], fr[8]
+        x, y, w, h = round(px * q), round(py * q), round(sw * q), round(sh * q)
+        cells.append(old[pg][y:y + h, x:x + w])
+    PW = 3072
+    PH = LIMIT // PW
+    pages, place = [[]], []
+    x = y = rowh = 0
+    for cl in cells:
+        if cl is None:
+            place.append(None)
+            continue
+        h, w = cl.shape[:2]
+        if x + w > PW:
+            x, y, rowh = 0, y + rowh + 2, 0
+        if y + h > PH:
+            pages.append([])
+            x = y = rowh = 0
+        pages[-1].append((x, y, cl))
+        place.append((x, y, len(pages) - 1))
+        x += w + 2
+        rowh = max(rowh, h)
+    for i in range(meta['pages']):
+        os.remove(os.path.join(OUT, man['img']['end/fc%d' % i]['f']))
+        if i:
+            del man['img']['end/fc%d' % i]
+    for i, items in enumerate(pages):
+        W = max(px + c.shape[1] for px, py, c in items)
+        H = max(py + c.shape[0] for px, py, c in items)
+        out = np.zeros((H, W, 4), np.uint8)
+        for px, py, c in items:
+            out[py:py + c.shape[0], px:px + c.shape[1]] = c
+        f = 'end/fcp%d.webp' % i
+        wr(f, out, True, 95)
+        e = man['img'].setdefault('end/fc%d' % i, {})
+        e.update({'f': f, 'w': W / q, 'h': H / q, 'k': q})
+    for fr, pl in zip(meta['frames'], place):
+        if pl:
+            fr[4], fr[5], fr[6] = pl[0] / q, pl[1] / q, pl[2]
+    meta['pages'] = len(pages)
+    meta['split'] = 1
+    print('end/fc', len(pages), 'pages', flush=True)
+
+
+split_anims()
+split_fc()
+# 絵の版（読み込むときに URL に付け、古い絵が残らないように）
+man['v'] = '%x' % int(time.time())
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
 print('done', flush=True)

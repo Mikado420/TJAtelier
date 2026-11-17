@@ -25,8 +25,9 @@ const HALF = NOTE / 2;
 
 /** k: 絵が元の大きさ（w × h）の何倍の細かさで入っているか */
 interface ImgInfo { f: string; w: number; h: number; k?: number }
-interface AnimInfo { f: string; w: number; h: number; n: number; cols: number; step: number; k?: number }
-interface Manifest { img: Record<string, ImgInfo>; anim: Record<string, AnimInfo> }
+/** pages: 大きな連番は何枚かに分けてある（1 枚に per コマずつ） */
+interface AnimInfo { f: string; w: number; h: number; n: number; cols: number; step: number; k?: number; pages?: string[]; per?: number }
+interface Manifest { img: Record<string, ImgInfo>; anim: Record<string, AnimInfo>; v?: string }
 
 export interface TndeFx {
   bursts: { t: number; judge: Judge; big: boolean }[];
@@ -171,7 +172,8 @@ export class TndeSkin {
 
   static async load(base: string, title?: string) {
     const s = new TndeSkin(base);
-    const r = await fetch(`${base}skin.json`);
+    // 絵を差し替えたとき、古い skin.json が残らないように
+    const r = await fetch(`${base}skin.json`, { cache: 'no-cache' });
     if (!r.ok) throw new Error('skin.json');
     s.man = await r.json();
     // プレイ画面の字: 曲名・称号・名前は勘亭流、ジャンル・曲目は丸ゴシック
@@ -241,35 +243,54 @@ export class TndeSkin {
       this.loadedSet = set;
       for (const n of names) {
         if (this.wants(n)) continue;
-        const im = this.imgs.get(n);
-        if (im && 'close' in im) im.close();
-        this.imgs.delete(n);
-        this.loading.delete(n);
+        for (const key of this.keysOf(n)) {
+          const im = this.imgs.get(key);
+          if (im && 'close' in im) im.close();
+          this.imgs.delete(key);
+          this.loading.delete(key);
+        }
       }
       this.dropCaches();
     }
     return Promise.all(names.filter((n) => this.wants(n)).map((n) => this.fetchImg(n))).then(() => {});
   }
 
+  /** 絵を置いておく名前（分けてある連番は、2 枚目から name#1, name#2, …） */
+  private keysOf(name: string) {
+    const pages = this.man.anim[name]?.pages;
+    return pages && pages.length > 1 ? pages.map((_, i) => (i ? `${name}#${i}` : name)) : [name];
+  }
+
   private fetchImg(name: string) {
-    let p = this.loading.get(name);
-    if (p) return p;
     const info = this.man.img[name] ?? this.man.anim[name];
     if (!info) return Promise.resolve(null);
-    const url = this.base + info.f;
+    const files = (info as AnimInfo).pages ?? [info.f];
+    const keys = this.keysOf(name);
+    return Promise.all(keys.map((key, i) => this.fetchOne(key, files[i], info.k))).then((r) => r[0]);
+  }
+
+  private fetchOne(key: string, file: string, k?: number) {
+    let p = this.loading.get(key);
+    if (p) return p;
+    const url = this.base + file + (this.man.v ? `?v=${this.man.v}` : '');
     p = this.queue(() => loadBitmap(url)).then((v) => {
       if (!v) {
         // 読み込めなかった絵は、次にまた読み込み直せるようにしておく
-        if (this.loading.get(name) === p) this.loading.delete(name);
+        if (this.loading.get(key) === p) this.loading.delete(key);
         return null;
       }
-      if (this.loading.get(name) !== p) { if ('close' in v) v.close(); return null; }
-      if (info.k && info.k !== 1) this.hq.set(v, info.k);
-      this.imgs.set(name, v);
+      if (this.loading.get(key) !== p) { if ('close' in v) v.close(); return null; }
+      if (k && k !== 1) this.hq.set(v, k);
+      this.imgs.set(key, v);
       return v;
     });
-    this.loading.set(name, p);
+    this.loading.set(key, p);
     return p;
+  }
+
+  /** 連番の絵がすべて読み込めているか */
+  private animReady(name: string) {
+    return this.keysOf(name).every((key) => this.imgs.has(key));
   }
 
   private img(name: string) {
@@ -340,12 +361,17 @@ export class TndeSkin {
   /** 連番の絵の n 番目 */
   private frame(c: CanvasRenderingContext2D, name: string, n: number, x: number, y: number, k = S) {
     // 魂ゲージが満タンのどんちゃんの絵は、満タンが近づいてから読み込む（読み込み中はふだんの絵で）
-    if (!this.img(name) && name.startsWith('chara/') && name.endsWith('_Max')) name = name.slice(0, -4);
+    if (!this.animReady(name) && name.startsWith('chara/') && name.endsWith('_Max')) name = name.slice(0, -4);
     const a = this.man.anim[name];
-    const im = this.img(name);
-    if (!a || !im) return;
+    if (!a) return;
     const i = Math.max(0, Math.min(a.n - 1, Math.floor(n)));
-    this.di(c, im, (i % a.cols) * a.w, Math.floor(i / a.cols) * a.h, a.w, a.h, x, y, a.w * k, a.h * k);
+    // 分けてある連番は、何枚目の何コマ目か
+    const per = a.pages && a.pages.length > 1 ? a.per ?? a.n : a.n;
+    const pg = Math.floor(i / per);
+    const j = i - pg * per;
+    const im = this.imgs.get(pg ? `${name}#${pg}` : name);
+    if (!im) return;
+    this.di(c, im, (j % a.cols) * a.w, Math.floor(j / a.cols) * a.h, a.w, a.h, x, y, a.w * k, a.h * k);
   }
 
   private count(name: string) {
