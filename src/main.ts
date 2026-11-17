@@ -125,6 +125,8 @@ const settings = {
   brStack: false,
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim: 0.5,
+  /** 下に出す動画（下・全面+下）の明るさ */
+  videoDimBottom: 0.5,
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
@@ -136,7 +138,10 @@ const settings = {
 };
 try {
   // 横スクロール化で拡大率の意味が変わったので v2 のキーで保存
-  Object.assign(settings, JSON.parse(localStorage.getItem('malody-web:settings2') ?? '{}'));
+  const saved = JSON.parse(localStorage.getItem('malody-web:settings2') ?? '{}');
+  Object.assign(settings, saved);
+  // 下の動画の明るさは、前の版では動画の明るさ 1 つだった
+  if (saved.videoDimBottom === undefined && typeof saved.videoDim === 'number') settings.videoDimBottom = saved.videoDim;
   // 背景の動画の「上だけ」は「下だけ」にした
   if ((settings.videoMode as string) === 'top') settings.videoMode = 'bottom';
   // 前の版はプレイをオートだけにしていて、その間に保存した auto: true が残っているので一度だけ戻す
@@ -1938,7 +1943,8 @@ function viewRows(heads = false) {
     ${stSwitch('showFps', 'FPS を表示', settings.showFps)}
     ${stSwitch('autoRes', '重いときは画質を下げる', settings.autoRes)}
     <div class="st-row"><span>背景の動画</span><div class="st-seg four">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
-    ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
+    ${stRange('videoDim', '全面の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}
+    ${stRange('videoDimBottom', '下の明るさ', 0.1, 1, 0.05, settings.videoDimBottom, 100, '%')}`;
 }
 const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', 'N'], ['E', 'E'], ['M', 'M']];
 function onBranchModeClick(b: HTMLButtonElement) {
@@ -1946,7 +1952,7 @@ function onBranchModeClick(b: HTMLButtonElement) {
   saveSettings();
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
 }
-const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['both', '全面+下'], ['bottom', '下だけ'], ['off', '出さない']];
+const VIDEO_MODES: [typeof settings.videoMode, string][] = [['both', '全面+下'], ['full', '全面'], ['bottom', '下'], ['off', 'なし']];
 function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}

@@ -42,8 +42,11 @@ function fit169(r: { x: number; y: number; w: number; h: number }) {
   return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
 }
 
-/** 全面+下の、全面の動画のぼかし（画面の何 px を 1 つにまとめるか） */
-const BLUR_Q = 4;
+/** 全面+下の、全面の動画のぼかし: 半分の細かさで描き、BLUR px でなめらかにぼかす（画面の px） */
+const BLUR_Q = 2;
+const BLUR = 3;
+/** ぼかしで端が薄くならないよう、枠の外にはみ出して描く幅（枠の外は切り落とす） */
+const BLUR_PAD = BLUR * 3;
 
 export interface PlaySettings {
   speed: number;
@@ -81,6 +84,8 @@ export interface PlaySettings {
   videoMode?: 'full' | 'both' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
+  /** 下に出す動画（下・全面+下）の明るさ（0.1〜1） */
+  videoDimBottom?: number;
   /** 遊びながら録画する（終わったら結果画面で保存できる） */
   recOn?: boolean;
   /** 録画の画質（縦の大きさ）と 1 秒のコマ数 */
@@ -789,12 +794,17 @@ export class PlayMode {
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
     const bl = this.vblur;
-    if (shown(bl) && bl.width) {
+    const bc = this.vblurCv;
+    if (shown(bl) && bc?.width) {
       const r = place(bl);
+      const rc = place(bc);
       g.save();
-      // 画面と同じぼかし（使えない端末では、小さな絵を広げたぼけ方だけ）
-      if ('filter' in g) g.filter = bl.style.filter.replace(/[\d.]+px/, (x) => `${parseFloat(x) * k}px`);
-      g.drawImage(bl, r.x, r.y, r.w, r.h);
+      g.beginPath();
+      g.rect(r.x, r.y, r.w, r.h);
+      g.clip();
+      // 画面と同じぼかし（使えない端末では、半分の細かさの絵を広げたぼけ方だけ）
+      if ('filter' in g) g.filter = `blur(${BLUR * k}px)`;
+      g.drawImage(bc, rc.x, rc.y, rc.w, rc.h);
       g.restore();
     }
     const v = this.video;
@@ -940,8 +950,9 @@ export class PlayMode {
 
   private video: HTMLVideoElement | null = null;
   private vdim: HTMLElement | null = null;
-  /** 全面+下のときの、全面のぼかした動画 */
-  private vblur: HTMLCanvasElement | null = null;
+  /** 全面+下のときの、全面のぼかした動画（枠と、その中の canvas） */
+  private vblur: HTMLElement | null = null;
+  private vblurCv: HTMLCanvasElement | null = null;
   private videoUrl = '';
   private videoOffset = 0;
   private videoCheck = 0;
@@ -970,9 +981,13 @@ export class PlayMode {
         const dim = document.createElement('div');
         dim.className = 'play-vdim';
         // 全面+下: 全面にうすくぼかして出す動画（小さく描いて広げる）
-        const blur = document.createElement('canvas');
+        const blur = document.createElement('div');
         blur.className = 'play-vblur hidden';
         blur.setAttribute('aria-hidden', 'true');
+        const bcv = document.createElement('canvas');
+        bcv.style.filter = `blur(${BLUR}px)`;
+        blur.append(bcv);
+        this.vblurCv = bcv;
         this.root.prepend(dim);
         this.root.prepend(v);
         this.root.prepend(blur);
@@ -1050,11 +1065,11 @@ export class PlayMode {
     R.movie = !!vmode;
     const v = this.video;
     this.vblur?.classList.toggle('hidden', vmode !== 'both');
-    if (vmode !== 'both' && this.vblur) this.vblur.width = this.vblur.height = 0;
+    if (vmode !== 'both' && this.vblurCv) this.vblurCv.width = this.vblurCv.height = 0;
     if (v) {
       v.classList.toggle('hidden', !vmode);
       this.vdim?.classList.toggle('hidden', !vmode);
-      if (this.vdim) this.vdim.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
+      if (this.vdim) this.vdim.style.opacity = String(1 - this.dimOf(vmode === 'both' || vmode === 'bottom'));
       if (!vmode) v.pause();
     }
     if (R.videoMode !== mode) {
@@ -1064,23 +1079,29 @@ export class PlayMode {
     this.placeVideo();
   }
 
+  /** 動画の明るさ（bottom = 下に出す動画） */
+  private dimOf(bottom: boolean) {
+    const v = bottom ? this.settings.videoDimBottom ?? this.settings.videoDim : this.settings.videoDim;
+    return Math.max(0.1, Math.min(1, v ?? 0.5));
+  }
+
   /**
-   * 全面+下: 動画を小さな canvas に描き（画面いっぱいを覆う向きで）、それを全面に広げてぼかして出す。
-   * 暗さは動画と同じだけ、canvas の中で暗くする
+   * 全面+下: 動画を半分の細かさの canvas に描き（枠より BLUR_PAD 広く）、なめらかにぼかして全面に出す。
+   * 枠の外（左右の帯）にははみ出さない。暗さは canvas の中で暗くする
    */
   private paintBlur() {
-    const c = this.vblur;
+    const box = this.vblur;
+    const c = this.vblurCv;
     const v = this.video;
-    if (!c || !v || this.videoMode !== 'both' || v.readyState < 2) return;
-    const W = c.clientWidth;
-    const H = c.clientHeight;
-    const q = BLUR_Q;
-    const w = Math.max(8, Math.round(W / q));
-    const h = Math.max(8, Math.round(H / q));
+    if (!box || !c || !v || this.videoMode !== 'both' || v.readyState < 2) return;
+    const W = box.clientWidth + BLUR_PAD * 2;
+    const H = box.clientHeight + BLUR_PAD * 2;
+    const w = Math.max(8, Math.round(W / BLUR_Q));
+    const h = Math.max(8, Math.round(H / BLUR_Q));
     if (c.width !== w || c.height !== h) {
       c.width = w;
       c.height = h;
-      c.style.filter = `blur(${Math.round(q * 0.6)}px)`;
+      Object.assign(c.style, { left: `${-BLUR_PAD}px`, top: `${-BLUR_PAD}px`, width: `${W}px`, height: `${H}px` });
     }
     const g = c.getContext('2d');
     if (!g || !v.videoWidth) return;
@@ -1088,7 +1109,7 @@ export class PlayMode {
     try {
       g.drawImage(v, (w - v.videoWidth * k) / 2, (h - v.videoHeight * k) / 2, v.videoWidth * k, v.videoHeight * k);
     } catch { /* 描けないコマ */ }
-    g.fillStyle = `rgba(0,0,0,${1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5))})`;
+    g.fillStyle = `rgba(0,0,0,${1 - this.dimOf(false)})`;
     g.fillRect(0, 0, w, h);
   }
 
