@@ -1045,6 +1045,16 @@ export class Renderer {
   }
 
   /** TNDE スキンで 1 フレーム描く（1920×1080 の座標を、この画面の基準座標に合わせて縮める） */
+  /** TNDE スキンのレーンの分岐の色（分岐の区間の始まりの小節線が判定枠に来たら、0.3 秒で切り替える） */
+  private tndeBranch(game: Game, now: number) {
+    if (!this.hasBranch) return null;
+    let fx = this.branchFx;
+    if (fx && (now - fx.at > 1 || game.branch !== fx.to)) fx = this.branchFx = null;
+    if (!fx) return { cur: game.branch, from: game.branch, p: 1 };
+    const p = Math.max(0, Math.min(1, (now - fx.at) / 0.3));
+    return { cur: fx.to, from: fx.from, p };
+  }
+
   private drawTnde(game: Game, course: Course, now: number, wall: number, info: TndeInfo, laneOnly = false) {
     const ctx = this.ctx;
     const k = REF_W / TW;
@@ -1072,6 +1082,7 @@ export class Renderer {
       laneOnly,
       bgMode: this.videoMode,
       end: this.endFx,
+      branch: this.tndeBranch(game, now),
     });
     } catch (e) {
       // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）

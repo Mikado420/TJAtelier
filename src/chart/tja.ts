@@ -107,6 +107,8 @@ export function parseTJA(text: string): EChart {
     }
     const lead = o.states.N ? 'N' : o.first ?? 'N';
     st = cloneSt(o.states[lead] ?? o.base);
+    // 中身の無い分岐（#N・#E・#M も音符も無い）: #BRANCHSTART の直前の命令（#MEASURE など）は、次の小節の頭に戻す
+    if (!key && !o.first && o.pre.length) items = [...o.pre, ...items];
     const b = o.b;
     b.end = st.tick;
     b.close = close;
@@ -129,6 +131,9 @@ export function parseTJA(text: string): EChart {
     if (course.notes.some((n) => n.tick >= tailTick)) course.endTick = tailTick;
     else {
       course.events = course.events.filter((e) => e.tick < tailTick);
+      // 音符の無い #END の後ろの分岐（表示を変えるだけのもの）も使わない
+      if (course.branches) course.branches = course.branches.filter((b) => b.start < tailTick);
+      if (course.branches && !course.branches.length) delete course.branches;
     }
     sortCourse(course);
     chart.courses.push(course);

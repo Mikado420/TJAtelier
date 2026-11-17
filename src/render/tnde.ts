@@ -101,6 +101,8 @@ export interface TndeFrame {
   profile?: PlateStyle;
   /** 曲の終わりの演出（t = 始まった時刻 ms） */
   end?: { kind: string; t: number } | null;
+  /** 譜面分岐（分岐のある譜面だけ）: 今の分岐・前の分岐・切り替わりの進み（0〜1） */
+  branch?: { cur: number; from: number; p: number } | null;
 }
 
 /** SENotes.png の行 */
@@ -1244,6 +1246,13 @@ export class TndeSkin {
   private drawLane(c: CanvasRenderingContext2D, F: TndeFrame, gogo: boolean) {
     const { wall } = F;
     this.put(c, 'lane/Background_Main', LANE_X, FIELD_Y);
+    // 譜面分岐のある譜面: 分岐ごとのレーンの色（切り替わるときは、前の色の上に新しい色を重ねていく）
+    const br = F.branch;
+    const BASE = ['lane/Base_Normal', 'lane/Base_Expert', 'lane/Base_Master'];
+    if (br) {
+      if (br.p < 1) this.put(c, BASE[br.from], LANE_X, FIELD_Y);
+      if (br.p > 0) this.alpha(c, br.p, () => this.put(c, BASE[br.cur], LANE_X, FIELD_Y));
+    }
     if (gogo) {
       // ゴーゴーのレーンは縦にひらいて出てくる（18 ms ごと）
       const v = step(wall, this.gogoAt, 18);
@@ -1251,6 +1260,16 @@ export class TndeSkin {
       this.put(c, 'lane/Background_GoGo', LANE_X, FIELD_Y + P(dy), 0, 0, undefined, undefined, S, S * ky);
     }
     this.put(c, 'lane/Background_Sub', LANE_X, P(326));
+    // 分岐の名前（普通譜面・玄人譜面・達人譜面）: 前の名前は上へ抜けて消え、新しい名前は下から入ってくる
+    if (br) {
+      const TEXT = ['lane/Text_Normal', 'lane/Text_Expert', 'lane/Text_Master'];
+      if (br.p >= 1) this.put(c, TEXT[br.cur], LANE_X, FIELD_Y);
+      else {
+        const d = P(20);
+        this.alpha(c, 1 - br.p, () => this.put(c, TEXT[br.from], LANE_X, FIELD_Y - d * br.p));
+        this.alpha(c, br.p, () => this.put(c, TEXT[br.cur], LANE_X, FIELD_Y + d * (1 - br.p)));
+      }
+    }
     // 叩いた色（ドン 赤・カッ 青）と、音符を叩けたとき（黄）。0.1 秒そのまま、次の 0.1 秒で半分まで薄くなって消える
     const flash = (name: string, t: number) => {
       const ms = wall - t;

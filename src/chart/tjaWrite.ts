@@ -135,10 +135,13 @@ export function writeMeasures(c: ECourse, atLeast = 0): string[][] {
   const shared = c.events.filter((e) => SHARED_KINDS.has(e.kind));
   const nChars = charsOf(c.notes);
   for (const m of ms) {
+    // 中身の無い分岐（#BRANCHSTART のすぐ後に #BRANCHEND。分岐の表示だけを変える使い方）は、その小節の前に書く
+    const empty = bs.filter((x) => x.start === x.end && x.start >= m.start && x.start < m.start + m.length);
+    const head = empty.flatMap((x) => [`#BRANCHSTART ${x.type},${num(x.x)},${num(x.y)}`, ...(x.close ? ['#BRANCHEND'] : [])]);
     const b = bs.find((x) => m.start >= x.start && m.start < x.end);
-    if (!b) { out.push(measureLines(m, nChars, c.events)); continue; }
+    if (!b) { out.push([...head, ...measureLines(m, nChars, c.events)]); continue; }
     if (m.start !== b.start && ms.some((x) => x.start === b.start)) { out.push([]); continue; }
-    out.push(branchLines(b, ms.filter((x) => x.start >= b.start && x.start < b.end), c, nChars, shared));
+    out.push([...head, ...branchLines(b, ms.filter((x) => x.start >= b.start && x.start < b.end), c, nChars, shared)]);
   }
   return out;
 }
