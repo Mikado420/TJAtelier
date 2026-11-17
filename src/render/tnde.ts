@@ -1562,38 +1562,62 @@ export class TndeSkin {
     }
     // 難易度・ネームプレート（中身が変わったときだけ描き直す）
     const course = COURSE_IMG[F.info.course] ?? 'course/Oni';
-    this.cached(c, 'plate', `${course}|${F.title}|${F.name}|${JSON.stringify(F.profile ?? null)}`, -10, 340, 350, 190, (g) => {
+    const key = `${course}|${F.title}|${F.name}|${JSON.stringify(F.profile ?? null)}`;
+    this.cached(c, 'plate', key, -10, 340, 350, 190, (g) => {
       this.put(g, course, P(28), P(232));
-      this.drawNameplate(g, F);
+      this.drawNameplate(g, F, false);
     });
+    // 金・紫の称号のキラキラ（帯の上、字の下）
+    const ts = (F.profile ?? DEFAULT_PROFILE).titleStyle;
+    if (ts !== 'wood') this.drawTitleShine(c, F.wall);
+    this.cached(c, 'plateTop', key, -10, 340, 350, 190, (g) => this.drawNameplate(g, F, true));
+  }
+
+  /**
+   * 金・紫の称号のキラキラ（帯の上、字の下）。参考動画から取り出した光を、2 秒（120 コマ）でひと回り貼る。
+   * 絵は横 10 コマずつ・1 コマ 300×58 で、1920×1080 の (30, 440) から
+   */
+  private drawTitleShine(c: CanvasRenderingContext2D, wall: number) {
+    const sh = this.img('fx/TitleShine');
+    if (!sh) return;
+    const i = Math.floor((((wall * 0.06) % 120) + 120) % 120);
+    this.di(c, sh, (i % 10) * 300, Math.floor(i / 10) * 58, 300, 58, 30, 440, 300, 58);
   }
 
   /**
    * ネームプレート。NamePlate.png の 54px ごとの段（1P の丸・白い台・称号の帯）を同じ位置に重ねて 1.5 倍で貼る
    * （参考動画で測った: 段の左上が (-6, 443.5)）。字は勘亭流。段位は無いので出さない
    */
-  private drawNameplate(c: CanvasRenderingContext2D, F: TndeFrame) {
+  private drawNameplate(c: CanvasRenderingContext2D, F: TndeFrame, top: boolean) {
     const im = this.img('nameplate');
     if (!im) return;
     const pf = F.profile ?? DEFAULT_PROFILE;
+    const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
     // NamePlate.png の 54px ごとの段: 0 1P の丸、3 白い台、4 木・5 金・6 紫の称号の帯、7 段位の下地、8 銀・9 金・10 虹の枠、11 金の字の色
-    const at = (src: CanvasImageSource, r: number) => this.di(c, src, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
+    const at = (src: CanvasImageSource, r: number) => this.di(c, src, 0, r * 54, 220, 54, PLATE_X, PLATE_Y, 330, 81);
     const row = (r: number) => at(im, r);
+    // 上の段（1P の丸・字）は、称号のキラキラより手前に別に描く
+    if (top) {
+      this.drawNameplateTop(c, F, im, pf, dan);
+      return;
+    }
     row(3);
     const base = pf.titleStyle === 'wood' ? 4 : pf.titleStyle === 'gold' || pf.titleStyle === 'goldc' ? 5 : 6;
     const rc = (pf.titleStyle === 'goldc' || pf.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(pf.titleColor) ? this.recolored(im, base, pf.titleColor) : null;
-    if (rc) this.di(c, rc, 0, 0, 220, 54, -6, 443.5, 330, 81);
+    if (rc) this.di(c, rc, 0, 0, 220, 54, PLATE_X, PLATE_Y, 330, 81);
     else row(base);
-    const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
     if (dan) {
       row(7);
       const fr = pf.danFrame === 'gold' ? 1 : pf.danFrame === 'rainbow' ? 2 : 0;
       // 枠は 4 倍にした絵から（無ければ元の絵）
       const hd = this.img('nameplate_frames');
-      if (hd) c.drawImage(hd, 0, fr * 216, 880, 216, -6, 443.5, 330, 81);
+      if (hd) c.drawImage(hd, 0, fr * 216, 880, 216, PLATE_X, PLATE_Y, 330, 81);
       else row(8 + fr);
     }
-    row(0);
+  }
+
+  private drawNameplateTop(c: CanvasRenderingContext2D, F: TndeFrame, im: CanvasImageSource, pf: PlateStyle, dan: string) {
+    this.di(c, im, 0, 0, 220, 54, PLATE_X, PLATE_Y, 330, 81);
     c.save();
     c.textAlign = 'center';
     c.textBaseline = 'middle';
@@ -2143,6 +2167,9 @@ function endGroup(name: string) {
   if (name.startsWith('end/fc')) return 'fc';
   return 'clear';
 }
+/** ネームプレートの段の左上（参考動画で測った） */
+const PLATE_X = -6;
+const PLATE_Y = 443.5;
 /** 「クリア成功」の字の左の端（1 文字 135px。下の端は y 450） */
 const LETTER_X = [949, 1035, 1124, 1224, 1331];
 /** 字の縦のふくらみと濃さ（1 コマごと。TJAPlayer3 と同じ表） */
