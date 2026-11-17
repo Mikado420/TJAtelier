@@ -258,7 +258,7 @@ export class Mp4Writer {
     const head = (type: string, ...rest: Bytes[]) => box(type, new Array(6).fill(0), u16(1), new Array(8).fill(0), u16(A.ch), u16(16), u16(0), u16(0), u32(A.rate * 65536 >>> 0), ...rest);
     let entry: Uint8Array;
     if (A.codec.kind === 'aac') {
-      const es = desc(3, u16(0), u8(0),
+      const es = desc(3, u16(t.id), u8(0),
         desc(4, u8(0x40), u8(0x15), [0, 0, 0], u32(256000), u32(192000), desc(5, A.codec.asc)),
         desc(6, u8(2)));
       entry = head('mp4a', full('esds', 0, 0, es));

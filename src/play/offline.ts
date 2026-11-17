@@ -326,9 +326,19 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     // 音: 映像を描いている間に、別の所で混ぜて AAC にしておく（できたものは確かめてから入れる）
     const hits = hitAt.map((h) => ({ kind: h.kind, at: h.t - t0 }));
     const ui = Renderer.skinEndOf(endKind, skinMode) ? [{ name: `tnde:${endKind}`, at: iFx / FPS }] : [];
+    const tA = performance.now();
     const audP = audio
       .renderMix({ length: length + 0.5, rate: acfg.rate, musicAt: -t0, hits, ui })
-      .then((mix) => encodeAudio(mix, acfg, length, job, diag));
+      .then((mix) => {
+        diag.mixMs = Math.round(performance.now() - tA);
+        diag.hits = hits.length;
+        diag.music = audio.musicDuration;
+        return encodeAudio(mix, acfg, length, job, diag);
+      })
+      .then((r) => {
+        diag.audioMs = Math.round(performance.now() - tA);
+        return r;
+      });
     audP.catch(() => {});
 
     // 別スレッドの数・画面のスレッドに描かせるか
@@ -589,7 +599,9 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
 
     // 音（確かめてから入れる。映像より長く作ったぶんは入れない）
     job.onProgress(0.995);
+    const tWait = performance.now();
     const au = await audP;
+    diag.audioWaitMs = Math.round(performance.now() - tWait);
     mux.setAudio(au.codec, au.rate);
     for (const c of au.chunks) mux.addAudio(c.data, c.frames);
     job.onProgress(1);
@@ -742,13 +754,15 @@ async function encodeAudio(mix: AudioBuffer, a: { kind: AudioCodec['kind']; rate
     let k = 0;
     while (k < chunks.length && acc < total) acc += chunks[k++].frames;
     const used = chunks.slice(0, k);
+    // AAC の設定（AudioSpecificConfig）: iPhone はエンコーダーが別の形（ES 記述子など）で渡すことがあり、
+    // そのまま .mp4 に入れると、写真などのアプリで音が鳴らない。AAC-LC・2ch と決めて作ったので、こちらで作った正しい形を使う
     const codec: AudioCodec =
       a.kind === 'aac'
-        ? { kind: 'aac', asc: desc ?? aacConfig(a.rate, 2) }
+        ? { kind: 'aac', asc: aacConfig(a.rate, 2) }
         : { kind: 'opus', preSkip: desc && (desc as Uint8Array).length >= 12 ? (desc as Uint8Array)[10] | ((desc as Uint8Array)[11] << 8) : 312 };
     ad.chunks = used.length;
     ad.adts = adts;
-    ad.desc = desc ? (desc as Uint8Array).length : 0;
+    ad.desc = desc ? Array.from((desc as Uint8Array).slice(0, 24)).map((x) => x.toString(16).padStart(2, '0')).join('') : '';
     // 読み戻して確かめる
     if (typeof AudioDecoder !== 'undefined' && mixRms > 1e-4) {
       const dec = await decodeRms(a, codec, used);

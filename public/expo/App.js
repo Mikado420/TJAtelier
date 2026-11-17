@@ -124,17 +124,60 @@ function openStream(name) {
   }
   file.create();
   let handle = null;
-  try {
-    handle = typeof file.open === 'function' ? file.open() : null;
-  } catch {
-    handle = null;
-  }
+  // base64 のまま書き足す（変換は保存の部品に任せる。JS で変換するより速い）。
+  // 最初の 2 つは、書いたあとの大きさで正しく書き足せたか確かめる（だめなら作り直して、JS で変換して書く）
+  let native = true;
+  let checked = 0;
+  let total = 0;
+  const firsts = [];
+  const sizeOf = (b64) => (b64.length / 4) * 3 - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+  const writeJs = (b64) => {
+    const bytes = fromBase64(b64);
+    if (!handle) {
+      try {
+        handle = typeof file.open === 'function' ? file.open() : null;
+        if (handle && typeof handle.size === 'number') handle.offset = handle.size;
+      } catch {
+        handle = null;
+      }
+    }
+    if (handle) handle.writeBytes(bytes);
+    else file.write(bytes, { append: true });
+  };
   return {
     file,
     safe,
-    write(bytes) {
-      if (handle) handle.writeBytes(bytes);
-      else file.write(bytes, { append: true });
+    writeB64(b64) {
+      total += sizeOf(b64);
+      if (!native) {
+        writeJs(b64);
+        return;
+      }
+      const testing = checked < 2;
+      if (testing) firsts.push(b64);
+      try {
+        file.write(b64, { encoding: 'base64', append: true });
+        if (testing) {
+          checked += 1;
+          if (file.size !== total) throw new Error('size');
+          if (checked === 2) firsts.length = 0;
+        }
+        return;
+      } catch {
+        native = false;
+      }
+      if (testing) {
+        // 確かめている間: 作り直して、ここまでの分を JS で書き直す
+        try {
+          if (file.exists) file.delete();
+        } catch {
+          // 消せなくても続ける
+        }
+        file.create();
+        const redo = firsts.slice();
+        firsts.length = 0;
+        for (const x of redo) writeJs(x);
+      } else writeJs(b64);
     },
     close() {
       try {
@@ -147,7 +190,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 8;
+const APP_VERSION = 9;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -272,9 +315,9 @@ export default function App() {
         try {
           st.buf[m.part] = m.data;
           while (st.buf[st.next] !== undefined) {
-            const bytes = fromBase64(st.buf[st.next]);
+            const b64 = st.buf[st.next];
             delete st.buf[st.next];
-            st.write(bytes);
+            st.writeB64(b64);
             ack(m.id, st.next);
             st.next += 1;
           }

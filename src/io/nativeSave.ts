@@ -66,9 +66,9 @@ export async function nativeSave(blob: Blob, name: string, mime = blob.type || '
 }
 
 /** 1 回に送る大きさ（バイト。base64 にすると 4/3 倍） */
-const PART = 1536 * 1024;
+const PART = 3 * 1024 * 1024;
 /** 受け取りを待たずに送ってよい数 */
-const AHEAD = 3;
+const AHEAD = 4;
 
 /** 受け取りの知らせを待つ（来なければ false） */
 function waitAck(key: string, ms: number) {
