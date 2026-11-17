@@ -190,7 +190,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -302,7 +302,7 @@ export default function App() {
       };
       if (m.type === 'fileStart') {
         try {
-          if (!streams.current[m.id]) streams.current[m.id] = { ...openStream(m.name), mime: m.mime, next: 0, buf: {} };
+          if (!streams.current[m.id]) streams.current[m.id] = { ...openStream(m.name), mime: m.mime, size: m.size, next: 0, buf: {} };
           ack(m.id, -1);
         } catch (err) {
           fail(m.id, err);
@@ -331,6 +331,18 @@ export default function App() {
         if (!st) return;
         delete streams.current[m.id];
         st.close();
+        // 書けた大きさが送られた大きさと違えば、壊れたファイルなので共有しない
+        let got = -1;
+        try {
+          got = st.file.size;
+        } catch {
+          got = -1;
+        }
+        if (typeof st.size === 'number' && got !== st.size) {
+          streams.current[m.id] = st;
+          fail(m.id, new Error(`書き込めませんでした（${got} / ${st.size}）`));
+          return;
+        }
         ack(m.id, 'end');
         Sharing.shareAsync(st.file.uri, { mimeType: m.mime || st.mime, dialogTitle: st.safe })
           .catch((err) => {
