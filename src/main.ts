@@ -127,6 +127,8 @@ const settings = {
   videoDim: 0.5,
   /** 下に出す動画（下・全面+下）の明るさ */
   videoDimBottom: 0.5,
+  /** 下に出す動画の縁取りの色 */
+  videoFrame: 'white' as 'white' | 'black',
   /** 拡大率の決め方の版（2 = プレイ画面と同じ間隔） */
   zoomVer: 0,
   /** レーンの下に出すイベントの種類 */
@@ -1944,7 +1946,8 @@ function viewRows(heads = false) {
     ${stSwitch('autoRes', '重いときは画質を下げる', settings.autoRes)}
     <div class="st-row"><span>背景の動画</span><div class="st-seg four">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stRange('videoDim', '全面の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}
-    ${stRange('videoDimBottom', '下の明るさ', 0.1, 1, 0.05, settings.videoDimBottom, 100, '%')}`;
+    ${stRange('videoDimBottom', '下の明るさ', 0.1, 1, 0.05, settings.videoDimBottom, 100, '%')}
+    <div class="st-row"><span>縁取り</span><div class="st-seg two">${([['white', '白'], ['black', '黒']] as const).map(([v, l]) => `<button data-vframe="${v}" class="${settings.videoFrame === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
 }
 const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', 'N'], ['E', 'E'], ['M', 'M']];
 function onBranchModeClick(b: HTMLButtonElement) {
@@ -2001,6 +2004,12 @@ function onHitModeClick(b: HTMLButtonElement) {
 }
 
 /** 背景の動画（全面 / 下だけ / 出さない）のボタン */
+function onVideoFrameClick(b: HTMLButtonElement) {
+  settings.videoFrame = b.dataset.vframe === 'black' ? 'black' : 'white';
+  saveSettings();
+  b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  play.applySettings();
+}
 function onVideoModeClick(b: HTMLButtonElement) {
   settings.videoMode = b.dataset.vmode as typeof settings.videoMode;
   saveSettings();
@@ -2133,6 +2142,8 @@ $('sheetBody').addEventListener('click', (e) => {
   if (b) onHitModeClick(b);
   const v = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vmode]');
   if (v) onVideoModeClick(v);
+  const vf = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-vframe]');
+  if (vf) onVideoFrameClick(vf);
   const sk = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-skin]');
   if (sk) onSkinClick(sk);
   const br = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-brmode]');
@@ -2870,6 +2881,8 @@ $('pauseSettings').addEventListener('click', (e) => {
   if (hm) onHitModeClick(hm);
   const vm = t.closest<HTMLButtonElement>('[data-vmode]');
   if (vm) onVideoModeClick(vm);
+  const vf = t.closest<HTMLButtonElement>('[data-vframe]');
+  if (vf) onVideoFrameClick(vf);
   const sk = t.closest<HTMLButtonElement>('[data-skin]');
   if (sk) onSkinClick(sk);
   const br = t.closest<HTMLButtonElement>('[data-brmode]');
