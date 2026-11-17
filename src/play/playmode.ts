@@ -65,6 +65,9 @@ export interface PlaySettings {
   videoMode?: 'full' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
+  /** 録画の画質（縦の大きさ）と 1 秒のコマ数 */
+  recRes?: 1080 | 720;
+  recFps?: 60 | 30;
   /** 動画用の画面（レーンを下に、上に曲の情報・ジャケット） */
   broadcast?: boolean;
   /** 譜面分岐: 自動・普通・玄人・達人に固定 */
@@ -682,6 +685,8 @@ export class PlayMode {
         plate: { ...this.renderer.plate },
       },
       fonts: [['Makinas 4 Flat', new URL('fonts/Makinas-4-Flat.woff', location.href).href]],
+      res: this.settings.recRes ?? 1080,
+      fps: this.settings.recFps ?? 60,
       fixed: fix,
       hitOn: this.hitOn,
       fxAt: (last) => this.endFxTime(last, course.endTime),

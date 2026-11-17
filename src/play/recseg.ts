@@ -52,12 +52,14 @@ export interface SegChunk {
   data: Uint8Array;
   key: boolean;
   avcC?: Uint8Array;
+  /** 表示する時刻（µs）。B フレームがあると、届く順と表示の順が違う */
+  ts: number;
 }
 
 /** 区間の頭の前に描いておく長さの上限（秒）。ふつうの見た目のときはいつもこれだけ描く */
 const WARM_MAX = 4;
-/** 区間の頭の直前は、毎コマ描く（連打のキャラなど、描くたびに増えるものをそろえる） */
-const WARM_EVERY = 90;
+/** 区間の頭の直前（秒）は、毎コマ描く（連打のキャラなど、描くたびに増えるものをそろえる） */
+const WARM_EVERY = 1.5;
 
 const toU8 = (d: AllowSharedBufferSource) => (ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d)).slice();
 
@@ -163,7 +165,7 @@ export class SegRenderer {
         const data = new Uint8Array(chunk.byteLength);
         chunk.copyTo(data);
         // 区間の最初のコマには、映像の設定（avcC）を付ける
-        this.emit?.({ data, key: chunk.type === 'key', avcC: this.first && this.avcC ? this.avcC : undefined });
+        this.emit?.({ data, key: chunk.type === 'key', avcC: this.first && this.avcC ? this.avcC : undefined, ts: chunk.timestamp });
         this.first = false;
       },
       error: (e) => { this.encErr = e; },
@@ -339,7 +341,7 @@ export class SegRenderer {
       const rec = i >= a;
       const now = nowOf(i);
       // 区間の前は 2 コマに 1 回だけ描く（状態をそろえるだけ。叩くのは毎コマ）。頭の直前は毎コマ
-      if (!rec && a - i > WARM_EVERY && (a - i) % 2 === 1 && i !== iFx) {
+      if (!rec && a - i > WARM_EVERY * FPS && (a - i) % 2 === 1 && i !== iFx) {
         atFrame(wallOf(i), i, () => hitTo(now));
         continue;
       }

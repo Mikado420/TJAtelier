@@ -123,7 +123,11 @@ export class Mp4Writer {
   }
 
   /** 映像の 1 コマ（avcC は、エンコーダーが渡したとき） */
-  addVideo(data: Uint8Array, key: boolean, avcC?: Uint8Array) {
+  /** 映像の表示の時刻（µs。B フレームがあると、入れる順と違う） */
+  private pts: number[] = [];
+
+  addVideo(data: Uint8Array, key: boolean, avcC?: Uint8Array, ts?: number) {
+    this.pts.push(ts ?? NaN);
     if (avcC) {
       const same = (a: Uint8Array) => a.length === avcC.length && a.every((x, i) => x === avcC[i]);
       let k = this.avcCs.findIndex(same);
@@ -203,6 +207,17 @@ export class Mp4Writer {
     return box('moov', mvhd, ...traks);
   }
 
+  /** 映像の、入れた順の時刻と表示の時刻の差（コマの長さ 100 の単位）と、全体を前へずらす量 */
+  private offsets(): { off: number[]; shift: number } | null {
+    const v = this.v;
+    if (!this.pts.length || this.pts.some((x) => !Number.isFinite(x))) return null;
+    const unit = 1e6 / (v.timescale / 100);
+    const off = this.pts.map((p, i) => Math.round(p / unit) * 100 - i * 100);
+    const min = Math.min(...off);
+    if (off.every((x) => x === 0)) return null;
+    return { off: off.map((x) => x - min), shift: -min };
+  }
+
   private trak(t: Track, base: number, big: boolean) {
     const total = totalOf(t);
     const ms = Math.round((total / t.timescale) * 1000);
@@ -212,6 +227,12 @@ export class Mp4Writer {
     const xmhd = t.video ? full('vmhd', 0, 1, u16(0), u16(0), u16(0), u16(0)) : full('smhd', 0, 0, u16(0), u16(0));
     const dinf = box('dinf', full('dref', 0, 0, u32(1), full('url ', 0, 1)));
     const minf = box('minf', xmhd, dinf, this.stbl(t, base, big));
+    // B フレームで表示を後ろへずらしたぶんは、編集リストで頭を飛ばす
+    const o = t.video ? this.offsets() : null;
+    if (o && o.shift > 0) {
+      const elst = full('elst', 0, 0, u32(1), u32(ms), u32(o.shift), u16(1), u16(0));
+      return box('trak', tkhd, box('edts', elst), box('mdia', mdhd, hdlr, minf));
+    }
     return box('trak', tkhd, box('mdia', mdhd, hdlr, minf));
   }
 
@@ -243,6 +264,16 @@ export class Mp4Writer {
       ? full('co64', 0, 0, u32(t.chunks.length), ...t.chunks.map((c) => { const o = base + c.at; return [...u32(Math.floor(o / 2 ** 32)), ...u32(o >>> 0)]; }))
       : full('stco', 0, 0, u32(t.chunks.length), ...t.chunks.map((c) => u32(base + c.at)));
     const boxes = [this.stsd(t), sttsB];
+    const o = t.video ? this.offsets() : null;
+    if (o) {
+      const runs2: [number, number][] = [];
+      for (const x of o.off) {
+        const l = runs2[runs2.length - 1];
+        if (l && l[1] === x) l[0]++;
+        else runs2.push([1, x]);
+      }
+      boxes.push(full('ctts', 0, 0, u32(runs2.length), ...runs2.map(([n, d]) => [...u32(n), ...u32(d)])));
+    }
     if (t.video && t.keys.length < t.sizes.length) boxes.push(full('stss', 0, 0, u32(t.keys.length), ...t.keys.map(u32)));
     boxes.push(stsc, stsz, stco);
     return box('stbl', ...boxes);

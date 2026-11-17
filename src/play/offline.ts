@@ -44,28 +44,35 @@ export interface OfflineJob {
   dim: number;
   /** 別スレッドで読み込む字（名前・場所） */
   fonts: [string, string][];
+  /** 画質（縦の大きさ）と 1 秒のコマ数 */
+  res?: 1080 | 720;
+  fps?: 60 | 30;
   onProgress: (p: number) => void;
   cancelled: () => boolean;
 }
 
 export class RecordCancelled extends Error {}
 
-const FPS = 60;
 
 /** この端末で録画できるか（映像の H.264 を作れるか） */
 export function canRecord() {
   return typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && typeof OfflineAudioContext !== 'undefined';
 }
 
-/** 映像の設定（1080p60 → だめなら 720p60） */
-async function pickVideo(): Promise<VideoEncoderConfig | null> {
-  const tries: [number, number, string[], number][] = [
-    [1920, 1080, ['avc1.42002A', 'avc1.4D002A', 'avc1.64002A', 'avc1.640028'], 8_000_000],
-    [1280, 720, ['avc1.420020', 'avc1.4D0020', 'avc1.640020'], 5_000_000],
-  ];
-  for (const [width, height, codecs, bitrate] of tries) {
-    for (const codec of codecs) {
-      const c: VideoEncoderConfig = { codec, width, height, bitrate, framerate: FPS, avc: { format: 'avc' } };
+/**
+ * 映像の設定。同じ見た目でファイルが小さくなる High プロファイルを先に試す（だめなら Main・Baseline。Baseline は少し多めに使う）。
+ * 1080p が作れない端末は 720p にする
+ */
+async function pickVideo(res: 1080 | 720, fps: number): Promise<VideoEncoderConfig | null> {
+  const sizes: [number, number][] = res === 1080 ? [[1920, 1080], [1280, 720]] : [[1280, 720]];
+  for (const [width, height] of sizes) {
+    const big = height === 1080;
+    // 1 秒あたりのビット数（High・Main のとき）
+    const rate = (big ? (fps > 30 ? 6_500_000 : 4_500_000) : fps > 30 ? 3_500_000 : 2_500_000);
+    const lv = big ? (fps > 30 ? '2A' : '28') : fps > 30 ? '20' : '1F';
+    const tries: [string, number][] = [[`avc1.6400${lv}`, rate], [`avc1.4D00${lv}`, rate], [`avc1.4200${lv}`, Math.round(rate * 1.25)]];
+    for (const [codec, bitrate] of tries) {
+      const c: VideoEncoderConfig = { codec, width, height, bitrate, framerate: fps, avc: { format: 'avc' } };
       try {
         if ((await VideoEncoder.isConfigSupported(c)).supported) return c;
       } catch { /* 次 */ }
@@ -220,13 +227,14 @@ interface Helper {
 export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; ext: string; audio: AudioCodec['kind'] }> {
   const T_START = performance.now();
   const { course, info, audio } = job;
-  const vcfg = await pickVideo();
+  const FPS = job.fps ?? 60;
+  const vcfg = await pickVideo(job.res ?? 1080, FPS);
   if (!vcfg) throw new Error('この端末では録画できません');
   const W = vcfg.width;
   const H = vcfg.height;
   const acfg = await pickAudio(audio.ctx.sampleRate);
   /** 実機で何に時間がかかったかの記録（動画ファイルの中に入れる。画面には出さない） */
-  const diag: Record<string, unknown> = { app: 'TJAtelier', ua: navigator.userAgent, w: W, h: H, codec: vcfg.codec, audioPick: acfg.kind, rate: acfg.rate };
+  const diag: Record<string, unknown> = { app: 'TJAtelier', ua: navigator.userAgent, w: W, h: H, fps: FPS, codec: vcfg.codec, bitrate: vcfg.bitrate, audioPick: acfg.kind, rate: acfg.rate };
 
   // オートで最後まで叩いたときの結果と打音（音は映像と並べて先に作る）
   const allAuto = buildAutoEvents(course.notes);
@@ -368,7 +376,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     let committed = 0;
     const commit = () => {
       while (finals.has(committed)) {
-        for (const c of finals.get(committed)!) mux.addVideo(c.data, c.key, c.avcC);
+        for (const c of finals.get(committed)!) mux.addVideo(c.data, c.key, c.avcC, c.ts);
         finals.delete(committed);
         committed++;
       }
@@ -473,7 +481,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
               res(false);
               drop();
             } else if (m.type === 'chunk') {
-              results.get(`${m.k}:${who}`)?.push({ data: m.data, key: m.key, avcC: m.avcC });
+              results.get(`${m.k}:${who}`)?.push({ data: m.data, key: m.key, avcC: m.avcC, ts: m.ts });
             } else if (m.type === 'frames') {
               frames += m.n;
               h.got += m.n;

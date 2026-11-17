@@ -42,7 +42,7 @@ self.onmessage = async (e: MessageEvent<Msg>) => {
       await seg.render(
         m.a,
         m.b,
-        (c) => post({ type: 'chunk', k: m.k, data: c.data, key: c.key, avcC: c.avcC }, [c.data.buffer]),
+        (c) => post({ type: 'chunk', k: m.k, data: c.data, key: c.key, avcC: c.avcC, ts: c.ts }, [c.data.buffer]),
         () => stop || skip === m.k,
         (n) => post({ type: 'frames', n }),
       );
