@@ -10,8 +10,10 @@ import { CLEAR_LINE, Game } from '../engine/game';
 import type { EndKind } from '../render/endfx';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import { buildAutoEvents } from './auto';
+import { Renderer } from '../render/renderer';
 import { BroadcastPainter, type PlayInfo } from './broadcast';
 import { Mp4Writer, aacConfig, type AudioCodec } from './mp4';
+import { buildTimeline } from './recneed';
 import { SegRenderer, type RecPlan, type SegChunk } from './recseg';
 import { VideoSource } from './vsource';
 
@@ -76,7 +78,7 @@ async function pickVideo(): Promise<VideoEncoderConfig | null> {
 async function pickAudio(rate: number): Promise<{ kind: AudioCodec['kind']; rate: number; config?: AudioEncoderConfig }> {
   if (typeof AudioEncoder !== 'undefined') {
     for (const r of [...new Set([rate, 48000, 44100])]) {
-      const c: AudioEncoderConfig = { codec: 'mp4a.40.2', sampleRate: r, numberOfChannels: 2, bitrate: 192_000 };
+      const c = { codec: 'mp4a.40.2', sampleRate: r, numberOfChannels: 2, bitrate: 192_000, aac: { format: 'aac' } } as AudioEncoderConfig;
       try {
         if ((await AudioEncoder.isConfigSupported(c)).supported) return { kind: 'aac', rate: r, config: c };
       } catch { /* 次 */ }
@@ -140,28 +142,58 @@ async function openVideo(url: string) {
 }
 
 /**
- * 別スレッドで描いている間に、アプリごと落ちたことがあるかの印。
- * 別スレッドは 1 つでスキンの絵などを丸ごと持つのでメモリを多く使い、足りない端末では落ちる。
- * 描いている間だけ印を付けておき、次に起動したときに印が残っていたら（落ちた）、それからは別スレッドを使わない
+ * 別スレッドの数を、端末に合わせて決めるための記録（この端末の中だけ）。
+ * - 無事に録り終えたら、次は 1 つ増やしてみる（上限まで）
+ * - 別スレッドで描いている間にアプリごと落ちたら（次に起動したとき、描いている印が残っている）、1 つ減らして、それより増やさない
+ * - 画面のスレッドと別スレッドの速さも残しておき、画面のスレッドに描かせるかを決める
  */
-const WORKER_KEY = 'tjatelier:recWorkers';
-const store = {
-  get: () => { try { return localStorage.getItem(WORKER_KEY); } catch { return null; } },
-  set: (v: string | null) => { try { if (v === null) localStorage.removeItem(WORKER_KEY); else localStorage.setItem(WORKER_KEY, v); } catch { /* 保存できない */ } },
-};
-if (store.get() === 'running') store.set('off');
+interface Tune {
+  next: number;
+  max: number;
+  /** 描いている間の印（落ちたら残る） */
+  running?: number;
+  /** 前に落ちたか */
+  crashed?: boolean;
+  /** 1 秒に描けたコマ数（画面のスレッド・別スレッド 1 つ） */
+  mainFps?: number;
+  workerFps?: number;
+}
+const TUNE_KEY = 'tjatelier:recTune';
+const isApple = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+/** 別スレッドの上限（iPhone・iPad は 3 つ、ほかは CPU の数から） */
+const CAP = () => (isApple() ? 3 : Math.max(0, Math.min(3, (navigator.hardwareConcurrency || 4) - 2)));
+function loadTune(): Tune {
+  let t: Tune | null = null;
+  try {
+    t = JSON.parse(localStorage.getItem(TUNE_KEY) ?? 'null');
+  } catch { /* 読めない */ }
+  if (!t || typeof t.next !== 'number') t = { next: 1, max: CAP() };
+  return t;
+}
+function saveTune(t: Tune) {
+  try {
+    localStorage.setItem(TUNE_KEY, JSON.stringify(t));
+  } catch { /* 保存できない */ }
+}
+// 起動したとき: 描いている印が残っていたら、そのとき落ちた。1 つ減らして、それより増やさない
+{
+  const t = loadTune();
+  if (t.running !== undefined) {
+    t.max = Math.max(0, t.running - 1);
+    t.next = t.max;
+    t.crashed = true;
+    delete t.running;
+    saveTune(t);
+  }
+}
 
-/** 別スレッドの数。iPhone・iPad はメモリが足りずに落ちるので使わない */
+/** 今回使う別スレッドの数 */
 function workerCount() {
   const forced = (globalThis as { __recWorkers?: number }).__recWorkers;
   if (forced !== undefined) return forced;
-  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return 0;
-  if (store.get() === 'off') return 0;
-  if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))) return 0;
-  // 1 つで 400MB ほど使うので、多くても 2 つ
-  const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
-  if (mem < 8) return 0;
-  return Math.max(0, Math.min(2, (navigator.hardwareConcurrency || 4) - 2));
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof VideoEncoder === 'undefined') return 0;
+  const t = loadTune();
+  return Math.max(0, Math.min(t.next, t.max, CAP()));
 }
 
 /** 別スレッドの係 */
@@ -175,15 +207,26 @@ interface Helper {
   /** 区間を渡した時刻と、その区間で録り終えたコマ数（遅い係を見分ける） */
   since: number;
   got: number;
+  /** 描いたコマ数と、描いていた時間（速さを測る） */
+  frames: number;
+  ms: number;
+  /** 用意ができたか・次の区間を渡す・最後に知らせが来た時刻（止まった係を見分ける） */
+  ok: boolean;
+  next: () => void;
+  drop: () => void;
+  heard: number;
 }
 
 export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; ext: string; audio: AudioCodec['kind'] }> {
+  const T_START = performance.now();
   const { course, info, audio } = job;
   const vcfg = await pickVideo();
   if (!vcfg) throw new Error('この端末では録画できません');
   const W = vcfg.width;
   const H = vcfg.height;
   const acfg = await pickAudio(audio.ctx.sampleRate);
+  /** 実機で何に時間がかかったかの記録（動画ファイルの中に入れる。画面には出さない） */
+  const diag: Record<string, unknown> = { app: 'TJAtelier', ua: navigator.userAgent, w: W, h: H, codec: vcfg.codec, audioPick: acfg.kind, rate: acfg.rate };
 
   // オートで最後まで叩いたときの結果と打音（音は映像と並べて先に作る）
   const allAuto = buildAutoEvents(course.notes);
@@ -202,8 +245,10 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
   const st = sim.stats;
   const fc = st.bad === 0 && sim.totalHitNotes > 0;
   const endKind: EndKind = fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
+  const tl = buildTimeline(course, job.fixed, allAuto);
   const tnde = job.view.tnde;
   if (tnde) await tnde.prepare(info.title);
+  const skinMode: 'on' | 'lane' | null = tnde?.ready ? (job.view.broadcast ? 'lane' : 'on') : null;
 
   // プレイと同じ時刻の決め方
   const first = (course.notes[0]?.time ?? 0) - 1;
@@ -215,19 +260,32 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
   const fxAt = job.fxAt(lastTime);
   let iFx = 0;
   while (!(t0 + iFx / FPS > fxAt)) iFx++;
+  // 全部のコマ数: 演出を見せ終える所まで（プレイと同じ決め方）
+  const hold = Renderer.endHoldOf(endKind, skinMode);
+  let N = iFx;
+  while (!((N - iFx) * 1000 / FPS > hold && t0 + N / FPS > tailEnd + 1)) N++;
+  N += 1;
+  const length = N / FPS;
+  diag.frames = N;
 
   const vmode = job.video ? job.view.vmode : '';
   const img = !vmode && !!job.bgImage;
   let velem: HTMLVideoElement | null = null;
   let vsrc: VideoSource | null = null;
+  let vblob: Blob | null = null;
   let painter: BroadcastPainter | null = null;
   let bgBitmap: ImageBitmap | null = null;
   const helpers: Helper[] = [];
   let main: SegRenderer | null = null;
   let cancel = false;
+  let suspended = false;
+  const tune = loadTune();
+  let level = 0;
   try {
     if (vmode && job.video) {
-      vsrc = await VideoSource.open(job.video.url);
+      // 動画は 1 つのファイルを、画面のスレッドと別スレッドで共有する（写さない）
+      vblob = await (await fetch(job.video.url)).blob().catch(() => null);
+      vsrc = vblob ? await VideoSource.open(vblob) : null;
       if (!vsrc) velem = await openVideo(job.video.url);
     }
     if (img && job.bgImage) {
@@ -252,44 +310,49 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       FPS,
       t0,
       W0: 1_000_000,
-      N: 0,
+      N,
       iFx,
       endKind,
       fade: tailEnd > 0,
       dim: job.dim,
-      video: vmode && job.video ? job.video : null,
+      video: vmode && job.video ? { ...job.video, blob: vblob ?? undefined } : null,
       bgImage: bgBitmap,
       bc: null,
       vcfg,
       skinBase: tnde ? job.view.skinBase : null,
+      tl,
     };
-    main = await SegRenderer.create(plan, { tnde, painter, velem, vsrc: velem ? null : vsrc });
-    vsrc = null; // main が持つ
-    // 全部のコマ数: 演出を見せ終える所まで（プレイと同じ決め方）
-    const hold = main.R.endHoldFor(endKind);
-    let N = iFx;
-    while (!((N - iFx) * 1000 / FPS > hold && t0 + N / FPS > tailEnd + 1)) N++;
-    N += 1;
-    plan.N = N;
-    const length = N / FPS;
 
-    // 音: 映像を描いている間に、別の所で混ぜて AAC にしておく
-    const codec: AudioCodec = acfg.kind === 'aac' ? { kind: 'aac', asc: aacConfig(acfg.rate, 2) } : acfg.kind === 'opus' ? { kind: 'opus', preSkip: 312 } : { kind: 'pcm' };
-    const mux = new Mp4Writer(W, H, FPS, { codec, rate: acfg.rate, ch: 2 });
+    // 音: 映像を描いている間に、別の所で混ぜて AAC にしておく（できたものは確かめてから入れる）
     const hits = hitAt.map((h) => ({ kind: h.kind, at: h.t - t0 }));
-    const ui = main.R.skinEnd(endKind) ? [{ name: `tnde:${endKind}`, at: iFx / FPS }] : [];
-    const audP = audio.renderMix({ length: length + 0.5, rate: acfg.rate, musicAt: -t0, hits, ui }).then((mix) => encodeAudio(mix, acfg, mux, job));
+    const ui = Renderer.skinEndOf(endKind, skinMode) ? [{ name: `tnde:${endKind}`, at: iFx / FPS }] : [];
+    const audP = audio
+      .renderMix({ length: length + 0.5, rate: acfg.rate, musicAt: -t0, hits, ui })
+      .then((mix) => encodeAudio(mix, acfg, length, job, diag));
     audP.catch(() => {});
 
-    // 区間に分ける（係の数の 2〜3 倍。短すぎると前に描くぶんが無駄になる）
+    // 別スレッドの数・画面のスレッドに描かせるか
     const nw = velem ? 0 : workerCount();
-    const segLen = (globalThis as { __recSegLen?: number }).__recSegLen ?? (nw ? Math.max(900, Math.ceil(N / ((nw + 1) * 2.5))) : N);
+    // 画面のスレッドは、前に測った速さが別スレッドよりかなり遅いときだけ描かない（そのぶんメモリを空ける）
+    let mainDraws = nw === 0 || !(tune.mainFps && tune.workerFps && tune.mainFps < tune.workerFps * 0.6);
+    if ((globalThis as { __recMainOff?: boolean }).__recMainOff && nw > 0) mainDraws = false;
+    diag.workers = nw;
+    diag.mainDraws = mainDraws;
+    diag.tune = { ...tune };
+    if (mainDraws) main = await SegRenderer.create(plan, { tnde, painter, velem, vsrc: velem ? null : vsrc });
+    vsrc = null; // main（か、別スレッドが自分で開く）
+    const mux = new Mp4Writer(W, H, FPS, { codec: { kind: 'pcm' }, rate: acfg.rate, ch: 2 });
+
+    // 区間に分ける（係の数の 2〜3 倍。短すぎると前に描くぶんが無駄になる）。係がいないときは分けない
+    const segLen = (globalThis as { __recSegLen?: number }).__recSegLen ?? (nw ? Math.max(900, Math.ceil(N / ((nw + (mainDraws ? 1 : 0)) * 2.5))) : N);
     const segs: [number, number][] = [];
     for (let a = 0; a < N; a += segLen) segs.push([a, Math.min(N, a + segLen)]);
+    diag.segs = segs.length;
     const queue = segs.map((_, k) => k);
     /** 区間ごと・描いた係ごとの結果（同じ区間を 2 つの係が描くことがある。先に終わったほうを使う） */
     const results = new Map<string, SegChunk[]>();
     const finals = new Map<number, SegChunk[]>();
+    const owner: string[] = [];
     /** 区間を描いている係の数 */
     const running = new Map<number, number>();
     let committed = 0;
@@ -310,6 +373,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       running.set(k, (running.get(k) ?? 1) - 1);
       if (ok && r && !finals.has(k) && k >= committed) {
         if ((globalThis as { __recDebug?: boolean }).__recDebug) console.warn(`rec seg ${k} by ${who}`);
+        owner[k] = who;
         finals.set(k, r);
         commit();
         // 同じ区間を描いているほかの係はやめさせる
@@ -332,7 +396,14 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
 
     // 別スレッドの係を用意する（用意できるまでの間も、画面のスレッドは描き始める）
     if (nw > 0 && segs.length > 1) {
-      store.set('running');
+      level = nw;
+      // 描いている間の印（アプリごと落ちたら残り、次に起動したときに数を減らす）
+      saveTune({ ...tune, running: nw });
+      // 画面のスレッドが描かないときは、プレイ画面用に読み込んでいるスキンの絵を手放す（録画のあとで読み直す）
+      if (!mainDraws && tnde) {
+        tnde.suspend();
+        suspended = true;
+      }
       const wplan: RecPlan = { ...plan, bc: painter ? await painter.export() : null };
       for (let n = 0; n < nw; n++) {
         let w: Worker;
@@ -342,7 +413,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
           break;
         }
         const who = `w${n}`;
-        const h: Helper = { w, ready: Promise.resolve(false), busy: false, dead: false, cur: -1, since: 0, got: 0 };
+        const h: Helper = { w, ready: Promise.resolve(false), busy: false, dead: false, cur: -1, since: 0, got: 0, frames: 0, ms: 0, ok: false, next: () => {}, drop: () => {}, heard: performance.now() };
         const next = () => {
           if (h.dead || cancel) return;
           const k = take();
@@ -351,6 +422,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
           h.busy = true;
           h.cur = k;
           h.since = performance.now();
+          h.heard = performance.now();
           h.got = 0;
           w.postMessage({ type: 'seg', k, a: segs[k][0], b: segs[k][1] });
         };
@@ -366,12 +438,28 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
           w.terminate();
           kick();
         };
+        h.next = next;
+        h.drop = drop;
         h.ready = new Promise<boolean>((res) => {
+          // 用意が 30 秒たってもできなければ、この係は使わない
+          const tm = setTimeout(() => {
+            if (!h.ok) {
+              (diag.fail ??= [] as string[]) && (diag.fail as string[]).push('init timeout');
+              res(false);
+              drop();
+            }
+          }, 30000);
           w.onmessage = (e) => {
             const m = e.data;
+            h.heard = performance.now();
             if ((globalThis as { __recDebug?: boolean }).__recDebug && m.type !== 'chunk' && m.type !== 'frames') console.warn(`rec ${who}`, m.type, m.k ?? '', m.msg ?? '');
-            if (m.type === 'ready') res(true);
+            if (m.type === 'ready') {
+              clearTimeout(tm);
+              h.ok = true;
+              res(true);
+            }
             else if (m.type === 'fail') {
+              (diag.fail ??= [] as string[]) && (diag.fail as string[]).push(String(m.msg));
               res(false);
               drop();
             } else if (m.type === 'chunk') {
@@ -381,14 +469,22 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
               h.got += m.n;
               progress();
             } else if (m.type === 'done' || m.type === 'skipped') {
+              if (m.type === 'done') {
+                h.frames += segs[m.k][1] - segs[m.k][0];
+                h.ms += performance.now() - h.since;
+              }
               h.busy = false;
               h.cur = -1;
               end(m.k, who, m.type === 'done');
               next();
               kick();
-            } else if (m.type === 'segfail') drop();
+            } else if (m.type === 'segfail') {
+              (diag.fail ??= [] as string[]) && (diag.fail as string[]).push(String(m.msg));
+              drop();
+            }
           };
-          w.onerror = () => {
+          w.onerror = (ev) => {
+            (diag.fail ??= [] as string[]) && (diag.fail as string[]).push(String(ev.message ?? 'error'));
             res(false);
             drop();
           };
@@ -400,19 +496,29 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     }
 
     // 画面のスレッドも区間を描く。全部そろうまで
-    /** 画面のスレッドの速さ（1 ミリ秒に何コマ） */
-    let mainRate = 0;
+    let mainFrames = 0;
+    let mainMs = 0;
     const drawHere = async (k: number) => {
+      if (!main) {
+        // 描かないつもりだったが、別スレッドが全部やめた: ここで描く
+        if (suspended && tnde) {
+          await tnde.prepare(info.title);
+          suspended = false;
+        }
+        main = await SegRenderer.create(plan, { tnde, painter, velem, vsrc: null });
+        mainDraws = true;
+      }
       begin(k, 'main');
       const [a, b] = segs[k];
       const t = performance.now();
       try {
-        await main!.render(a, b, (c) => results.get(`${k}:main`)?.push(c), () => job.cancelled() || isDone(k), (n) => {
+        await main.render(a, b, (c) => results.get(`${k}:main`)?.push(c), () => job.cancelled() || isDone(k), (n) => {
           frames += n;
           progress();
         });
         end(k, 'main', true);
-        mainRate = (b - a) / Math.max(1, performance.now() - t);
+        mainFrames += b - a;
+        mainMs += performance.now() - t;
       } catch (err) {
         end(k, 'main', false);
         if (job.cancelled()) throw new RecordCancelled();
@@ -426,22 +532,36 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
         throw new RecordCancelled();
       }
       if (committed >= segs.length) break;
-      const k = take();
-      if (k >= 0) {
-        await drawHere(k);
-        continue;
+      // 止まった係（20 秒なにも知らせて来ない）はやめさせて、その区間はやり直す。空いている係には次の区間を渡す
+      for (const h of helpers) {
+        if (h.dead) continue;
+        if (h.busy && performance.now() - h.heard > 20000) {
+          (diag.fail ??= [] as string[]) && (diag.fail as string[]).push('stalled');
+          h.drop();
+        } else if (h.ok && !h.busy) h.next();
+      }
+      const alive = helpers.some((h) => !h.dead);
+      // 画面のスレッドが描く（描かないときは、係がいなくなったときだけ）
+      if (mainDraws || !alive) {
+        const k = take();
+        if (k >= 0) {
+          await drawHere(k);
+          continue;
+        }
       }
       // 残りは別スレッドの係が描いている。係がいなくなった区間はここで描く
-      const alive = helpers.some((h) => !h.dead && h.busy);
-      if (!alive) {
-        for (let j = committed; j < segs.length; j++) if (!isDone(j) && !running.get(j)) queue.push(j);
-        if (!queue.length) await sleep(20);
-        continue;
+      if (!helpers.some((h) => !h.dead && h.busy) && !(alive && !mainDraws && helpers.some((h) => !h.dead && !h.busy))) {
+        for (let j = committed; j < segs.length; j++) if (!isDone(j) && !running.get(j) && !queue.includes(j)) queue.push(j);
+        if (!helpers.some((h) => !h.dead)) {
+          if (!queue.length) await sleep(20);
+          continue;
+        }
       }
       // 係がとても遅いときは、その区間をここでも描く（先に終わったほうを使う）。
       // ここで描き直したほうが、係の残りより十分早く終わりそうなときだけ
       let spec = -1;
-      if (mainRate > 0) {
+      const mainRate = mainMs > 0 ? mainFrames / mainMs : 0;
+      if (mainDraws && mainRate > 0) {
         const tNow = performance.now();
         for (const h of helpers) {
           if (h.dead || !h.busy || h.cur < 0 || isDone(h.cur) || (running.get(h.cur) ?? 0) > 1) continue;
@@ -466,16 +586,37 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       h.w.postMessage({ type: 'stop' });
       h.w.terminate();
     }
-    helpers.length = 0;
 
-    // 音（映像より長く作ったぶんは切る）
-    await audP;
-    mux.trimAudio(length);
+    // 音（確かめてから入れる。映像より長く作ったぶんは入れない）
+    job.onProgress(0.995);
+    const au = await audP;
+    mux.setAudio(au.codec, au.rate);
+    for (const c of au.chunks) mux.addAudio(c.data, c.frames);
     job.onProgress(1);
+
+    // 次の録画のための記録: 速さと、別スレッドの数（無事に終わったので 1 つ増やしてみる）
+    const ws = helpers.filter((h) => h.frames > 0);
+    const t2: Tune = { ...tune };
+    delete t2.running;
+    if (mainFrames > 0 && mainMs > 0) t2.mainFps = Math.round((mainFrames / mainMs) * 1000 * 10) / 10;
+    if (ws.length) t2.workerFps = Math.round((ws.reduce((x, h) => x + h.frames / h.ms, 0) / ws.length) * 1000 * 10) / 10;
+    if (level > 0) {
+      if (ws.length) t2.next = Math.min(t2.max, CAP(), level + 1);
+      else if (diag.fail) t2.max = t2.next = 0; // 別スレッドが使えない端末
+    } else if (nw === 0 && !velem) t2.next = Math.min(t2.max, CAP(), Math.max(t2.next, 1));
+    saveTune(t2);
+    diag.result = { ms: Math.round(performance.now() - T_START), mainFrames, mainMs: Math.round(mainMs), owners: owner, workers: helpers.map((h) => ({ frames: h.frames, ms: Math.round(h.ms), dead: h.dead })) };
+    diag.nextTune = t2;
+    mux.note(JSON.stringify(diag));
     const blob = mux.finish();
-    return { blob, ext: blob.type === 'video/quicktime' ? 'mov' : 'mp4', audio: acfg.kind };
+    return { blob, ext: blob.type === 'video/quicktime' ? 'mov' : 'mp4', audio: au.codec.kind };
   } finally {
-    if (store.get() === 'running') store.set(null);
+    // 描いている間の印を消す（ここまで来れば落ちていない）
+    const t = loadTune();
+    if (t.running !== undefined) {
+      delete t.running;
+      saveTune(t);
+    }
     cancel = true;
     for (const h of helpers) h.w.terminate();
     main?.close();
@@ -486,58 +627,181 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
       velem.removeAttribute('src');
       velem.load();
     }
+    // 手放したスキンの絵は、裏で読み直しておく（次のプレイに間に合うように）
+    if (suspended && tnde) void tnde.prepare(info.title).catch(() => {});
   }
 }
 
-/** 混ぜた音を形式に合わせて入れる */
-async function encodeAudio(mix: AudioBuffer, a: { kind: AudioCodec['kind']; rate: number; config?: AudioEncoderConfig }, mux: Mp4Writer, job: OfflineJob) {
+interface AudioOut {
+  codec: AudioCodec;
+  rate: number;
+  chunks: { data: Uint8Array; frames: number }[];
+}
+
+/** 音を PCM（.mov）にする */
+function pcmOf(mix: AudioBuffer, frames: number): { data: Uint8Array; frames: number }[] {
   const L = mix.getChannelData(0);
   const Rc = mix.numberOfChannels > 1 ? mix.getChannelData(1) : L;
-  const n = mix.length;
-  if (a.kind === 'pcm') {
-    const BLK = 4800;
-    for (let o = 0; o < n; o += BLK) {
-      const m = Math.min(BLK, n - o);
-      const b = new DataView(new ArrayBuffer(m * 4));
-      for (let k = 0; k < m; k++) {
-        b.setInt16(k * 4, Math.max(-32768, Math.min(32767, Math.round(L[o + k] * 32767))), true);
-        b.setInt16(k * 4 + 2, Math.max(-32768, Math.min(32767, Math.round(Rc[o + k] * 32767))), true);
-      }
-      mux.addAudio(new Uint8Array(b.buffer), m);
+  const n = Math.min(mix.length, frames);
+  const out: { data: Uint8Array; frames: number }[] = [];
+  const BLK = 4800;
+  for (let o = 0; o < n; o += BLK) {
+    const m = Math.min(BLK, n - o);
+    const b = new DataView(new ArrayBuffer(m * 4));
+    for (let k = 0; k < m; k++) {
+      b.setInt16(k * 4, Math.max(-32768, Math.min(32767, Math.round(L[o + k] * 32767))), true);
+      b.setInt16(k * 4 + 2, Math.max(-32768, Math.min(32767, Math.round(Rc[o + k] * 32767))), true);
     }
-    return;
+    out.push({ data: new Uint8Array(b.buffer), frames: m });
   }
-  let err: unknown = null;
-  const def = a.kind === 'aac' ? 1024 : 960;
-  const ae = new AudioEncoder({
-    output: (chunk, meta) => {
-      const desc = meta?.decoderConfig?.description;
-      if (desc) mux.setAudioDescription(toU8(desc));
-      const d = new Uint8Array(chunk.byteLength);
-      chunk.copyTo(d);
-      const frames = chunk.duration ? Math.round((chunk.duration * a.rate) / 1e6) : def;
-      mux.addAudio(d, frames || def);
+  return out;
+}
+
+/** 音の大きさ（全体の二乗平均の平方根。間引いて測る） */
+function rmsOf(chs: Float32Array[]) {
+  let s = 0;
+  let n = 0;
+  for (const c of chs) for (let i = 0; i < c.length; i += 7) { s += c[i] * c[i]; n++; }
+  return n ? Math.sqrt(s / n) : 0;
+}
+
+/** ADTS の頭（AAC の 1 つずつに付くことがある）を外し、そこから AudioSpecificConfig を作る */
+function stripAdts(d: Uint8Array): { body: Uint8Array; asc?: Uint8Array } {
+  if (d.length < 7 || d[0] !== 0xff || (d[1] & 0xf0) !== 0xf0) return { body: d };
+  const head = d[1] & 1 ? 7 : 9;
+  const prof = ((d[2] >> 6) & 3) + 1;
+  const fi = (d[2] >> 2) & 15;
+  const ch = ((d[2] & 1) << 2) | (d[3] >> 6);
+  return { body: d.subarray(head), asc: new Uint8Array([(prof << 3) | (fi >> 1), ((fi & 1) << 7) | (ch << 3)]) };
+}
+
+/**
+ * 混ぜた音を形式に合わせて作る（length 秒まで）。AAC・Opus は作ったものを一度読み戻して、音が入っているか確かめる。
+ * 読み戻せない・音が消えているときは PCM（.mov）にする
+ */
+async function encodeAudio(mix: AudioBuffer, a: { kind: AudioCodec['kind']; rate: number; config?: AudioEncoderConfig }, length: number, job: OfflineJob, diag: Record<string, unknown>): Promise<AudioOut> {
+  const total = Math.min(mix.length, Math.round(length * a.rate));
+  const L = mix.getChannelData(0);
+  const Rc = mix.numberOfChannels > 1 ? mix.getChannelData(1) : L;
+  const mixRms = rmsOf([L.subarray(0, total), Rc.subarray(0, total)]);
+  const ad: Record<string, unknown> = { mixRms: Math.round(mixRms * 1e4) / 1e4, mixLen: mix.length };
+  diag.audio = ad;
+  const pcm = (): AudioOut => ({ codec: { kind: 'pcm' }, rate: a.rate, chunks: pcmOf(mix, total) });
+  if (a.kind === 'pcm' || !a.config) {
+    ad.final = 'pcm';
+    return pcm();
+  }
+  try {
+    let err: unknown = null;
+    const per = a.kind === 'aac' ? 1024 : 960;
+    let desc: Uint8Array | null = null;
+    let adts = 0;
+    const chunks: { data: Uint8Array; frames: number; ts: number }[] = [];
+    const ae = new AudioEncoder({
+      output: (chunk, meta) => {
+        const dd = meta?.decoderConfig?.description;
+        if (dd) desc = toU8(dd);
+        let d = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(d);
+        if (a.kind === 'aac') {
+          const x = stripAdts(d);
+          if (x.asc) {
+            adts++;
+            desc ??= x.asc;
+            d = x.body.slice();
+          }
+        }
+        // 1 つの長さ: AAC はいつも 1024。Opus は届いた長さ（無ければ 960）
+        const frames = a.kind === 'aac' ? 1024 : Math.round(((chunk.duration ?? 0) * a.rate) / 1e6) || per;
+        chunks.push({ data: d, frames, ts: chunk.timestamp });
+      },
+      error: (e) => { err = e; },
+    });
+    try {
+      ae.configure(a.config);
+      const BLK = 4096;
+      for (let o = 0; o < mix.length; o += BLK) {
+        if (err) throw err;
+        if (job.cancelled()) throw new RecordCancelled();
+        const m = Math.min(BLK, mix.length - o);
+        const data = new Float32Array(m * 2);
+        data.set(L.subarray(o, o + m), 0);
+        data.set(Rc.subarray(o, o + m), m);
+        const x = new AudioData({ format: 'f32-planar', sampleRate: a.rate, numberOfFrames: m, numberOfChannels: 2, timestamp: Math.round((o / a.rate) * 1e6), data });
+        ae.encode(x);
+        x.close();
+        if (ae.encodeQueueSize > 16) await drained(ae, 8);
+      }
+      await ae.flush();
+      if (err) throw err;
+    } finally {
+      if (ae.state !== 'closed') ae.close();
+    }
+    // length 秒までにする
+    let acc = 0;
+    let k = 0;
+    while (k < chunks.length && acc < total) acc += chunks[k++].frames;
+    const used = chunks.slice(0, k);
+    const codec: AudioCodec =
+      a.kind === 'aac'
+        ? { kind: 'aac', asc: desc ?? aacConfig(a.rate, 2) }
+        : { kind: 'opus', preSkip: desc && (desc as Uint8Array).length >= 12 ? (desc as Uint8Array)[10] | ((desc as Uint8Array)[11] << 8) : 312 };
+    ad.chunks = used.length;
+    ad.adts = adts;
+    ad.desc = desc ? (desc as Uint8Array).length : 0;
+    // 読み戻して確かめる
+    if (typeof AudioDecoder !== 'undefined' && mixRms > 1e-4) {
+      const dec = await decodeRms(a, codec, used);
+      ad.decRms = dec === null ? null : Math.round(dec * 1e4) / 1e4;
+      if (dec === null || dec < mixRms * 0.3) {
+        ad.final = 'pcm';
+        return pcm();
+      }
+    }
+    ad.final = a.kind;
+    return { codec, rate: a.rate, chunks: used.map((c) => ({ data: c.data, frames: c.frames })) };
+  } catch (e) {
+    if (e instanceof RecordCancelled) throw e;
+    ad.error = String((e as Error)?.message ?? e);
+    ad.final = 'pcm';
+    return pcm();
+  }
+}
+
+/** 作った音を読み戻した大きさ（読めなければ null） */
+async function decodeRms(a: { kind: AudioCodec['kind']; rate: number }, codec: AudioCodec, chunks: { data: Uint8Array; frames: number; ts: number }[]): Promise<number | null> {
+  let s = 0;
+  let n = 0;
+  let err = false;
+  const dec = new AudioDecoder({
+    output: (x) => {
+      try {
+        for (let ch = 0; ch < x.numberOfChannels; ch++) {
+          const buf = new Float32Array(x.numberOfFrames);
+          x.copyTo(buf, { planeIndex: ch, format: 'f32-planar' });
+          for (let i = 0; i < buf.length; i += 7) { s += buf[i] * buf[i]; n++; }
+        }
+      } catch {
+        err = true;
+      }
+      x.close();
     },
-    error: (e) => { err = e; },
+    error: () => { err = true; },
   });
   try {
-    ae.configure(a.config!);
-    const BLK = 4096;
-    for (let o = 0; o < n; o += BLK) {
-      if (err) throw err;
-      if (job.cancelled()) throw new RecordCancelled();
-      const m = Math.min(BLK, n - o);
-      const data = new Float32Array(m * 2);
-      data.set(L.subarray(o, o + m), 0);
-      data.set(Rc.subarray(o, o + m), m);
-      const ad = new AudioData({ format: 'f32-planar', sampleRate: a.rate, numberOfFrames: m, numberOfChannels: 2, timestamp: Math.round((o / a.rate) * 1e6), data });
-      ae.encode(ad);
-      ad.close();
-      if (ae.encodeQueueSize > 16) await drained(ae, 8);
+    const description = codec.kind === 'aac' ? codec.asc : undefined;
+    dec.configure({ codec: a.kind === 'aac' ? 'mp4a.40.2' : 'opus', sampleRate: a.rate, numberOfChannels: 2, description });
+    let t = 0;
+    for (const c of chunks) {
+      dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: Math.round((t / a.rate) * 1e6), data: c.data }));
+      t += c.frames;
+      if (dec.decodeQueueSize > 32) await new Promise((r) => setTimeout(r, 1));
     }
-    await ae.flush();
-    if (err) throw err;
+    await dec.flush();
+  } catch {
+    err = true;
   } finally {
-    if (ae.state !== 'closed') ae.close();
+    if (dec.state !== 'closed') dec.close();
   }
+  return err || !n ? null : Math.sqrt(s / n);
 }

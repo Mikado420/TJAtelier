@@ -484,6 +484,12 @@ export class Renderer {
   /** 動かない背景を一度だけ描いておく（毎フレームはこれをコピーするだけ） */
   private buildBackground() {
     const bg = this.bg ?? document.createElement('canvas');
+    if (this.lean && this.skinOn && !this.videoMode) {
+      // 録画: 後ろは毎コマ黒で塗るので、背景の canvas は要らない
+      bg.width = bg.height = 1;
+      this.bg = bg;
+      return;
+    }
     bg.width = this.canvas.width;
     bg.height = this.canvas.height;
     const c = bg.getContext('2d')!;
@@ -859,6 +865,17 @@ export class Renderer {
     if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
     return END_HOLD[kind];
   }
+  /** 演出を見せる長さ（skin: TNDE スキンで全面に描く 'on'・動画用の画面のレーンだけ 'lane'・使わない null） */
+  static endHoldOf(kind: EndKind, skin: 'on' | 'lane' | null) {
+    if (skin && TNDE_END.has(kind)) return skin === 'on' ? 8800 : 7000;
+    return END_HOLD[kind];
+  }
+  /** スキンの演出を使うか（声を鳴らすか） */
+  static skinEndOf(kind: EndKind, skin: 'on' | 'lane' | null) {
+    return !!skin && TNDE_END.has(kind);
+  }
+  /** 録画用: 背景の canvas を作らない（後ろが真っ黒と決まっているとき。メモリを空ける） */
+  lean = false;
   /** showEnd が返す、演出を見せる長さ（演出は始めない） */
   endHoldFor(kind: EndKind) {
     if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;

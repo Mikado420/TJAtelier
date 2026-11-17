@@ -10,6 +10,7 @@ import { TndeSkin, type PlateStyle } from '../render/tnde';
 import type { EndKind } from '../render/endfx';
 import { buildAutoEvents, type AutoEvent } from './auto';
 import { BroadcastPainter, type BroadcastData, type PlayInfo } from './broadcast';
+import { needFor, warmFor, type Timeline } from './recneed';
 import { VideoSource } from './vsource';
 
 export interface RecPlan {
@@ -36,12 +37,15 @@ export interface RecPlan {
   endKind: EndKind;
   fade: boolean;
   dim: number;
-  video: { url: string; offset: number } | null;
+  /** 背景の動画（blob = ファイルそのもの。別スレッドは写さずに使う） */
+  video: { url: string; offset: number; blob?: Blob } | null;
   bgImage: ImageBitmap | null;
   bc: BroadcastData | null;
   vcfg: VideoEncoderConfig;
   /** TNDE スキンの場所（null = ふつうの見た目） */
   skinBase: string | null;
+  /** 叩くたびのコンボとゲージ（区間で使う絵・前に描く長さを決める） */
+  tl: Timeline;
 }
 
 export interface SegChunk {
@@ -50,8 +54,10 @@ export interface SegChunk {
   avcC?: Uint8Array;
 }
 
-/** 区間の頭の前に描いておくコマ数（演出の途中の状態をそろえる。2 コマに 1 回描く） */
-const WARM = 240;
+/** 区間の頭の前に描いておく長さの上限（秒）。ふつうの見た目のときはいつもこれだけ描く */
+const WARM_MAX = 4;
+/** 区間の頭の直前は、毎コマ描く（連打のキャラなど、描くたびに増えるものをそろえる） */
+const WARM_EVERY = 90;
 
 const toU8 = (d: AllowSharedBufferSource) => (ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : new Uint8Array(d)).slice();
 
@@ -132,6 +138,7 @@ export class SegRenderer {
     const R = new Renderer(this.cv as unknown as HTMLCanvasElement);
     this.R = R;
     R.fixedSize = { w: W, h: H };
+    R.lean = true;
     R.dprCap = 1;
     R.spectate = false;
     R.setOpponents([]);
@@ -171,18 +178,24 @@ export class SegRenderer {
    */
   static async create(plan: RecPlan, o: { tnde?: TndeSkin | null; painter?: BroadcastPainter | null; velem?: HTMLVideoElement | null; vsrc?: VideoSource | null } = {}) {
     let tnde = o.tnde ?? null;
+    // 自分で読み込むスキン（別スレッド）は、区間で使う絵だけにする
+    let own = false;
     if (o.tnde === undefined && plan.skinBase) {
-      tnde = await TndeSkin.load(plan.skinBase, plan.info.title);
-      await tnde.prepare(plan.info.title);
+      tnde = await TndeSkin.load(plan.skinBase, plan.info.title, () => false);
+      own = true;
     }
     let vsrc = o.vsrc ?? null;
     if (o.vsrc === undefined && plan.video && plan.view.vmode) {
-      vsrc = await VideoSource.open(plan.video.url);
+      vsrc = await VideoSource.open(plan.video.blob ?? plan.video.url);
       if (!vsrc && !o.velem) throw new Error('video');
     }
     const painter = o.painter !== undefined ? o.painter : plan.bc ? BroadcastPainter.from(plan.course, plan.bc) : null;
-    return new SegRenderer(plan, tnde, vsrc, o.velem ?? null, painter);
+    const seg = new SegRenderer(plan, tnde, vsrc, o.velem ?? null, painter);
+    seg.ownSkin = own;
+    return seg;
   }
+  /** 自分で読み込んだスキン（区間ごとに使う絵をしぼる） */
+  private ownSkin = false;
 
   private vRect() {
     const { W, H } = this.plan;
@@ -215,7 +228,7 @@ export class SegRenderer {
     const { W, H, bgImage } = this.plan;
     const dimA = 1 - Math.max(0.1, Math.min(1, this.plan.dim));
     const moving = !!this.vsrc || !!this.velem;
-    if (!moving && !bgImage && this.tnde && !this.R.broadcast) {
+    if (!moving && !bgImage && this.tnde?.ready && !this.R.broadcast) {
       g.fillStyle = '#000';
       g.fillRect(0, 0, W, H);
     } else if (moving) {
@@ -280,7 +293,11 @@ export class SegRenderer {
     const { course, FPS, t0, W0, iFx } = plan;
     const wallOf = (i: number) => W0 + (i * 1000) / FPS;
     const nowOf = (i: number) => t0 + i / FPS;
-    const start = Math.max(0, a - WARM);
+    // 区間の頭の前に描く長さ: TNDE スキンは、頭をまたいで続く演出の分だけ（演出のあとの区間・ふつうの見た目は長め）
+    const warm = tnde && a < iFx ? warmFor(course, plan.tl, nowOf(a)) : WARM_MAX;
+    const start = Math.max(0, a - Math.ceil(warm * FPS));
+    // この区間で使う絵だけ読み込む（自分で読み込んだスキンのとき）。読み込み終えるまで描き始めない
+    if (tnde && this.ownSkin) await tnde.setLimit(needFor(course, plan.tl, nowOf(start), nowOf(b)));
     // 終わりの演出の絵（演出がこの区間にかかるときだけ）
     if (tnde && b > iFx - FPS) await Promise.race([tnde.loadEnd(plan.endKind), sleep(15000)]);
     this.emit = emit;
@@ -321,8 +338,8 @@ export class SegRenderer {
       if (this.encErr) throw this.encErr;
       const rec = i >= a;
       const now = nowOf(i);
-      // 区間の前は 2 コマに 1 回だけ描く（状態をそろえるだけ。叩くのは毎コマ）
-      if (!rec && (a - i) % 2 === 1 && i !== iFx) {
+      // 区間の前は 2 コマに 1 回だけ描く（状態をそろえるだけ。叩くのは毎コマ）。頭の直前は毎コマ
+      if (!rec && a - i > WARM_EVERY && (a - i) % 2 === 1 && i !== iFx) {
         atFrame(wallOf(i), i, () => hitTo(now));
         continue;
       }
@@ -337,7 +354,15 @@ export class SegRenderer {
         R.draw(game, course, now, plan.info);
         if (i === iFx) R.showEnd(plan.endKind, plan.fade);
       });
-      if (!rec) continue;
+      if (!rec) {
+        // 前に描く間も、ときどき手を空ける（止まっていないと知らせる）
+        if (performance.now() - yieldAt > 200) {
+          onFrames(0);
+          await sleep(0);
+          yieldAt = performance.now();
+        }
+        continue;
+      }
       // 別スレッド: 描いた絵をそのまま渡して、次のコマは新しい絵に描く（描き終わるのを待たずに次へ進める）
       const bm = 'transferToImageBitmap' in this.cv ? this.cv.transferToImageBitmap() : null;
       const vf = new VideoFrame(bm ?? this.cv, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) });
@@ -345,7 +370,8 @@ export class SegRenderer {
       vf.close();
       bm?.close();
       sent++;
-      if (this.enc.encodeQueueSize > 6) await waitQueue(this.enc, 3);
+      // 待っているコマは 1 つで 8MB ほど使う。別スレッドは少なめにためる
+      if (this.enc.encodeQueueSize > (bm ? 2 : 6)) await waitQueue(this.enc, bm ? 1 : 3);
       if (performance.now() - yieldAt > 40) {
         onFrames(sent);
         sent = 0;

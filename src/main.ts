@@ -2547,6 +2547,11 @@ async function applyAudioOnly(a: AudioFile) {
 
 /** Expo Go のアプリへファイルを渡す（受け取れないときは知らせる） */
 async function nativeSaveToast(blob: Blob, name: string, mime?: string) {
+  // 古いアプリ（v7 まで）は、届いたものを全部ためてから保存するので、大きいファイルでは落ちる。送らずに知らせる
+  if (nativeAppVersion() < 8 && blob.size > 24 * 1024 * 1024) {
+    toast('アプリが古いため保存できません。Expo Go を完全に閉じて開き直してください');
+    return;
+  }
   toast('保存の準備をしています…');
   try {
     const r = await nativeSave(blob, name, mime);

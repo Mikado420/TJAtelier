@@ -77,6 +77,18 @@ export class Mp4Writer {
     if (audio) this.a = { id: 2, video: false, timescale: audio.rate, sizes: [], durs: [], keys: [], chunks: [], pcm: 0 };
   }
 
+  /** 音の形式を決める（音を入れる前に） */
+  setAudio(codec: AudioCodec, rate: number) {
+    this.audio = { codec, rate, ch: 2 };
+    this.a = { id: 2, video: false, timescale: rate, sizes: [], durs: [], keys: [], chunks: [], pcm: 0 };
+  }
+
+  /** ファイルに書いておくメモ（再生には関係しない free の箱に入れる） */
+  private memo: Uint8Array | null = null;
+  note(text: string) {
+    this.memo = new TextEncoder().encode(`TJAREC${text}`);
+  }
+
   /** 入れた映像のコマ数 */
   get videoFrames() {
     return this.v.sizes.length;
@@ -175,9 +187,10 @@ export class Mp4Writer {
     // 目次の大きさが決まってから、データの位置を入れる
     const big = this.pos + 16 > 0xffffffff;
     const mdatHead = big ? cat([u32(1), str('mdat'), u32(Math.floor((this.pos + 16) / 2 ** 32)), u32((this.pos + 16) >>> 0)]) : cat([u32(this.pos + 8), str('mdat')]);
+    const memo = this.memo ? box('free', this.memo) : new Uint8Array();
     let moov = this.moov(0, big);
-    moov = this.moov(ftyp.length + moov.length + mdatHead.length, big);
-    return new Blob([ftyp, moov, mdatHead, ...this.parts] as BlobPart[], { type: mov ? 'video/quicktime' : 'video/mp4' });
+    moov = this.moov(ftyp.length + moov.length + memo.length + mdatHead.length, big);
+    return new Blob([ftyp, moov, memo, mdatHead, ...this.parts] as BlobPart[], { type: mov ? 'video/quicktime' : 'video/mp4' });
   }
 
   private moov(base: number, big: boolean) {

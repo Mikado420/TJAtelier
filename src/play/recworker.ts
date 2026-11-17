@@ -35,6 +35,8 @@ self.onmessage = async (e: MessageEvent<Msg>) => {
       post({ type: 'fail', msg: String((err as Error)?.message ?? err) });
     }
   } else if (m.type === 'seg') {
+    // 絵を読み込んでいる間なども、止まっていないと知らせる
+    const alive = setInterval(() => post({ type: 'alive' }), 2000);
     try {
       if (!seg) throw new Error('not ready');
       await seg.render(
@@ -48,6 +50,8 @@ self.onmessage = async (e: MessageEvent<Msg>) => {
     } catch (err) {
       if (skip === m.k) post({ type: 'skipped', k: m.k });
       else post({ type: 'segfail', k: m.k, msg: String((err as Error)?.message ?? err) });
+    } finally {
+      clearInterval(alive);
     }
   } else if (m.type === 'skip') {
     skip = m.k;

@@ -166,8 +166,10 @@ export class TndeSkin {
 
   constructor(private readonly base: string) {}
 
-  static async load(base: string, title?: string) {
+  /** limit = 読み込む絵をしぼる（録画の別スレッド: 区間ごとに決めるので、はじめは何も読み込まない） */
+  static async load(base: string, title?: string, limit?: (name: string) => boolean) {
     const s = new TndeSkin(base);
+    if (limit) s.limit = limit;
     const r = await fetch(`${base}skin.json`);
     if (!r.ok) throw new Error('skin.json');
     s.man = await r.json();
@@ -195,7 +197,26 @@ export class TndeSkin {
   }
 
   /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
+  /** 録画: 区間で使う絵だけにしぼる（null = しぼらない）。終わりの演出の絵は別に決める */
+  private limit: ((name: string) => boolean) | null = null;
+  async setLimit(f: ((name: string) => boolean) | null) {
+    this.limit = f;
+    this.loadedSet = '';
+    await this.sync();
+  }
+
+  /** 録画: 読み込んだ絵を全部手放す（メモリを空ける）。次に prepare で読み直す */
+  suspend() {
+    for (const im of this.imgs.values()) if ('close' in im) im.close();
+    this.imgs.clear();
+    this.loading.clear();
+    this.loadedSet = '';
+    this.endWant.clear();
+    this.dropCaches();
+  }
+
   private wants(name: string) {
+    if (this.limit && !name.startsWith('end/') && !this.limit(name)) return false;
     const p = this.pick;
     // 曲が決まるまでは、曲ごとに変わる絵（背景・踊り子・モブ）は読み込まない
     if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;

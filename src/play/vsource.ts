@@ -103,10 +103,11 @@ export class VideoSource {
     this.dec.configure(cfg);
   }
 
-  static async open(url: string): Promise<VideoSource | null> {
+  /** src = 動画の URL か、ファイルそのもの（別スレッドへは、ファイルを写さずに渡せる Blob で渡す） */
+  static async open(src: string | Blob): Promise<VideoSource | null> {
     if (typeof VideoDecoder === 'undefined') return null;
     try {
-      const blob = await (await fetch(url)).blob();
+      const blob = typeof src === 'string' ? await (await fetch(src)).blob() : src;
       const m = await readMoov(blob);
       if (!m) return null;
       const { d } = m;
