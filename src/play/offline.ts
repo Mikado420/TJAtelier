@@ -139,13 +139,29 @@ async function openVideo(url: string) {
   return v.readyState >= 2 ? v : null;
 }
 
-/** 別スレッドの数（iPhone はメモリが少ないので 2 つまで） */
+/**
+ * 別スレッドで描いている間に、アプリごと落ちたことがあるかの印。
+ * 別スレッドは 1 つでスキンの絵などを丸ごと持つのでメモリを多く使い、足りない端末では落ちる。
+ * 描いている間だけ印を付けておき、次に起動したときに印が残っていたら（落ちた）、それからは別スレッドを使わない
+ */
+const WORKER_KEY = 'tjatelier:recWorkers';
+const store = {
+  get: () => { try { return localStorage.getItem(WORKER_KEY); } catch { return null; } },
+  set: (v: string | null) => { try { if (v === null) localStorage.removeItem(WORKER_KEY); else localStorage.setItem(WORKER_KEY, v); } catch { /* 保存できない */ } },
+};
+if (store.get() === 'running') store.set('off');
+
+/** 別スレッドの数。iPhone・iPad はメモリが足りずに落ちるので使わない */
 function workerCount() {
   const forced = (globalThis as { __recWorkers?: number }).__recWorkers;
   if (forced !== undefined) return forced;
   if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return 0;
-  if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))) return 2;
-  return Math.max(0, Math.min(3, (navigator.hardwareConcurrency || 4) - 2));
+  if (store.get() === 'off') return 0;
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent))) return 0;
+  // 1 つで 400MB ほど使うので、多くても 2 つ
+  const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
+  if (mem < 8) return 0;
+  return Math.max(0, Math.min(2, (navigator.hardwareConcurrency || 4) - 2));
 }
 
 /** 別スレッドの係 */
@@ -267,7 +283,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
 
     // 区間に分ける（係の数の 2〜3 倍。短すぎると前に描くぶんが無駄になる）
     const nw = velem ? 0 : workerCount();
-    const segLen = (globalThis as { __recSegLen?: number }).__recSegLen ?? Math.max(900, Math.ceil(N / ((nw + 1) * 2.5)));
+    const segLen = (globalThis as { __recSegLen?: number }).__recSegLen ?? (nw ? Math.max(900, Math.ceil(N / ((nw + 1) * 2.5))) : N);
     const segs: [number, number][] = [];
     for (let a = 0; a < N; a += segLen) segs.push([a, Math.min(N, a + segLen)]);
     const queue = segs.map((_, k) => k);
@@ -316,6 +332,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
 
     // 別スレッドの係を用意する（用意できるまでの間も、画面のスレッドは描き始める）
     if (nw > 0 && segs.length > 1) {
+      store.set('running');
       const wplan: RecPlan = { ...plan, bc: painter ? await painter.export() : null };
       for (let n = 0; n < nw; n++) {
         let w: Worker;
@@ -458,6 +475,7 @@ export async function renderChartVideo(job: OfflineJob): Promise<{ blob: Blob; e
     const blob = mux.finish();
     return { blob, ext: blob.type === 'video/quicktime' ? 'mov' : 'mp4', audio: acfg.kind };
   } finally {
+    if (store.get() === 'running') store.set(null);
     cancel = true;
     for (const h of helpers) h.w.terminate();
     main?.close();
