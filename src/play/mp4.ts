@@ -49,7 +49,7 @@ interface Track {
   durs: number[];
   keys: number[];
   /** かたまり（chunk）ごとの、データの始まり（mdat の中身の先頭から）と、入っている数 */
-  chunks: { at: number; n: number }[];
+  chunks: { at: number; n: number; sd?: number }[];
   /** PCM の音の数（1 つずつ数を並べるとメモリを使いすぎるので、数だけ） */
   pcm: number;
 }
@@ -63,7 +63,9 @@ export class Mp4Writer {
   private pos = 0;
   private v: Track;
   private a: Track | null = null;
-  private avcC: Uint8Array | null = null;
+  /** 映像の設定（avcC）。エンコーダーが違うと変わることがあるので、いくつでも持つ */
+  private avcCs: Uint8Array[] = [];
+  private sd = 1;
 
   constructor(
     private readonly W: number,
@@ -108,15 +110,20 @@ export class Mp4Writer {
     this.pendBytes = 0;
   }
 
-  /** 映像の 1 コマ（avcC は最初のコマで） */
+  /** 映像の 1 コマ（avcC は、エンコーダーが渡したとき） */
   addVideo(data: Uint8Array, key: boolean, avcC?: Uint8Array) {
-    if (avcC && !this.avcC) this.avcC = avcC;
+    if (avcC) {
+      const same = (a: Uint8Array) => a.length === avcC.length && a.every((x, i) => x === avcC[i]);
+      let k = this.avcCs.findIndex(same);
+      if (k < 0) k = this.avcCs.push(avcC) - 1;
+      this.sd = k + 1;
+    }
     const t = this.v;
     const at = this.put(data);
     t.sizes.push(data.length);
     t.durs.push(100);
     if (key) t.keys.push(t.sizes.length);
-    t.chunks.push({ at, n: 1 });
+    t.chunks.push({ at, n: 1, sd: this.sd });
   }
 
   /** 音のかたまり。frames = 入っている音の数（PCM のときは 1 つが 1 サンプル） */
@@ -208,11 +215,12 @@ export class Mp4Writer {
     const stts: [number, number][] = t.pcm ? [[t.pcm, 1]] : runs(t.durs);
     const sttsB = full('stts', 0, 0, u32(stts.length), ...stts.map(([n, d]) => [...u32(n), ...u32(d)]));
     // かたまりごとの数（同じ数が続く所はまとめる）
-    const sc: [number, number][] = [];
+    const sc: [number, number, number][] = [];
     t.chunks.forEach((c, i) => {
-      if (!sc.length || sc[sc.length - 1][1] !== c.n) sc.push([i + 1, c.n]);
+      const l = sc[sc.length - 1];
+      if (!l || l[1] !== c.n || l[2] !== (c.sd ?? 1)) sc.push([i + 1, c.n, c.sd ?? 1]);
     });
-    const stsc = full('stsc', 0, 0, u32(sc.length), ...sc.map(([f, n]) => [...u32(f), ...u32(n), ...u32(1)]));
+    const stsc = full('stsc', 0, 0, u32(sc.length), ...sc.map(([f, n, d]) => [...u32(f), ...u32(n), ...u32(d)]));
     const stsz = t.pcm
       ? full('stsz', 0, 0, u32(this.audio!.ch * 2), u32(t.pcm))
       : t.sizes.length > 0 && t.sizes.every((s) => s === t.sizes[0])
@@ -229,8 +237,9 @@ export class Mp4Writer {
 
   private stsd(t: Track) {
     if (t.video) {
-      const avc1 = box('avc1', new Array(6).fill(0), u16(1), u16(0), u16(0), new Array(12).fill(0), u16(this.W), u16(this.H), u32(0x480000), u32(0x480000), u32(0), u16(1), new Array(32).fill(0), u16(0x18), u16(0xffff), box('avcC', this.avcC ?? new Uint8Array()));
-      return full('stsd', 0, 0, u32(1), avc1);
+      const list = this.avcCs.length ? this.avcCs : [new Uint8Array()];
+      const avc1 = (c: Uint8Array) => box('avc1', new Array(6).fill(0), u16(1), u16(0), u16(0), new Array(12).fill(0), u16(this.W), u16(this.H), u32(0x480000), u32(0x480000), u32(0), u16(1), new Array(32).fill(0), u16(0x18), u16(0xffff), box('avcC', c));
+      return full('stsd', 0, 0, u32(list.length), ...list.map(avc1));
     }
     const A = this.audio!;
     const head = (type: string, ...rest: Bytes[]) => box(type, new Array(6).fill(0), u16(1), new Array(8).fill(0), u16(A.ch), u16(16), u16(0), u16(0), u32(A.rate * 65536 >>> 0), ...rest);

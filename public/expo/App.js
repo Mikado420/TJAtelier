@@ -102,8 +102,52 @@ async function saveAndShare(name, mime, b64) {
   await Sharing.shareAsync(file.uri, { mimeType: mime, dialogTitle: safe });
 }
 
+/**
+ * 大きいファイル（録画した動画など）を、届いた所から順にファイルへ書き足す（全部をメモリにためない）。
+ * 書けたら Web 版へ知らせる（Web 版は知らせを待ってから次を送る）
+ */
+let lastStream = null;
+function openStream(name) {
+  // 前に共有した大きいファイルを消す（たまらないように）
+  try {
+    if (lastStream && lastStream.exists) lastStream.delete();
+  } catch {
+    // 消せなくてもよい
+  }
+  lastStream = null;
+  const safe = String(name || 'file').replace(/[\\/:*?"<>|]+/g, '_');
+  const file = new File(Paths.cache, safe);
+  try {
+    if (file.exists) file.delete();
+  } catch {
+    // 消せなくても上書きを試す
+  }
+  file.create();
+  let handle = null;
+  try {
+    handle = typeof file.open === 'function' ? file.open() : null;
+  } catch {
+    handle = null;
+  }
+  return {
+    file,
+    safe,
+    write(bytes) {
+      if (handle) handle.writeBytes(bytes);
+      else file.write(bytes, { append: true });
+    },
+    close() {
+      try {
+        handle?.close();
+      } catch {
+        // 閉じられなくても続ける
+      }
+    },
+  };
+}
+
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 7;
+const APP_VERSION = 8;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -194,10 +238,67 @@ export default function App() {
 
   /** 分けて届くファイル（id ごと） */
   const files = useRef({});
+  /** 順に書き足しているファイル（id ごと） */
+  const streams = useRef({});
 
   const onMessage = useCallback((e) => {
     try {
       const m = JSON.parse(e.nativeEvent.data);
+      // 大きいファイル: 始め → 分けた中身（順に書き足す）→ 終わり（共有シートを開く）
+      const ack = (id, part) => {
+        web.current?.injectJavaScript(`window.__nativeFileAck&&window.__nativeFileAck(${JSON.stringify(id)},${JSON.stringify(part)});true;`);
+        web.current?.postMessage(JSON.stringify({ type: 'fileAck', id, part }));
+      };
+      const fail = (id, err) => {
+        const st = streams.current[id];
+        delete streams.current[id];
+        st?.close();
+        const msg = String((err && err.message) || err);
+        Alert.alert('保存できませんでした', msg);
+        web.current?.injectJavaScript(`window.__nativeSaveError&&window.__nativeSaveError(${JSON.stringify(msg)});true;`);
+      };
+      if (m.type === 'fileStart') {
+        try {
+          if (!streams.current[m.id]) streams.current[m.id] = { ...openStream(m.name), mime: m.mime, next: 0, buf: {} };
+          ack(m.id, -1);
+        } catch (err) {
+          fail(m.id, err);
+        }
+        return;
+      }
+      if (m.type === 'filePart') {
+        const st = streams.current[m.id];
+        if (!st) return;
+        try {
+          st.buf[m.part] = m.data;
+          while (st.buf[st.next] !== undefined) {
+            const bytes = fromBase64(st.buf[st.next]);
+            delete st.buf[st.next];
+            st.write(bytes);
+            ack(m.id, st.next);
+            st.next += 1;
+          }
+        } catch (err) {
+          fail(m.id, err);
+        }
+        return;
+      }
+      if (m.type === 'fileEnd') {
+        const st = streams.current[m.id];
+        if (!st) return;
+        delete streams.current[m.id];
+        st.close();
+        ack(m.id, 'end');
+        Sharing.shareAsync(st.file.uri, { mimeType: m.mime || st.mime, dialogTitle: st.safe })
+          .catch((err) => {
+            Alert.alert('保存できませんでした', String((err && err.message) || err));
+          })
+          .finally(() => {
+            // アプリの中の写しは、次に大きいファイルを受け取るときに消す（共有先が後から読むことがあるので、すぐには消さない）
+            lastStream = st.file;
+          });
+        return;
+      }
       if (m.type === 'file') {
         if (!files.current[m.id]) {
           const ack = JSON.stringify(m.id);

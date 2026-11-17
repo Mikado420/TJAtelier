@@ -16,16 +16,21 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-type W = { __nativeFileAck?: (id: string) => void; __nativeSaveError?: (msg: string) => void };
+type W = { __nativeFileAck?: (id: string, part?: number | string) => void; __nativeSaveError?: (msg: string) => void };
 const acks = new Map<string, () => void>();
 let onError: (msg: string) => void = () => {};
-(window as unknown as W).__nativeFileAck = (id) => { acks.get(id)?.(); acks.delete(id); };
+// part 付き = 大きいファイルを順に送るときの、1 つずつの受け取り
+(window as unknown as W).__nativeFileAck = (id, part) => {
+  const k = part === undefined ? id : `${id}:${part}`;
+  acks.get(k)?.();
+  acks.delete(k);
+};
 (window as unknown as W).__nativeSaveError = (msg) => onError(msg);
 // アプリからの WebView.postMessage（もう一つの道）
 const onMsg = (e: Event) => {
   try {
     const m = JSON.parse(String((e as MessageEvent).data));
-    if (m && m.type === 'fileAck') (window as unknown as W).__nativeFileAck?.(m.id);
+    if (m && m.type === 'fileAck') (window as unknown as W).__nativeFileAck?.(m.id, m.part);
   } catch { /* 関係ないメッセージ */ }
 };
 window.addEventListener('message', onMsg);
@@ -42,6 +47,7 @@ export function onNativeSaveError(f: (msg: string) => void) { onError = f; }
 export async function nativeSave(blob: Blob, name: string, mime = blob.type || 'application/octet-stream'): Promise<'ok' | 'old' | 'none'> {
   const host = rn();
   if (!host) return 'none';
+  if (nativeAppVersion() >= 8) return streamSave(host, blob, name, mime);
   const b64 = toBase64(new Uint8Array(await blob.arrayBuffer()));
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const total = Math.max(1, Math.ceil(b64.length / CHUNK));
@@ -57,4 +63,50 @@ export async function nativeSave(blob: Blob, name: string, mime = blob.type || '
   // 大きいファイル（譜面画像など）はアプリが受け取るまで時間がかかるので、送り終えてから大きさに応じて待つ
   if (!got) setTimeout(() => { acks.delete(id); done(false); }, 6000 + total * 1500);
   return (await acked) ? 'ok' : 'old';
+}
+
+/** 1 回に送る大きさ（バイト。base64 にすると 4/3 倍） */
+const PART = 1536 * 1024;
+/** 受け取りを待たずに送ってよい数 */
+const AHEAD = 3;
+
+/** 受け取りの知らせを待つ（来なければ false） */
+function waitAck(key: string, ms: number) {
+  return new Promise<boolean>((res) => {
+    const t = setTimeout(() => {
+      acks.delete(key);
+      res(false);
+    }, ms);
+    acks.set(key, () => {
+      clearTimeout(t);
+      res(true);
+    });
+  });
+}
+
+/**
+ * 大きいファイル（録画した動画など）を、少しずつ読みながら送る。アプリは届いた所から順にファイルへ書き足す。
+ * どちらも全部をメモリにためないので、大きくても落ちない
+ */
+async function streamSave(host: RN, blob: Blob, name: string, mime: string): Promise<'ok' | 'old'> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const total = Math.max(1, Math.ceil(blob.size / PART));
+  const started = waitAck(`${id}:-1`, 8000);
+  host.postMessage(JSON.stringify({ type: 'fileStart', id, name, mime, size: blob.size, total }));
+  if (!(await started)) return 'old';
+  const pending: Promise<boolean>[] = [];
+  for (let i = 0; i < total; i++) {
+    // 先に送った分の受け取りを待つ（アプリ側が詰まらないように）
+    if (pending.length >= AHEAD) {
+      if (!(await pending.shift()!)) throw new Error('アプリが受け取れませんでした');
+    }
+    const bytes = new Uint8Array(await blob.slice(i * PART, Math.min(blob.size, (i + 1) * PART)).arrayBuffer());
+    pending.push(waitAck(`${id}:${i}`, 60000));
+    host.postMessage(JSON.stringify({ type: 'filePart', id, part: i, data: toBase64(bytes) }));
+  }
+  for (const p of pending) if (!(await p)) throw new Error('アプリが受け取れませんでした');
+  const ended = waitAck(`${id}:end`, 30000);
+  host.postMessage(JSON.stringify({ type: 'fileEnd', id, mime }));
+  if (!(await ended)) throw new Error('アプリが受け取れませんでした');
+  return 'ok';
 }

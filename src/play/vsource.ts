@@ -88,7 +88,7 @@ export class VideoSource {
   private wake: (() => void) | null = null;
   private err: unknown = null;
 
-  private constructor(private readonly blob: Blob, private readonly samples: Sample[], cfg: VideoDecoderConfig) {
+  private constructor(private readonly blob: Blob, private readonly samples: Sample[], private readonly cfg: VideoDecoderConfig) {
     this.dec = new VideoDecoder({
       output: (f) => {
         // 表示の順に届く
@@ -203,6 +203,27 @@ export class VideoSource {
       }
     } catch { /* 読めない */ }
     return null;
+  }
+
+  /** t 秒の少し前のキーフレームから読み直す（録画を区間に分けて描くとき） */
+  seek(t: number) {
+    const us = t * 1e6;
+    let k = 0;
+    for (let i = 0; i < this.samples.length; i++) {
+      const s = this.samples[i];
+      if (s.ts > us) break;
+      if (s.key) k = i;
+    }
+    this.cur?.close();
+    for (const f of this.pending) f.close();
+    this.cur = null;
+    this.pending = [];
+    this.flushed = false;
+    this.next = k;
+    if (this.dec.state === 'configured') {
+      this.dec.reset();
+      this.dec.configure(this.cfg);
+    }
   }
 
   /** 動画の t 秒に出ているコマ（閉じないこと。次に呼ぶまで使える） */

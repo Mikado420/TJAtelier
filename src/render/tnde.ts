@@ -460,6 +460,7 @@ export class TndeSkin {
   private rollSeries = 0;
 
   reset() {
+    if (this.fixedRnd) this.seed = 7;
     this.rollTint = { level: 0, count: 0, at: -1e9 };
     this.rollCharas = [];
     this.rollSeries = this.rnd() % 3;
@@ -504,32 +505,38 @@ export class TndeSkin {
     const r = F.fx.rollFx;
     if (r && r.t !== L.roll) {
       L.roll = r.t;
+      // 時刻は叩いた時（描いた時ではなく）。録画で区間の途中から描き始めても同じになるように
+      const at = r.t;
       if (r.balloon) {
-        this.balloonNumAt = wall;
-        this.balloonHitAt = wall;
-        if (!this.charaOnce || this.charaOnce.name !== 'chara/Balloon_Breaking') this.charaOnce = { name: 'chara/Balloon_Breaking', t: wall, ms: 1e9 };
-        this.balloonUntil = wall + 1e9;
+        this.balloonNumAt = at;
+        this.balloonHitAt = at;
+        if (!this.charaOnce || this.charaOnce.name !== 'chara/Balloon_Breaking') this.charaOnce = { name: 'chara/Balloon_Breaking', t: at, ms: 1e9 };
+        this.balloonUntil = at + 1e9;
       } else {
         // 連打の音符の色: 1 打ごとに赤みが 10 増える（100 まで）
         const T = this.rollTint;
         if (r.count < T.count) T.level = 0;
-        T.level = Math.min(100, this.rollLevel(wall) + 10 * Math.max(1, r.count - T.count));
+        T.level = Math.min(100, this.rollLevel(at) + 10 * Math.max(1, r.count - T.count));
         T.count = r.count;
-        T.at = wall;
+        T.at = at;
         // 下から斜めに上がっていく連打のキャラ
-        this.rollCharas.push({ t: wall, x: P(ROLL_X[this.rnd() % ROLL_X.length]), type: this.rnd() % 6 });
+        if (this.fixedRnd) {
+          let h = (Math.round(at * 7) * 2654435761) >>> 0;
+          const rr = () => (h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0);
+          this.rollCharas.push({ t: at, x: P(ROLL_X[rr() % ROLL_X.length]), type: rr() % 6 });
+        } else this.rollCharas.push({ t: at, x: P(ROLL_X[this.rnd() % ROLL_X.length]), type: this.rnd() % 6 });
         if (this.rollCharas.length > 64) this.rollCharas.shift();
         // 連打の枠: 出ていなければ開くところから、出ていれば開いたまま延ばす
-        if (wall - this.rollAt > 2400) this.rollAt = wall;
-        else this.rollAt = wall - 5 * 40;
-        this.rollNumAt = wall;
+        if (at - this.rollAt > 2400) this.rollAt = at;
+        else this.rollAt = at - 5 * 40;
+        this.rollNumAt = at;
       }
     }
     if (F.fx.rainbow !== null && F.fx.rainbow !== L.popped) {
       L.popped = F.fx.rainbow;
       const n = this.count('chara/Balloon_Broke');
-      this.charaOnce = { name: 'chara/Balloon_Broke', t: wall, ms: n * 32 };
-      this.balloonUntil = wall + 500;
+      this.charaOnce = { name: 'chara/Balloon_Broke', t: F.fx.rainbow, ms: n * 32 };
+      this.balloonUntil = F.fx.rainbow + 500;
     } else if (this.charaOnce?.name === 'chara/Balloon_Breaking' && (!r || !r.balloon || wall - r.t > 300)) {
       // 割らずに終わった
       const n = this.count('chara/Balloon_Miss');
@@ -1801,7 +1808,10 @@ export class TndeSkin {
 
   private titleCache: { key: string; c: HTMLCanvasElement } | null = null;
   /** ジャンルと曲目を入れ替える時計の始まり */
-  private stageAt = -1;
+  /** ジャンルと曲目を入れ替える時計の始まり（録画: 区間ごとに描いても同じになるよう、外から決める） */
+  stageAt = -1;
+  /** 録画: 連打のキャラの位置などを、時刻から決める（区間ごとに描いても同じになるように） */
+  fixedRnd = false;
 
   private drawTitle(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { wall } = F;
@@ -2001,6 +2011,8 @@ async function loadBitmap(url: string): Promise<ImageBitmap | HTMLImageElement |
       if (bm) return bm;
     } catch { /* もう 1 回 */ }
   }
+  // 録画の別スレッドには Image が無い
+  if (typeof Image === 'undefined') return null;
   return new Promise((res) => {
     const im = new Image();
     const t = setTimeout(() => res(null), 12000);

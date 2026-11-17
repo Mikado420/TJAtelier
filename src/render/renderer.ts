@@ -262,13 +262,11 @@ export class Renderer {
     this.hud = hud;
     this.ctx = canvas.getContext('2d')!;
     // Web フォントが後から読み込まれたら、前もって描いておいた文字の絵を作り直す
-    document.fonts?.addEventListener?.('loadingdone', () => {
-      this.dropSprites();
-      clearTextCache();
-    });
+    document.fonts?.addEventListener?.('loadingdone', this.onFonts);
     this.makePatterns();
     this.resize();
-    new ResizeObserver(() => this.resize()).observe(canvas);
+    // 録画用の canvas（OffscreenCanvas）は画面に置かないので、大きさの変化は見ない
+    if (typeof (canvas as { getBoundingClientRect?: unknown }).getBoundingClientRect === 'function') new ResizeObserver(() => this.resize()).observe(canvas);
   }
 
   // ---------- レイアウト ----------
@@ -277,8 +275,8 @@ export class Renderer {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
     // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
     this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
-    const w = this.canvas.clientWidth || window.innerWidth;
-    const h = this.canvas.clientHeight || window.innerHeight;
+    const w = this.fixedSize?.w ?? (this.canvas.clientWidth || window.innerWidth);
+    const h = this.fixedSize?.h ?? (this.canvas.clientHeight || window.innerHeight);
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
 
@@ -356,6 +354,8 @@ export class Renderer {
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
   plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
+  /** 録画用: 画面に置かない canvas の大きさ（CSS px） */
+  fixedSize: { w: number; h: number } | null = null;
   /** 録画用: 毎コマ、消す代わりに後ろの絵（背景・動画など）を描く */
   underlay: ((c: CanvasRenderingContext2D) => void) | null = null;
   /** 後ろに置く、動かない背景の canvas */
@@ -640,6 +640,22 @@ export class Renderer {
   private particles = new Map<string, { c: HTMLCanvasElement; unit: number }>();
 
   /** 前もって描いた絵を全部手放す（iPhone はキャンバスの大きさを 0 にしないとメモリがすぐ空かない） */
+  private onFonts = () => {
+    this.dropSprites();
+    clearTextCache();
+  };
+
+  /** 録画用の描き手を捨てる（canvas のメモリを手放す） */
+  dispose() {
+    document.fonts?.removeEventListener?.('loadingdone', this.onFonts);
+    this.dropSprites();
+    for (const L of this.layers.values()) L.c.width = L.c.height = 0;
+    this.layers.clear();
+    for (const c of [this.bg, this.hud, this.canvas]) if (c) c.width = c.height = 0;
+    this.tnde = null;
+    this.underlay = null;
+  }
+
   private dropSprites() {
     for (const sp of this.sprites.values()) { sp.c.width = 0; sp.c.height = 0; }
     this.sprites.clear();
@@ -840,6 +856,11 @@ export class Renderer {
   showEnd(kind: EndKind, fade = false) {
     this.endFx = { kind, t: performance.now(), fade };
     // TNDE スキンの演出は 7 秒見せてから 1.8 秒で暗くする（動画用の画面は暗くしない）
+    if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
+    return END_HOLD[kind];
+  }
+  /** showEnd が返す、演出を見せる長さ（演出は始めない） */
+  endHoldFor(kind: EndKind) {
     if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
     return END_HOLD[kind];
   }
