@@ -41,16 +41,20 @@ const mmss = (t: number) => {
  * 表示のたびにぼかしを計算しないように
  */
 const artCache = new Map<string, Promise<string | null>>();
+/** ジャケットの背景のぼかしの強さ（2000×1125 の画面の単位。ぼけ方の半径） */
+const ART_BLUR = 12;
 function blurredArt(src: string): Promise<string | null> {
-  const hit = artCache.get(src);
+  const key = src;
+  const hit = artCache.get(key);
   if (hit) return hit;
   const p = new Promise<string | null>((resolve) => {
     const im = new Image();
     im.decoding = 'async';
     const run = (tries: number) => {
       try {
-        const W = 216;
-        const H = 82;
+        // 2160×820 の 1/5 の大きさで計算する
+        const W = 432;
+        const H = 164;
         const cv = document.createElement('canvas');
         cv.width = W;
         cv.height = H;
@@ -67,9 +71,9 @@ function blurredArt(src: string): Promise<string | null> {
           if (tries > 0) return void setTimeout(() => run(tries - 1), 120);
           return resolve(null);
         }
-        boxBlur(d.data, W, H, 5);
-        boxBlur(d.data, W, H, 5);
-        boxBlur(d.data, W, H, 4);
+        // 箱ぼかしを 3 回（3 回でぼけ方の半径がほぼ r になる）
+        const r = Math.max(1, Math.round(ART_BLUR / 5));
+        for (let k = 0; k < 3; k++) boxBlur(d.data, W, H, r);
         // 色を濃く（1.35 倍）・暗く（0.62 倍）
         const a = d.data;
         for (let i = 0; i < a.length; i += 4) {
@@ -90,7 +94,7 @@ function blurredArt(src: string): Promise<string | null> {
     im.onerror = () => resolve(null);
     im.src = src;
   });
-  artCache.set(src, p);
+  artCache.set(key, p);
   if (artCache.size > 8) artCache.delete(artCache.keys().next().value!);
   return p;
 }

@@ -1491,6 +1491,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .st-num input:focus { outline: none; border-color: var(--accent); }
 .st-num i { font-style: normal; font-size: 11px; color: var(--sub); }
 .st-seg.two { grid-template-columns: 1fr 1fr; }
+.st-seg.four { grid-template-columns: repeat(4, 1fr); }
 
 /* ---------- プレイのポーズ画面（ほかの画面と同じ色・斜めの形） ---------- */
 .play .pause-menu {
@@ -2329,6 +2330,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .ol-vprog i { background: #7b4bd0; }
 .play .play-vdim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #000; pointer-events: none; }
 .play .play-vdim.hidden { display: none; }
+.play .play-vblur { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.play .play-vblur.hidden { display: none; }
 
 /* ───────── 合作（リアルタイム共同編集） ───────── */
 /* 波形の左上の帯: メニュー・開いているレーン・メンバー・チャット */
@@ -2765,7 +2768,7 @@ body.playing .br-ctl { display: none; }
 /* 動画用の画面: ジャケットが主役（ぼかしたジャケットを上半分の背景に、板は半透明の白に細い縁） */
 /* ぼかしたジャケットは、レーン（左のパネルの上端 = 673px）より下へはみ出さない */
 .bc-art { left: -80px; top: -120px; width: 2160px; height: 793px; background: center / 100% 100% no-repeat; clip-path: inset(0); }
-.bc-art-css { background-size: cover; filter: blur(46px) saturate(1.35) brightness(0.62); }
+.bc-art-css { background-size: cover; filter: blur(12px) saturate(1.35) brightness(0.62); }
 .bc-art-none { filter: none; background: radial-gradient(ellipse 60% 80% at 30% 20%, color-mix(in srgb, var(--cc) 55%, #0d1014), #0d1014 75%); }
 .bc-shade { left: 0; top: 0; width: 2000px; height: 660px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55) 92%, #0d1014); }
 .bc-backdrop .bc-shade { display: none; }

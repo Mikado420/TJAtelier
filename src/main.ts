@@ -118,7 +118,7 @@ const settings = {
   /** 画面の音（タップ・フォルダ・結果・曲名） */
   volUi: 1,
   /** 背景の動画: 全面・下だけ・出さない */
-  videoMode: 'full' as 'full' | 'bottom' | 'off',
+  videoMode: 'full' as 'full' | 'both' | 'bottom' | 'off',
   /** 譜面分岐: 自動・普通・玄人・達人に固定 */
   branch: 'auto' as 'auto' | 'N' | 'E' | 'M',
   /** エディタ: 譜面分岐のほかの分岐も下に並べる */
@@ -1937,7 +1937,7 @@ function viewRows(heads = false) {
     ${stSwitch('broadcast', '動画用の画面', settings.broadcast)}
     ${stSwitch('showFps', 'FPS を表示', settings.showFps)}
     ${stSwitch('autoRes', '重いときは画質を下げる', settings.autoRes)}
-    <div class="st-row"><span>背景の動画</span><div class="st-seg">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+    <div class="st-row"><span>背景の動画</span><div class="st-seg four">${VIDEO_MODES.map(([v, l]) => `<button data-vmode="${v}" class="${settings.videoMode === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
     ${stRange('videoDim', '動画の明るさ', 0.1, 1, 0.05, settings.videoDim, 100, '%')}`;
 }
 const BRANCH_MODES: [typeof settings.branch, string][] = [['auto', '自動'], ['N', 'N'], ['E', 'E'], ['M', 'M']];
@@ -1946,7 +1946,7 @@ function onBranchModeClick(b: HTMLButtonElement) {
   saveSettings();
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
 }
-const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['bottom', '下だけ'], ['off', '出さない']];
+const VIDEO_MODES: [typeof settings.videoMode, string][] = [['full', '全面'], ['both', '全面+下'], ['bottom', '下だけ'], ['off', '出さない']];
 function volumeRows() {
   return `
     ${stRange('volMusic', '音源', 0, 2, 0.05, settings.volMusic, 100, '%')}

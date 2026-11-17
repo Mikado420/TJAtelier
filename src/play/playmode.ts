@@ -30,6 +30,21 @@ function base64(buf: ArrayBuffer): string {
   return btoa(s);
 }
 
+/** 範囲の縦をいっぱいに使う 16:9 の枠（左右は黒帯。縦長なら横をいっぱいにして、上下を黒帯に） */
+function fit169(r: { x: number; y: number; w: number; h: number }) {
+  if (r.w <= 0 || r.h <= 0) return r;
+  let h = r.h;
+  let w = (h * 16) / 9;
+  if (w > r.w) {
+    w = r.w;
+    h = (w * 9) / 16;
+  }
+  return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
+}
+
+/** 全面+下の、全面の動画のぼかし（画面の何 px を 1 つにまとめるか） */
+const BLUR_Q = 4;
+
 export interface PlaySettings {
   speed: number;
   /** 判定オフセット（ms）。＋で判定を遅らせる */
@@ -63,7 +78,7 @@ export interface PlaySettings {
   /** 指のタッチをポインターイベントで受け取る（iPhone の取りこぼし対策の切り替え） */
   pointerInput?: boolean;
   /** 背景の動画: 全面・下だけ・出さない */
-  videoMode?: 'full' | 'bottom' | 'off';
+  videoMode?: 'full' | 'both' | 'bottom' | 'off';
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim?: number;
   /** 遊びながら録画する（終わったら結果画面で保存できる） */
@@ -565,6 +580,7 @@ export class PlayMode {
       // 続けた直後は音が出るまで時計が少し戻ることがあるので、止めた時刻より前には戻さない
       const now = Math.max(this.time(), this.timeFloor);
       this.syncVideo();
+      this.paintBlur();
       if (this.auto && !this.calibrating) {
         this.scheduleSounds(now);
         this.autoPlay(game, now);
@@ -772,6 +788,15 @@ export class PlayMode {
     };
     g.fillStyle = '#000';
     g.fillRect(0, 0, W, H);
+    const bl = this.vblur;
+    if (shown(bl) && bl.width) {
+      const r = place(bl);
+      g.save();
+      // 画面と同じぼかし（使えない端末では、小さな絵を広げたぼけ方だけ）
+      if ('filter' in g) g.filter = bl.style.filter.replace(/[\d.]+px/, (x) => `${parseFloat(x) * k}px`);
+      g.drawImage(bl, r.x, r.y, r.w, r.h);
+      g.restore();
+    }
     const v = this.video;
     if (this.videoMode && shown(v)) {
       if (v.readyState >= 2) cover(v, v.videoWidth, v.videoHeight, place(v));
@@ -915,6 +940,8 @@ export class PlayMode {
 
   private video: HTMLVideoElement | null = null;
   private vdim: HTMLElement | null = null;
+  /** 全面+下のときの、全面のぼかした動画 */
+  private vblur: HTMLCanvasElement | null = null;
   private videoUrl = '';
   private videoOffset = 0;
   private videoCheck = 0;
@@ -942,10 +969,16 @@ export class PlayMode {
         // 暗くするのは動画のフィルターではなく、上に重ねた黒い板で（iPhone ではフィルターが重い）
         const dim = document.createElement('div');
         dim.className = 'play-vdim';
+        // 全面+下: 全面にうすくぼかして出す動画（小さく描いて広げる）
+        const blur = document.createElement('canvas');
+        blur.className = 'play-vblur hidden';
+        blur.setAttribute('aria-hidden', 'true');
         this.root.prepend(dim);
         this.root.prepend(v);
+        this.root.prepend(blur);
         this.video = v;
         this.vdim = dim;
+        this.vblur = blur;
         // コマが出るたびに、その位置と時刻を覚える（ずれを正確に測るため）
         type RVFC = (cb: (now: number, m: { mediaTime: number }) => void) => number;
         const rvfc = (v as unknown as { requestVideoFrameCallback?: RVFC }).requestVideoFrameCallback?.bind(v);
@@ -994,7 +1027,7 @@ export class PlayMode {
   }
 
   /** 今の動画の出し方（'' = 出さない） */
-  private get videoMode(): '' | 'full' | 'bottom' {
+  private get videoMode(): '' | 'full' | 'both' | 'bottom' {
     const m = (this.settings.videoMode as string) === 'top' ? 'bottom' : this.settings.videoMode ?? 'full';
     if (!this.videoUrl || m === 'off' || this.calibrating) return '';
     // 動画用の画面では、いつも全面の背景に
@@ -1011,10 +1044,13 @@ export class PlayMode {
       this.bgDim!.classList.toggle('hidden', !img);
       this.bgDim!.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
     }
-    const mode = vmode || (img ? 'full' : '');
+    // 全面+下: 後ろは全面にうすくぼかした動画を出すので、絵は全面のときと同じく背景を塗らない
+    const mode = vmode === 'both' ? 'full' : vmode || (img ? 'full' : '');
     const R = this.renderer;
     R.movie = !!vmode;
     const v = this.video;
+    this.vblur?.classList.toggle('hidden', vmode !== 'both');
+    if (vmode !== 'both' && this.vblur) this.vblur.width = this.vblur.height = 0;
     if (v) {
       v.classList.toggle('hidden', !vmode);
       this.vdim?.classList.toggle('hidden', !vmode);
@@ -1029,29 +1065,51 @@ export class PlayMode {
   }
 
   /**
+   * 全面+下: 動画を小さな canvas に描き（画面いっぱいを覆う向きで）、それを全面に広げてぼかして出す。
+   * 暗さは動画と同じだけ、canvas の中で暗くする
+   */
+  private paintBlur() {
+    const c = this.vblur;
+    const v = this.video;
+    if (!c || !v || this.videoMode !== 'both' || v.readyState < 2) return;
+    const W = c.clientWidth;
+    const H = c.clientHeight;
+    const q = BLUR_Q;
+    const w = Math.max(8, Math.round(W / q));
+    const h = Math.max(8, Math.round(H / q));
+    if (c.width !== w || c.height !== h) {
+      c.width = w;
+      c.height = h;
+      c.style.filter = `blur(${Math.round(q * 0.6)}px)`;
+    }
+    const g = c.getContext('2d');
+    if (!g || !v.videoWidth) return;
+    const k = Math.max(w / v.videoWidth, h / v.videoHeight);
+    try {
+      g.drawImage(v, (w - v.videoWidth * k) / 2, (h - v.videoHeight * k) / 2, v.videoWidth * k, v.videoHeight * k);
+    } catch { /* 描けないコマ */ }
+    g.fillStyle = `rgba(0,0,0,${1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5))})`;
+    g.fillRect(0, 0, w, h);
+  }
+
+  /**
    * 動画を置く。上だけに出すときは、レーンより上の範囲に置く。
    * 16:9 のときは、その範囲の縦をいっぱいに使う 16:9 の枠を真ん中に置き（左右は黒帯）、動画は枠に合わせて切り抜く
    */
   private placeVideo() {
     const v = this.video;
     if (!v) return;
-    const t = this.videoMode === 'bottom' ? this.renderer.layout?.bottom : null;
-    let r = t ? { x: t.x, y: t.y, w: t.w, h: t.h } : { x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight };
-    // いつも 16:9（その範囲の縦をいっぱいに使い、左右は黒帯。縦長なら横をいっぱいに）
-    if (r.w > 0 && r.h > 0) {
-      let h = r.h;
-      let w = (h * 16) / 9;
-      // 縦長の画面では横をいっぱいにして、上下を黒帯にする
-      if (w > r.w) {
-        w = r.w;
-        h = (w * 9) / 16;
-      }
-      r = { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
-    }
-    for (const el of [v, this.vdim]) {
-      if (!el) continue;
-      Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
-    }
+    const m = this.videoMode;
+    const t = m === 'bottom' || m === 'both' ? this.renderer.layout?.bottom : null;
+    const full = { x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight };
+    const r = fit169(t ? { x: t.x, y: t.y, w: t.w, h: t.h } : full);
+    const set = (el: HTMLElement | null, q: { x: number; y: number; w: number; h: number }) => {
+      if (el) Object.assign(el.style, { left: `${q.x}px`, top: `${q.y}px`, width: `${q.w}px`, height: `${q.h}px` });
+    };
+    set(v, r);
+    set(this.vdim, r);
+    // 全面+下: ぼかした動画は、全面のときの動画と同じ所（左右の帯はそのまま）
+    set(this.vblur, fit169(full));
   }
 
   /** 動画が最後にコマを出したときの位置（requestVideoFrameCallback。currentTime より正確） */

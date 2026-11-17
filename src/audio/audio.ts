@@ -115,8 +115,8 @@ export class AudioEngine {
       this.uiBufs.set(name, buf);
       if (voice) {
         const lv = AudioEngine.level(buf, false);
-        // 画面の音の音量（0.6 倍）のぶんも戻し、流れている曲より大きく（2 倍）聞こえるように
-        if (lv > 0) this.uiNorm.set(name, Math.min(12, (AudioEngine.TARGET * 2) / lv / 0.6));
+        // 画面の音の音量（0.6 倍）のぶんも戻し、曲・打音と同じ大きさ（TARGET）に
+        if (lv > 0) this.uiNorm.set(name, Math.min(12, AudioEngine.TARGET / lv / 0.6));
       }
     } catch { /* 鳴らせない */ }
   }

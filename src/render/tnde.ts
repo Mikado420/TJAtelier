@@ -609,9 +609,10 @@ export class TndeSkin {
       this.drawTitle(c, F);
       this.drawComboBanner(c, wall);
     }
+    // 風船を割っているどんちゃんは、風船より後ろ（風船・連打数は手前）
+    if (all) this.drawBalloonChara(c, F);
     this.drawRoll(c, F);
     this.drawJudgeText(c, F, jx);
-    if (all) this.drawBalloonChara(c, F);
     // 演出の 7 秒後から 1.8 秒で暗くして、結果の画面へ
     if (all && F.end && END_KINDS.has(F.end.kind)) {
       const a = (wall - F.end.t - END_FADE_AT) / END_FADE;
@@ -1200,7 +1201,7 @@ export class TndeSkin {
     this.frame(c, name, ph * this.count(name), 0, 0);
   }
 
-  /** 風船を割っているどんちゃん（いちばん手前） */
+  /** 風船を割っているどんちゃん（風船のすぐ後ろ） */
   private drawBalloonChara(c: CanvasRenderingContext2D, F: TndeFrame) {
     const once = this.charaOnce;
     if (!once || !once.name.startsWith('chara/Balloon')) return;
