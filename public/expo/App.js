@@ -19,7 +19,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as GH from 'react-native-gesture-handler';
 import * as Sharing from 'expo-sharing';
-import { File, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 
 const { GestureDetector, GestureHandlerRootView } = GH;
 
@@ -110,74 +110,40 @@ let lastStream = null;
 function openStream(name) {
   // 前に共有した大きいファイルを消す（たまらないように）
   try {
-    if (lastStream && lastStream.exists) lastStream.delete();
+    if (lastStream) {
+      const d = lastStream.parentDirectory;
+      if (d && /\/rec-\d+\/?$/.test(d.uri)) d.delete();
+      else if (lastStream.exists) lastStream.delete();
+    }
   } catch {
     // 消せなくてもよい
   }
   lastStream = null;
   const safe = String(name || 'file').replace(/[\\/:*?"<>|]+/g, '_');
-  const file = new File(Paths.cache, safe);
+  // 毎回、新しいフォルダに作る（前のファイルの残りが混ざらないように）
+  let file;
   try {
-    if (file.exists) file.delete();
+    const dir = new Directory(Paths.cache, `rec-${Date.now()}`);
+    dir.create();
+    file = new File(dir, safe);
   } catch {
-    // 消せなくても上書きを試す
+    file = new File(Paths.cache, `${Date.now()}-${safe}`);
   }
   file.create();
+  // 届いた base64 を JS でバイト列にして、開いたファイルの続きに書き足す（どれも同じやり方で、確実に）
   let handle = null;
-  // base64 のまま書き足す（変換は保存の部品に任せる。JS で変換するより速い）。
-  // 最初の 2 つは、書いたあとの大きさで正しく書き足せたか確かめる（だめなら作り直して、JS で変換して書く）
-  let native = true;
-  let checked = 0;
-  let total = 0;
-  const firsts = [];
-  const sizeOf = (b64) => (b64.length / 4) * 3 - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
-  const writeJs = (b64) => {
-    const bytes = fromBase64(b64);
-    if (!handle) {
-      try {
-        handle = typeof file.open === 'function' ? file.open() : null;
-        if (handle && typeof handle.size === 'number') handle.offset = handle.size;
-      } catch {
-        handle = null;
-      }
-    }
-    if (handle) handle.writeBytes(bytes);
-    else file.write(bytes, { append: true });
-  };
+  try {
+    handle = typeof file.open === 'function' ? file.open() : null;
+  } catch {
+    handle = null;
+  }
   return {
     file,
     safe,
     writeB64(b64) {
-      total += sizeOf(b64);
-      if (!native) {
-        writeJs(b64);
-        return;
-      }
-      const testing = checked < 2;
-      if (testing) firsts.push(b64);
-      try {
-        file.write(b64, { encoding: 'base64', append: true });
-        if (testing) {
-          checked += 1;
-          if (file.size !== total) throw new Error('size');
-          if (checked === 2) firsts.length = 0;
-        }
-        return;
-      } catch {
-        native = false;
-      }
-      if (testing) {
-        // 確かめている間: 作り直して、ここまでの分を JS で書き直す
-        try {
-          if (file.exists) file.delete();
-        } catch {
-          // 消せなくても続ける
-        }
-        file.create();
-        const redo = firsts.slice();
-        firsts.length = 0;
-        for (const x of redo) writeJs(x);
-      } else writeJs(b64);
+      const bytes = fromBase64(b64);
+      if (handle) handle.writeBytes(bytes);
+      else file.write(bytes, { append: true });
     },
     close() {
       try {
@@ -190,7 +156,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -296,6 +262,8 @@ export default function App() {
         const st = streams.current[id];
         delete streams.current[id];
         st?.close();
+        // 書きかけのファイルは、次に受け取るときに消す
+        if (st) lastStream = st.file;
         const msg = String((err && err.message) || err);
         Alert.alert('保存できませんでした', msg);
         web.current?.injectJavaScript(`window.__nativeSaveError&&window.__nativeSaveError(${JSON.stringify(msg)});true;`);
@@ -332,9 +300,10 @@ export default function App() {
         delete streams.current[m.id];
         st.close();
         // 書けた大きさが送られた大きさと違えば、壊れたファイルなので共有しない
+        // 大きさは、新しく開き直して測る（前の情報が残っていることがあるので）
         let got = -1;
         try {
-          got = st.file.size;
+          got = new File(st.file.uri).size;
         } catch {
           got = -1;
         }
