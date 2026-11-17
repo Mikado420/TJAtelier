@@ -187,3 +187,4 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import course
 sys.argv = [sys.argv[0], SRC, OUT, os.path.join(OUT, 'FOT-OedoKtr.otf')]
 course.main()
+# このあと hq.py で、粗く見える絵（字・数字・どんちゃん・終わりの演出）を waifu2x で細かくする

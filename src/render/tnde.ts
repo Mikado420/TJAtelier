@@ -25,7 +25,7 @@ const HALF = NOTE / 2;
 
 /** k: 絵が元の大きさ（w × h）の何倍の細かさで入っているか */
 interface ImgInfo { f: string; w: number; h: number; k?: number }
-interface AnimInfo { f: string; w: number; h: number; n: number; cols: number; step: number }
+interface AnimInfo { f: string; w: number; h: number; n: number; cols: number; step: number; k?: number }
 interface Manifest { img: Record<string, ImgInfo>; anim: Record<string, AnimInfo> }
 
 export interface TndeFx {
@@ -212,7 +212,16 @@ export class TndeSkin {
     if (name === 'dancer/Normal1') return p.dancer === 1;
     if (name === 'mob') return p.down !== 5;
     if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
+    if (name.startsWith('chara/') && name.endsWith('_Max')) return this.maxWant;
     return true;
+  }
+
+  /** 魂ゲージが満タンのどんちゃんの絵（大きいので、ゲージが 8 割を超えてから読み込む） */
+  private maxWant = false;
+  private wantMax() {
+    if (this.maxWant) return;
+    this.maxWant = true;
+    for (const n of Object.keys(this.man.anim)) if (n.startsWith('chara/') && n.endsWith('_Max')) void this.fetchImg(n);
   }
 
   /** 曲の終わりの演出の絵は、要りそうになってから読み込む（clear・fc・dfc） */
@@ -255,6 +264,7 @@ export class TndeSkin {
         return null;
       }
       if (this.loading.get(name) !== p) { if ('close' in v) v.close(); return null; }
+      if (info.k && info.k !== 1) this.hq.set(v, info.k);
       this.imgs.set(name, v);
       return v;
     });
@@ -264,6 +274,26 @@ export class TndeSkin {
 
   private img(name: string) {
     return this.imgs.get(name) ?? null;
+  }
+
+  /** 細かくしてある絵（元の大きさの何倍の細かさで入っているか） */
+  private hq = new WeakMap<object, number>();
+  private qOf(im: CanvasImageSource) {
+    return this.hq.get(im as object) ?? 1;
+  }
+  /** 絵の元の大きさ（細かくしてあっても、元の絵の px で） */
+  private lw(im: CanvasImageSource) {
+    return (im as { width: number }).width / this.qOf(im);
+  }
+  private lh(im: CanvasImageSource) {
+    return (im as { height: number }).height / this.qOf(im);
+  }
+  /** 絵を貼る。絵の中の範囲は元の絵の px で書き、細かくしてある絵はその倍率で読む */
+  private di(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
+    const q = this.qOf(im);
+    if (a.length === 8) this.di(c, im, a[0] * q, a[1] * q, a[2] * q, a[3] * q, a[4], a[5], a[6], a[7]);
+    else if (a.length === 4) this.di(c, im, a[0], a[1], a[2], a[3]);
+    else this.di(c, im, a[0], a[1], this.lw(im), this.lh(im));
   }
 
   /** 一度に読み込む絵の数をしぼる（iPhone は一度にたくさん頼むと止まりやすい） */
@@ -287,19 +317,17 @@ export class TndeSkin {
   private put(c: CanvasRenderingContext2D, name: string, x: number, y: number, sx = 0, sy = 0, sw?: number, sh?: number, kx = S, ky = kx) {
     const im = this.img(name);
     if (!im) return;
-    const q = this.man.img[name]?.k ?? 1;
-    const w = sw ?? im.width / q - sx;
-    const h = sh ?? im.height / q - sy;
+    const w = sw ?? this.lw(im) - sx;
+    const h = sh ?? this.lh(im) - sy;
     if (w <= 0 || h <= 0) return;
-    c.drawImage(im, sx * q, sy * q, w * q, h * q, x, y, w * kx, h * ky);
+    this.di(c, im, sx, sy, w, h, x, y, w * kx, h * ky);
   }
 
   /** レーンの絵を貼る。絵は 1 px ほど右端に届かないので、横は画面の右端までちょうどに伸ばす（ky = 縦の倍率） */
   private putLane(c: CanvasRenderingContext2D, name: string, y: number, ky = 1) {
     const im = this.img(name);
     if (!im) return;
-    const q = this.man.img[name]?.k ?? 1;
-    this.put(c, name, LANE_X, y, 0, 0, undefined, undefined, (TW - LANE_X) / (im.width / q), S * ky);
+    this.put(c, name, LANE_X, y, 0, 0, undefined, undefined, (TW - LANE_X) / this.lw(im), S * ky);
   }
 
   /** 絵の範囲を、(cx, cy) を中心に k 倍（1.5 倍の上にさらに）で貼る */
@@ -311,11 +339,13 @@ export class TndeSkin {
 
   /** 連番の絵の n 番目 */
   private frame(c: CanvasRenderingContext2D, name: string, n: number, x: number, y: number, k = S) {
+    // 魂ゲージが満タンのどんちゃんの絵は、満タンが近づいてから読み込む（読み込み中はふだんの絵で）
+    if (!this.img(name) && name.startsWith('chara/') && name.endsWith('_Max')) name = name.slice(0, -4);
     const a = this.man.anim[name];
     const im = this.img(name);
     if (!a || !im) return;
     const i = Math.max(0, Math.min(a.n - 1, Math.floor(n)));
-    c.drawImage(im, (i % a.cols) * a.w, Math.floor(i / a.cols) * a.h, a.w, a.h, x, y, a.w * k, a.h * k);
+    this.di(c, im, (i % a.cols) * a.w, Math.floor(i / a.cols) * a.h, a.w, a.h, x, y, a.w * k, a.h * k);
   }
 
   private count(name: string) {
@@ -673,7 +703,7 @@ export class TndeSkin {
             c.save();
             c.translate(x + 470 - 290 * q, cy);
             c.rotate(((30 + 70 * (q / 0.9)) * Math.PI) / 180);
-            c.drawImage(im, (-im.width * S) / 2, (-im.height * S) / 2, im.width * S, im.height * S);
+            this.di(c, im, (-this.lw(im) * S) / 2, (-this.lh(im) * S) / 2, this.lw(im) * S, this.lh(im) * S);
             c.restore();
           }
         }
@@ -697,7 +727,7 @@ export class TndeSkin {
             const q = (wall / 6000 + i / 14) % 1;
             const px = ((i * 397) % TW) - q * 300 + 150;
             const py = q * 320 - 30;
-            c.drawImage(im, 0, v * 184, 641, 184, px - 60, py - 20, 641 * 0.25, 184 * 0.25);
+            this.di(c, im, 0, v * 184, 641, 184, px - 60, py - 20, 641 * 0.25, 184 * 0.25);
           }
         }
       };
@@ -849,9 +879,10 @@ export class TndeSkin {
     const n = meta.frames.length;
     const k = Math.min(n - 1, Math.floor(t / 33));
     if (t > 2300) this.confetti(c, t - 2300);
-    const [x0, y0, w, h, px, py, pg] = meta.frames[k];
+    // 細かくした絵では、コマの位置と大きさ（px, py, sw, sh）を元の大きさの単位で持っている
+    const [x0, y0, w, h, px, py, pg, sw, sh] = meta.frames[k];
     const im = this.img(`end/fc${pg}`);
-    if (im && w) c.drawImage(im, px, py, w, h, 495 + x0 * S, 75 + y0 * S, w * S, h * S);
+    if (im && w) this.di(c, im, px, py, sw ?? w, sh ?? h, 495 + x0 * S, 75 + y0 * S, w * S, h * S);
     if (t >= n * 33) {
       const j = Math.floor((t - n * 33) / 50) % 2 ? 2 : 0;
       this.put(c, 'end/fcLoop', 495, 294, 0, j * 155, 950, 155);
@@ -1053,7 +1084,7 @@ export class TndeSkin {
       c.translate(x, y);
       c.rotate(ph + t * 4);
       c.scale(flip, 1);
-      c.drawImage(im, (-im.width * S) / 2, (-im.height * S) / 2, im.width * S, im.height * S);
+      this.di(c, im, (-this.lw(im) * S) / 2, (-this.lh(im) * S) / 2, this.lw(im) * S, this.lh(im) * S);
       c.restore();
     }
   }
@@ -1182,6 +1213,7 @@ export class TndeSkin {
   private drawChara(c: CanvasRenderingContext2D, beat: number, gogo: boolean, F: TndeFrame) {
     const st = F.game.stats;
     const { wall } = F;
+    if (st.gauge >= 80) this.wantMax();
     const once = this.charaOnce;
     if (once?.name === 'chara/Balloon_Breaking' || wall < this.balloonUntil) return; // 風船のどんちゃんは手前に描く
     if (once && !once.name.startsWith('chara/Balloon')) {
@@ -1410,7 +1442,7 @@ export class TndeSkin {
     if (!im) return;
     const lv = Math.round((1 - g) * 20);
     if (lv <= 0) {
-      c.drawImage(im, sx, sy, sw, sh, x, y, dw, dh);
+      this.di(c, im, sx, sy, sw, sh, x, y, dw, dh);
       return;
     }
     const key = `${sx},${sy},${sw},${sh},${lv}`;
@@ -1426,14 +1458,14 @@ export class TndeSkin {
       cv.width = sw;
       cv.height = sh;
       const t = cv.getContext('2d');
-      if (!t) { c.drawImage(im, sx, sy, sw, sh, x, y, dw, dh); return; }
+      if (!t) { this.di(c, im, sx, sy, sw, sh, x, y, dw, dh); return; }
       const gg = Math.round(255 * (1 - lv / 20));
-      t.drawImage(im, sx, sy, sw, sh, 0, 0, sw, sh);
+      this.di(t, im, sx, sy, sw, sh, 0, 0, sw, sh);
       t.globalCompositeOperation = 'multiply';
       t.fillStyle = `rgb(255,${gg},${gg})`;
       t.fillRect(0, 0, sw, sh);
       t.globalCompositeOperation = 'destination-in';
-      t.drawImage(im, sx, sy, sw, sh, 0, 0, sw, sh);
+      this.di(t, im, sx, sy, sw, sh, 0, 0, sw, sh);
       if (this.tinted.size > 200) this.tinted.clear();
       this.tinted.set(key, cv);
     }
@@ -1488,9 +1520,9 @@ export class TndeSkin {
       if (lv <= 0) continue;
       const im = this.img(f.kind === 'don' ? 'taiko/Don' : 'taiko/Ka');
       if (!im) continue;
-      const half = im.width / 2;
+      const half = this.lw(im) / 2;
       const sx = f.side === 'L' ? 0 : half;
-      this.alpha(c, Math.min(255, lv * 73) / 255, () => c.drawImage(im, sx, 0, half, im.height, tx + sx * S, ty, half * S, im.height * S));
+      this.alpha(c, Math.min(255, lv * 73) / 255, () => this.di(c, im, sx, 0, half, this.lh(im), tx + sx * S, ty, half * S, this.lh(im) * S));
     }
     // 難易度・ネームプレート（中身が変わったときだけ描き直す）
     const course = COURSE_IMG[F.info.course] ?? 'course/Oni';
@@ -1509,12 +1541,12 @@ export class TndeSkin {
     if (!im) return;
     const pf = F.profile ?? DEFAULT_PROFILE;
     // NamePlate.png の 54px ごとの段: 0 1P の丸、3 白い台、4 木・5 金・6 紫の称号の帯、7 段位の下地、8 銀・9 金・10 虹の枠、11 金の字の色
-    const at = (src: CanvasImageSource, r: number) => c.drawImage(src, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
+    const at = (src: CanvasImageSource, r: number) => this.di(c, src, 0, r * 54, 220, 54, -6, 443.5, 330, 81);
     const row = (r: number) => at(im, r);
     row(3);
     const base = pf.titleStyle === 'wood' ? 4 : pf.titleStyle === 'gold' || pf.titleStyle === 'goldc' ? 5 : 6;
     const rc = (pf.titleStyle === 'goldc' || pf.titleStyle === 'purplec') && /^#[0-9a-f]{6}$/i.test(pf.titleColor) ? this.recolored(im, base, pf.titleColor) : null;
-    if (rc) c.drawImage(rc, 0, 0, 220, 54, -6, 443.5, 330, 81);
+    if (rc) this.di(c, rc, 0, 0, 220, 54, -6, 443.5, 330, 81);
     else row(base);
     const dan = pf.danOn && pf.dan.trim() ? [...pf.dan.trim()].slice(0, 3).join('') : '';
     if (dan) {
@@ -1582,7 +1614,7 @@ export class TndeSkin {
     if (gold) {
       g.globalCompositeOperation = 'source-in';
       // 金の字の色は 11 段目の帯の、色のある所（縦に金のしま）を字の高さに合わせて引きのばす
-      g.drawImage(im, 51, 11 * 54 + 30, 35, 15, 0, H / 2 - size / 2, W, size);
+      this.di(g, im, 51, 11 * 54 + 30, 35, 15, 0, H / 2 - size / 2, W, size);
     }
     g.globalCompositeOperation = 'destination-over';
     g.lineJoin = 'round';
@@ -1600,13 +1632,16 @@ export class TndeSkin {
     const key = `${r}|${hex}`;
     let cv = this.recolorCache.get(key);
     if (cv) return cv;
+    // 細かくしてある絵なら、その細かさのまま色を変える
+    const q = this.qOf(im);
     cv = document.createElement('canvas');
-    cv.width = 220;
-    cv.height = 54;
+    cv.width = Math.round(220 * q);
+    cv.height = Math.round(54 * q);
     const g = cv.getContext('2d', { willReadFrequently: true });
     if (!g) return null;
-    g.drawImage(im, 0, r * 54, 220, 54, 0, 0, 220, 54);
-    const d = g.getImageData(0, 0, 220, 54);
+    this.di(g, im, 0, r * 54, 220, 54, 0, 0, cv.width, cv.height);
+    this.hq.set(cv, q);
+    const d = g.getImageData(0, 0, cv.width, cv.height);
     const px = d.data;
     const n = parseInt(hex.slice(1), 16);
     const [th, ts, tv] = rgbToHsv((n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
@@ -1633,7 +1668,7 @@ export class TndeSkin {
   private drawSplash(c: CanvasRenderingContext2D, wall: number) {
     const im = this.img('fx/GoGoSplash');
     if (!im) return;
-    const n = Math.floor(im.width / 230);
+    const n = Math.floor(this.lw(im) / 230);
     const i = step(wall, this.gogoAt, 30);
     if (i < 0 || i >= n) return;
     this.add(c, 1, () => {
@@ -1641,7 +1676,7 @@ export class TndeSkin {
         c.save();
         c.translate(P(x), P(y) - P(230));
         c.rotate(rot);
-        c.drawImage(im, i * 230, 0, 230, 460, -P(115), -P(230), P(230), P(460));
+        this.di(c, im, i * 230, 0, 230, 460, -P(115), -P(230), P(230), P(460));
         c.restore();
       }
     });
@@ -1683,7 +1718,7 @@ export class TndeSkin {
       const d = +digits[n - 1 - i];
       const w = P(40) * k;
       const h = P(48) * (1 + ky);
-      c.drawImage(im, d * 40, 0, 40, 48, right - pad * i - w / 2, bottom - h, w, h);
+      this.di(c, im, d * 40, 0, 40, 48, right - pad * i - w / 2, bottom - h, w, h);
     }
     // 3 桁から: 数字のまわりのきらきら（20 ms ごと、30 コマでひと回り）
     if (n >= 3) {
@@ -1703,8 +1738,8 @@ export class TndeSkin {
   private drawScore(c: CanvasRenderingContext2D, wall: number) {
     const im = this.img('taiko/Score');
     if (!im) return;
-    const cw = im.width / 10;
-    const ch = im.height / 3;
+    const cw = this.lw(im) / 10;
+    const ch = this.lh(im) / 3;
     const s = String(Math.max(0, Math.floor(this.shownScore))).padStart(7, ' ');
     const v = Math.min(11, step(wall, this.scoreAt, 12));
     const k = SCORE_SCALE[v];
@@ -1712,7 +1747,7 @@ export class TndeSkin {
     for (let i = 0; i < 7; i++) {
       if (s[i] === ' ') continue;
       const d = +s[i];
-      c.drawImage(im, d * cw, 0, cw, ch, 52.5 + 29.5 * i, 336.5 - ch * S * k, cw * S, ch * S * k);
+      this.di(c, im, d * cw, 0, cw, ch, 52.5 + 29.5 * i, 336.5 - ch * S * k, cw * S, ch * S * k);
     }
   }
 
@@ -1756,7 +1791,7 @@ export class TndeSkin {
   private drawFireworks(c: CanvasRenderingContext2D, wall: number) {
     const im = this.img('fx/FireWorks');
     if (!im) return;
-    const n = Math.floor(im.width / 192);
+    const n = Math.floor(this.lw(im) / 192);
     this.fireworks = this.fireworks.filter((f) => wall - f.t < n * 10);
     this.add(c, 1, () => {
       for (const f of this.fireworks) {
@@ -1770,7 +1805,7 @@ export class TndeSkin {
   private drawSoulFx(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { wall } = F;
     const im = this.img('gauge/1P_Explosion');
-    const n = im ? Math.floor(im.width / 180) : 0;
+    const n = im ? Math.floor(this.lw(im) / 180) : 0;
     const x = P(1222);
     const y = P(164);
     for (const f of F.fx.flyers) {
@@ -1810,13 +1845,13 @@ export class TndeSkin {
     if (v < 0 || v > 164) return;
     const im = this.img('fx/Rainbow');
     if (!im) return;
-    const W = im.width;
+    const W = this.lw(im);
     if (v < 82) {
       const w = (v * W) / 85;
-      if (w > 0) c.drawImage(im, 0, 0, w, im.height, P(360), P(-100), w * S, im.height * S);
+      if (w > 0) this.di(c, im, 0, 0, w, this.lh(im), P(360), P(-100), w * S, this.lh(im) * S);
     } else {
       const x = Math.min(W, ((v - 82) * W) / 85);
-      if (W - x > 0) c.drawImage(im, x, 0, W - x, im.height, P(360) + x * S, P(-100), (W - x) * S, im.height * S);
+      if (W - x > 0) this.di(c, im, x, 0, W - x, this.lh(im), P(360) + x * S, P(-100), (W - x) * S, this.lh(im) * S);
     }
   }
 
@@ -1941,7 +1976,7 @@ export class TndeSkin {
       const kx = big ? 0.8 : 1;
       let x = P(big ? 297 : 257);
       for (const ch of s) {
-        if (ch !== ' ') c.drawImage(im, +ch * 53, 0, 53, 61, x, P(54), 53 * S * kx, 61 * S);
+        if (ch !== ' ') this.di(c, im, +ch * 53, 0, 53, 61, x, P(54), 53 * S * kx, 61 * S);
         x += P(45 * kx);
       }
       this.put(c, 'balloon/Number_Combo', P((big ? 444 : 442) + 6 - cell * 3), P(85), 0, 124, 100, 30);
@@ -1979,12 +2014,12 @@ export class TndeSkin {
     const im = this.img('balloon/Number_Roll');
     if (!im) return;
     const s = String(Math.max(0, Math.floor(v)));
-    const gw = im.width / 10;
+    const gw = this.lw(im) / 10;
     let px = x - P((57 * s.length) / 2);
     for (const ch of s) {
       const w = gw * S * k;
-      const h = im.height * S * (k + ky);
-      c.drawImage(im, +ch * gw, 0, gw, im.height, px, y - h, w, h);
+      const h = this.lh(im) * S * (k + ky);
+      this.di(c, im, +ch * gw, 0, gw, this.lh(im), px, y - h, w, h);
       px += P(55) * k;
     }
   }
