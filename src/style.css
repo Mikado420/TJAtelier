@@ -1773,6 +1773,8 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
 .res-side .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .res-side .buttons button { height: 44px; font-size: 15px; font-weight: 900; border-radius: 0; color: #fff; background: var(--btn); --sk: calc(44px * var(--tan)); clip-path: none; }
 .res-side .buttons button.primary { background: var(--accent); }
+.res-side .buttons .res-save { grid-column: 1 / -1; }
+.res-side .buttons .res-save.hidden { display: none; }
 /* タイミング調整: カードは出さず、記録だけ */
 .res.res-calib .res-card { display: none; }
 .res.res-calib .res-main { grid-template-columns: 1fr; }
@@ -3268,5 +3270,8 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .sheet-body .st-nav button[data-sttab="prof"] span { display: inline-block; transform: scaleX(0.84); transform-origin: left center; }
 /* 曲えらびの「録画」・録画の進み具合の「やめる」 */
 .home .home-diff svg.ic-rec { fill: #ff4b4b; stroke: #fff; stroke-width: 2; }
-.busy-stop { min-width: 120px; height: 36px; padding: 0 18px; border: 0; border-radius: 0; background: #353d45; color: #fff; font: 800 14px var(--fd); }
-.busy-stop.hidden { display: none; }
+.home .home-diff .hdf-side .hdf-rec svg.ic-rec { fill: #ff3b3b; stroke: none; }
+.home .home-diff .hdf-side .hdf-rec.on { background: #e0313a !important; }
+.home .home-diff .hdf-side .hdf-rec.on svg.ic-rec { fill: #fff; }
+.sheet.rec { align-items: center; }
+.sheet.rec .sheet-panel { width: min(420px, 92%); border-radius: 0; border-bottom: 1px solid var(--line); padding-bottom: 6px; }

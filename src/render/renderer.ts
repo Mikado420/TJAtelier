@@ -275,8 +275,13 @@ export class Renderer {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
     // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
     this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
-    const w = this.fixedSize?.w ?? (this.canvas.clientWidth || window.innerWidth);
-    const h = this.fixedSize?.h ?? (this.canvas.clientHeight || window.innerHeight);
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    // 録画中: 16:9 の枠が録画の縦の大きさより細かく描かれるようにする（小さく描いて引き伸ばすと粗くなる）
+    if (this.minFrameH > 0) {
+      const fh = Math.min(w / REF_W, h / REF_H) * REF_H;
+      if (fh > 0) this.dpr = Math.max(this.dpr, Math.min(4, this.minFrameH / fh));
+    }
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
 
@@ -349,15 +354,17 @@ export class Renderer {
   broadcast = false;
   /** 16:9 の枠（画面 px。左上と倍率） */
   frame = { x: 0, y: 0, s: 1 };
+  /** 16:9 の枠の大きさ（画面 px） */
+  get frameSize() {
+    return { w: REF_W * this.frame.s, h: REF_H * this.frame.s };
+  }
+  /** 録画中: 16:9 の枠を、少なくともこの縦の大きさ（端末の px）で描く。変えたら resize() */
+  minFrameH = 0;
 
   /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */
   tnde: TndeSkin | null = null;
   /** ネームプレートの称号と名前 */
   plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
-  /** 録画用: 画面に置かない canvas の大きさ（CSS px） */
-  fixedSize: { w: number; h: number } | null = null;
-  /** 録画用: 毎コマ、消す代わりに後ろの絵（背景・動画など）を描く */
-  underlay: ((c: CanvasRenderingContext2D) => void) | null = null;
   /** 後ろに置く、動かない背景の canvas */
   get background() {
     return this.bg;
@@ -484,12 +491,6 @@ export class Renderer {
   /** 動かない背景を一度だけ描いておく（毎フレームはこれをコピーするだけ） */
   private buildBackground() {
     const bg = this.bg ?? document.createElement('canvas');
-    if (this.lean && this.skinOn && !this.videoMode) {
-      // 録画: 後ろは毎コマ黒で塗るので、背景の canvas は要らない
-      bg.width = bg.height = 1;
-      this.bg = bg;
-      return;
-    }
     bg.width = this.canvas.width;
     bg.height = this.canvas.height;
     const c = bg.getContext('2d')!;
@@ -650,17 +651,6 @@ export class Renderer {
     this.dropSprites();
     clearTextCache();
   };
-
-  /** 録画用の描き手を捨てる（canvas のメモリを手放す） */
-  dispose() {
-    document.fonts?.removeEventListener?.('loadingdone', this.onFonts);
-    this.dropSprites();
-    for (const L of this.layers.values()) L.c.width = L.c.height = 0;
-    this.layers.clear();
-    for (const c of [this.bg, this.hud, this.canvas]) if (c) c.width = c.height = 0;
-    this.tnde = null;
-    this.underlay = null;
-  }
 
   private dropSprites() {
     for (const sp of this.sprites.values()) { sp.c.width = 0; sp.c.height = 0; }
@@ -865,17 +855,6 @@ export class Renderer {
     if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
     return END_HOLD[kind];
   }
-  /** 演出を見せる長さ（skin: TNDE スキンで全面に描く 'on'・動画用の画面のレーンだけ 'lane'・使わない null） */
-  static endHoldOf(kind: EndKind, skin: 'on' | 'lane' | null) {
-    if (skin && TNDE_END.has(kind)) return skin === 'on' ? 8800 : 7000;
-    return END_HOLD[kind];
-  }
-  /** スキンの演出を使うか（声を鳴らすか） */
-  static skinEndOf(kind: EndKind, skin: 'on' | 'lane' | null) {
-    return !!skin && TNDE_END.has(kind);
-  }
-  /** 録画用: 背景の canvas を作らない（後ろが真っ黒と決まっているとき。メモリを空ける） */
-  lean = false;
   /** showEnd が返す、演出を見せる長さ（演出は始めない） */
   endHoldFor(kind: EndKind) {
     if ((this.skinOn || this.skinLane) && TNDE_END.has(kind)) return this.skinOn ? 8800 : 7000;
@@ -971,13 +950,9 @@ export class Renderer {
     }
     this.wasGogo = gogo;
 
-    // 背景は後ろの canvas に描いてあるので、手前は消すだけ（録画: 後ろに重ねる絵をここに描いて、1 枚の絵にする）
+    // 背景は後ろの canvas に描いてあるので、手前は消すだけ
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (this.underlay) {
-      ctx.save();
-      this.underlay(ctx);
-      ctx.restore();
-    } else ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (this.skinOn || this.skinLane) {
       this.drawTnde(game, course, now, wall, info, this.skinLane);
       return;

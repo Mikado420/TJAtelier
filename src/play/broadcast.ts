@@ -387,15 +387,6 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
  * 動画用の画面の、レーン以外の部分を canvas に描く（録画用。見た目は Broadcast の DOM と同じ）。
  * 動かない所は 1 枚の絵にしておき、毎コマは数・曲の流れ・時間だけ描く
  */
-/** 録画の別スレッドへ渡す、動画用の画面の動かない部分 */
-export interface BroadcastData {
-  stat: ImageBitmap;
-  lit: ImageBitmap | null;
-  dur: number;
-  total: string;
-  lyricX: number;
-}
-
 export class BroadcastPainter {
   private stat: HTMLCanvasElement | ImageBitmap | null = null;
   private lit: HTMLCanvasElement | ImageBitmap | null = null;
@@ -711,29 +702,6 @@ export class BroadcastPainter {
       g.textAlign = 'left';
     }
     g.restore();
-  }
-
-  /** 別スレッドへ渡す形にする */
-  async export(): Promise<BroadcastData | null> {
-    if (!this.stat) return null;
-    return {
-      stat: await createImageBitmap(this.stat),
-      lit: this.lit ? await createImageBitmap(this.lit) : null,
-      dur: this.dur,
-      total: this.total,
-      lyricX: this.lyricX,
-    };
-  }
-  /** 渡されたものから作る（別スレッドで） */
-  static from(course: Course, d: BroadcastData) {
-    const p = new BroadcastPainter();
-    p.course = course;
-    p.stat = d.stat;
-    p.lit = d.lit;
-    p.dur = d.dur;
-    p.total = d.total;
-    p.lyricX = d.lyricX;
-    return p;
   }
 
   dispose() {

@@ -39,7 +39,6 @@ import { loadAudio, loadChart } from './io/storage';
 import { addFolder, listFolderColors, listSongs, loadSongAudio, loadSongData, loadSongVideo, newId, repairLibrary, saveSong, setFolderColors, saveSongJacket, saveSongVideo, loadSongJacket, saveSongBgImage, loadSongBgImage, setCurrentId, setVideoOffset } from './io/library';
 import { Home, folderColor } from './home/home';
 import type { PlayInfo } from './play/broadcast';
-import { canRecord, RecordCancelled } from './play/offline';
 import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
@@ -90,7 +89,10 @@ const settings = {
   restZone: IS_IOS,
   passiveTouch: false,
   pauseButton: true,
-  /** 自動録画 */
+  /** 遊びながら録画する・録画の画質（縦の大きさ）・1 秒のコマ数 */
+  recOn: false,
+  recRes: 1080 as 1080 | 720,
+  recFps: 60 as 60 | 30,
   /** 動画用の画面 */
   broadcast: false,
   /** プレイ中に左上へ FPS を出す */
@@ -1497,7 +1499,7 @@ function toggleBigAtPos() {
 
 // ---------- シート ----------
 
-type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch';
+type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch' | 'rec';
 let sheet: SheetKind | null = null;
 
 function openSheet(kind: SheetKind) {
@@ -1515,6 +1517,8 @@ function openSheet(kind: SheetKind) {
   $('sheet').classList.toggle('info', kind === 'analysis' || kind === 'settings');
   // 譜面情報は画面いっぱいに、情報・譜面の流れ・譜面画像を 1 画面で
   $('sheet').classList.toggle('an', kind === 'analysis');
+  // 録画の設定は真ん中に小さく
+  $('sheet').classList.toggle('rec', kind === 'rec');
   document.body.classList.toggle('tja-open', kind === 'events');
   setTjaPortrait(kind === 'events');
   renderSheet();
@@ -1647,6 +1651,14 @@ function renderSheet() {
         <button data-act="dupCourse">複製</button>
         <button data-act="delCourse" class="danger" ${c.courses.length <= 1 ? 'disabled' : ''}>削除</button>
       </div>`}`;
+  } else if (sheet === 'rec') {
+    $('sheetTitle').textContent = '録画';
+    const seg = (k: string, opts: [string, string][], cur: string) =>
+      `<div class="st-row"><span>${k}</span><div class="st-seg two">${opts.map(([v, l]) => `<button data-recset="${v}" class="${v === cur ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
+    body.innerHTML =
+      seg('録画', [['on:0', 'オフ'], ['on:1', 'オン']], `on:${settings.recOn ? 1 : 0}`) +
+      seg('画質', [['res:1080', '1080p'], ['res:720', '720p']], `res:${settings.recRes}`) +
+      seg('コマ数', [['fps:60', '60fps'], ['fps:30', '30fps']], `fps:${settings.recFps}`);
   } else if (sheet === 'settings') {
     $('sheetTitle').textContent = '設定';
     const t = settingsTab;
@@ -2158,6 +2170,16 @@ $('sheetBody').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest('button');
   if (!b) return;
   const d = b.dataset;
+  if (d.recset) {
+    const [k, v] = d.recset.split(':');
+    if (k === 'on') settings.recOn = v === '1';
+    else if (k === 'res') settings.recRes = v === '720' ? 720 : 1080;
+    else if (k === 'fps') settings.recFps = v === '30' ? 30 : 60;
+    saveSettings();
+    renderSheet();
+    home.syncRec();
+    return;
+  }
   if (d.act) void fileAction(d.act);
   else if (d.course) ed.selectCourse(Number(d.course));
   else if (d.off) ed.mutate(() => { ed.chart.offset = Number((ed.chart.offset + Number(d.off)).toFixed(4)); });
@@ -2863,6 +2885,15 @@ $('pauseBack').addEventListener('click', () => {
   }
 });
 $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.startCalibration() : startTest()));
+// 結果画面の「動画を保存」: 録画した動画を保存・共有する（作り終えるまで待つ）
+$('saveVideo').addEventListener('click', async () => {
+  const p = play.recording;
+  if (!p) return;
+  busy('動画を用意しています…');
+  const r = await p;
+  busyEnd();
+  if (r) download(r.blob, `${safeName(ed.chart.title || '譜面')}_${ed.course.name}.${r.ext}`);
+});
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
 play.onError = (msg) => toast(msg);
@@ -2952,70 +2983,8 @@ async function folderOf(id: string): Promise<PlayInfo['folder']> {
   return { name: key.split('/').pop()!, color: folderColor(key, colors), custom: !!colors[key] };
 }
 
-/** 録画中か */
-let recording = false;
-/** 録画をやめる（進み具合の画面の「やめる」） */
-let recordStop = false;
-
-/** 曲えらびの「録画」: 曲を読み込んで、オートで流した動画を作る */
-async function recordSong(id: string, course?: string) {
-  if (recording) return;
-  if (!canRecord()) {
-    toast('この端末では録画できません');
-    return;
-  }
-  recording = true;
-  try {
-    busy('録画の準備をしています…', 0);
-    await openSong(id, 'record', course);
-  } finally {
-    recording = false;
-    busyEnd();
-  }
-}
-
-/** 開いている譜面を録画して、保存・共有する */
-async function recordCurrent() {
-  const course = toPlayable(ed.chart, ed.mainCourse);
-  if (!course.notes.length) {
-    toast('ノーツがありません');
-    return;
-  }
-  const title = ed.chart.title || '譜面';
-  const msg = `「${title}」を録画しています…`;
-  recordStop = false;
-  $('busyStop').classList.remove('hidden');
-  busy(msg, 0);
-  try {
-    const r = await play.exportVideo(
-      course,
-      {
-        title: ed.chart.title,
-        course: ed.course.name,
-        level: ed.course.level,
-        genre: ed.chart.extra.find(([k]) => k.toUpperCase() === 'GENRE')?.[1],
-        sub: ed.chart.subtitle,
-        maker: hdrOf(ed.chart, 'MAKER') || hdrOf(ed.chart, `NOTESDESIGNER${Math.max(0, (COURSE_NAMES as readonly string[]).indexOf(ed.course.name))}`) || undefined,
-        jacket: currentJacket?.url,
-        folder: currentSongId ? await folderOf(currentSongId).catch(() => undefined) : undefined,
-        stage: Math.max(1, stageNo),
-      },
-      (p) => busy(msg, p),
-      () => recordStop,
-    );
-    busyEnd();
-    download(r.blob, `${safeName(title)}_${ed.course.name}.${r.ext}`);
-  } catch (e) {
-    busyEnd();
-    if (!(e instanceof RecordCancelled)) toast(`録画できませんでした（${(e as Error)?.message ?? e}）`);
-  } finally {
-    $('busyStop').classList.add('hidden');
-  }
-}
-$('busyStop').addEventListener('click', () => { recordStop = true; });
-
 /** 一覧の曲をエディタで開く（play ならそのままテストプレイ） */
-async function openSong(id: string, mode: 'edit' | 'play' | 'record', course?: string) {
+async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   const data = await loadSongData(id);
   if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
   if (course) {
@@ -3049,11 +3018,6 @@ async function openSong(id: string, mode: 'edit' | 'play' | 'record', course?: s
   if (id !== currentSongId) return;
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
-  if (mode === 'record') {
-    updateHeader();
-    await recordCurrent();
-    return;
-  }
   home.hide();
   updateHeader();
   if (mode === 'play') void startTest(true);
@@ -3122,7 +3086,8 @@ const home = new Home({
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
   online: () => online.open(),
-  record: (id, course) => void recordSong(id, course),
+  recording: () => !!settings.recOn,
+  recSettings: () => openSheet('rec'),
   analyze: (id, course) => void (async () => {
     const d = await loadSongData(id);
     if (!d) { toast('譜面を読み込めませんでした'); return; }
