@@ -291,9 +291,9 @@ export class TndeSkin {
   /** 絵を貼る。絵の中の範囲は元の絵の px で書き、細かくしてある絵はその倍率で読む */
   private di(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
     const q = this.qOf(im);
-    if (a.length === 8) this.di(c, im, a[0] * q, a[1] * q, a[2] * q, a[3] * q, a[4], a[5], a[6], a[7]);
-    else if (a.length === 4) this.di(c, im, a[0], a[1], a[2], a[3]);
-    else this.di(c, im, a[0], a[1], this.lw(im), this.lh(im));
+    if (a.length === 8) c.drawImage(im, a[0] * q, a[1] * q, a[2] * q, a[3] * q, a[4], a[5], a[6], a[7]);
+    else if (a.length === 4) c.drawImage(im, a[0], a[1], a[2], a[3]);
+    else c.drawImage(im, a[0], a[1], this.lw(im), this.lh(im));
   }
 
   /** 一度に読み込む絵の数をしぼる（iPhone は一度にたくさん頼むと止まりやすい） */
