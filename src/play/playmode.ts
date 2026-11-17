@@ -4,6 +4,7 @@ import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
 import { LiveRecorder } from './liverec';
+import { GlBlur } from './glblur';
 import { BroadcastPainter } from './broadcast';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { BUILD_ID } from '../update';
@@ -1032,6 +1033,7 @@ export class PlayMode {
         const bcv = document.createElement('canvas');
         blur.append(bcv);
         this.vblurCv = bcv;
+        this.vblur2d = bcv;
         this.root.prepend(dim);
         this.root.prepend(v);
         this.root.prepend(blur);
@@ -1110,7 +1112,14 @@ export class PlayMode {
     const v = this.video;
     this.vblur?.classList.toggle('hidden', vmode !== 'both');
     if (vmode !== 'both' && this.vblurCv) {
-      this.vblurCv.width = this.vblurCv.height = 0;
+      // 使わないときは GPU の係も手放す（次に使うときに作り直す）
+      if (this.glb) {
+        this.glb.dispose();
+        this.glb = undefined;
+        if (this.vblur && this.vblur2d) this.vblur.replaceChildren(this.vblur2d);
+        this.vblurCv = this.vblur2d;
+      }
+      if (this.vblurCv) this.vblurCv.width = this.vblurCv.height = 0;
       this.blurKey = '';
     }
     if (v) {
@@ -1137,6 +1146,10 @@ export class PlayMode {
     return Math.max(0.1, Math.min(1, v ?? 0.5));
   }
 
+  /** GPU でぼかす係（undefined = まだ作っていない、null = 使えない） */
+  private glb: GlBlur | null | undefined = undefined;
+  /** GPU が使えないときの canvas */
+  private vblur2d: HTMLCanvasElement | null = null;
   /** ぼかした絵を作った動画の位置と大きさ・暗さ（同じなら描き直さない） */
   private blurKey = '';
   /** canvas でぼかしを使えるか（使えなければ、縮めて広げることでぼかす） */
@@ -1150,11 +1163,37 @@ export class PlayMode {
    */
   private paintBlur() {
     const box = this.vblur;
-    const c = this.vblurCv;
     const v = this.video;
-    if (!box || !c || !v || this.videoMode !== 'both' || v.readyState < 2 || !v.videoWidth) return;
+    if (!box || !v || this.videoMode !== 'both' || v.readyState < 2 || !v.videoWidth) return;
     const W = box.clientWidth;
     const H = box.clientHeight;
+    // GPU（WebGL）でぼかす。画面と同じ細かさ（画面の px）で、動画のコマが変わったときだけ
+    if (this.glb === undefined) this.glb = GlBlur.create();
+    const gb = this.glb;
+    if (gb && !gb.lost) {
+      if (gb.canvas.parentElement !== box) {
+        Object.assign(gb.canvas.style, { left: '0px', top: '0px', width: '100%', height: '100%' });
+        box.replaceChildren(gb.canvas);
+        this.vblurCv = gb.canvas;
+      }
+      const gw = Math.max(8, Math.round(W));
+      const gh = Math.max(8, Math.round(H));
+      const bright = this.dimOf(false);
+      const gkey = `${this.vFrame ? this.vFrame.media : v.currentTime}|${gw}x${gh}|${bright}|gl`;
+      if (gkey === this.blurKey) return;
+      this.blurKey = gkey;
+      if (gb.draw(v, gw, gh, BLUR, bright)) return;
+      if (!gb.lost) return;
+      // GPU が使えなくなった: canvas の描き方に戻す
+      gb.dispose();
+      this.glb = null;
+      if (this.vblur2d) {
+        box.replaceChildren(this.vblur2d);
+        this.vblurCv = this.vblur2d;
+      }
+    }
+    const c = this.vblurCv;
+    if (!c) return;
     const w = Math.max(8, Math.round(W / BLUR_Q));
     const h = Math.max(8, Math.round(H / BLUR_Q));
     const dim = 1 - this.dimOf(false);
