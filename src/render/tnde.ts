@@ -23,7 +23,8 @@ const LANE_X = P(332);
 const NOTE = P(130);
 const HALF = NOTE / 2;
 
-interface ImgInfo { f: string; w: number; h: number }
+/** k: 絵が元の大きさ（w × h）の何倍の細かさで入っているか */
+interface ImgInfo { f: string; w: number; h: number; k?: number }
 interface AnimInfo { f: string; w: number; h: number; n: number; cols: number; step: number }
 interface Manifest { img: Record<string, ImgInfo>; anim: Record<string, AnimInfo> }
 
@@ -315,10 +316,11 @@ export class TndeSkin {
   private put(c: CanvasRenderingContext2D, name: string, x: number, y: number, sx = 0, sy = 0, sw?: number, sh?: number, kx = S, ky = kx) {
     const im = this.img(name);
     if (!im) return;
-    const w = sw ?? im.width - sx;
-    const h = sh ?? im.height - sy;
+    const q = this.man.img[name]?.k ?? 1;
+    const w = sw ?? im.width / q - sx;
+    const h = sh ?? im.height / q - sy;
     if (w <= 0 || h <= 0) return;
-    c.drawImage(im, sx, sy, w, h, x, y, w * kx, h * ky);
+    c.drawImage(im, sx * q, sy * q, w * q, h * q, x, y, w * kx, h * ky);
   }
 
   /** 絵の範囲を、(cx, cy) を中心に k 倍（1.5 倍の上にさらに）で貼る */

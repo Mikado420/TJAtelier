@@ -56,8 +56,7 @@ for f in ['1P_Background', 'Base', 'Don', 'Ka', 'Combo', 'Combo_Big', 'Combo_Mid
     img('taiko/' + f, '6_Taiko/%s.png' % f)
 for i in range(4):
     img('taiko/frame%d' % i, '6_Taiko/Frame/1P/%d/1P_Frame.png' % i)
-for f in ['Easy', 'Normal', 'Hard', 'Oni', 'Edit']:
-    img('course/' + f, '4_CourseSymbol/%s.png' % f)
+# 難易度マークは course.py で細かく作る（最後に）
 # ジャンルの帯・曲目の帯は図形と字で描く（絵は使わない）
 # ゲージ
 for i in range(4):
@@ -172,3 +171,8 @@ man['img']['nameplate_frames'] = {'f': wr('nameplate_frames', _hd, False), 'w': 
 for f in ['FOT-Seurat_Pro_B.otf', 'FOT-OedoKtr.otf']:
     shutil.copy(pick(f), os.path.join(OUT, f))
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w'), ensure_ascii=False, separators=(',', ':'))
+# 難易度マーク（選曲画面の大きなマークと大江戸勘亭流の字で、4 倍の細かさに作る）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import course
+sys.argv = [sys.argv[0], SRC, OUT, os.path.join(OUT, 'FOT-OedoKtr.otf')]
+course.main()
