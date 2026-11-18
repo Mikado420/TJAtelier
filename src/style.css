@@ -3271,3 +3271,10 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .st-nav button span { white-space: nowrap; min-width: 0; }
 .sheet-body .st-nav button[data-sttab="prof"] span { display: inline-block; transform: scaleX(0.84); transform-origin: left center; }
 /* 曲えらびの「録画」・録画の進み具合の「やめる」 */
+
+/* TNDE スキンの読み込み画面・リザルト画面（プレイ画面・幕より手前） */
+.tnde-overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 90; touch-action: none; }
+.tnde-res-btns { position: fixed; z-index: 91; right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
+.tnde-res-btns.hidden { display: none; }
+.tnde-res-btns button { height: 44px; padding: 0 18px; font-size: 15px; font-weight: 900; color: #fff; background: rgba(20, 24, 28, 0.86); border: 2px solid #fff; border-radius: 22px; }
+.tnde-res-btns button.primary { background: #e8452c; }

@@ -2882,6 +2882,7 @@ $('retry').addEventListener('click', () => void (play.lastWasCalibration ? play.
 play.onExit = () => view.invalidate();
 // 曲の最初から自分で叩いたときだけ、自己ベストとして残す
 play.onError = (msg) => toast(msg);
+play.bestScore = () => (currentSongId && lastTestFromStart ? loadBest(currentSongId, ed.course.name)?.score ?? null : null);
 play.onFinished = (r) => {
   if (!currentSongId || !lastTestFromStart) return null;
   const prev = loadBest(currentSongId, ed.course.name);
@@ -3061,6 +3062,7 @@ const home = new Home({
   audio,
   open: openSong,
   playOpts: () => ({ speed: settings.speed, auto: !!settings.auto }),
+  tndeSkin: () => settings.skin === 'tnde',
   setPlayOpt: (k, v) => {
     if (k === 'speed') settings.speed = v as number;
     else settings.auto = v as boolean;

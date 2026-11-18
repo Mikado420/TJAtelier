@@ -16,6 +16,8 @@ export interface HomeHost {
   open(id: string, mode: 'edit' | 'play', course?: string): Promise<void>;
   /** 難易度えらびに出す、プレイの設定（ハイスピード・オート） */
   playOpts(): { speed: number; auto: boolean };
+  /** TNDE スキンで遊ぶか（読み込み画面はスキンのものを出す） */
+  tndeSkin(): boolean;
   setPlayOpt(key: 'speed' | 'auto', v: number | boolean): void;
   /** ファイルを選んで読み込む（読み込んだ曲は一覧に入る） */
   importFiles(): void;
@@ -886,6 +888,12 @@ export class Home {
     try {
       const cs = s.courses.find((c) => c.name === course);
       const best = loadBest(s.id, course);
+      // TNDE スキン: 幕はプレイ画面がスキンの読み込み画面を出す
+      if (this.host.tndeSkin()) {
+        this.closeDiff();
+        await this.host.open(s.id, 'play', course);
+        return;
+      }
       await closeCurtain({
         title: s.title,
         sub: s.subtitle,

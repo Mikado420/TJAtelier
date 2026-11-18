@@ -82,6 +82,8 @@ export interface TndeInfo {
 }
 
 export interface TndeFrame {
+  /** 自己ベスト（超えたら「ベストスコア更新」を出す。無ければ出さない） */
+  best?: number | null;
   /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
   laneOnly?: boolean;
   /** 背景の動画（画像）を出している所: full = 全面（上下の背景を描かない）、bottom = 下だけ（下の背景・踊り子・モブを描かない） */
@@ -214,6 +216,7 @@ export class TndeSkin {
     if (name === 'dancer/Normal1') return p.dancer === 1;
     if (name === 'mob') return p.down !== 5;
     if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
+    if (/^(load|res)\//.test(name)) return this.screenWant.has(name.slice(0, name.indexOf('/')));
     if (name.startsWith('chara/') && name.endsWith('_Max')) return this.maxWant;
     return true;
   }
@@ -233,6 +236,63 @@ export class TndeSkin {
     for (const k of kinds) if (!this.endWant.has(k)) { this.endWant.add(k); add = true; }
     if (!add) return;
     for (const n of Object.keys(this.man.img)) if (n.startsWith('end/') && this.endWant.has(endGroup(n))) void this.fetchImg(n);
+  }
+
+  // ---------- 曲の読み込み画面・リザルト画面（tndescreens.ts から使う） ----------
+
+  private screenWant = new Set<string>();
+  /** 読み込み画面（load）・リザルト画面（res）の絵を読み込む（全部そろうまで待つ） */
+  needScreen(kind: 'load' | 'res'): Promise<void> {
+    this.screenWant.add(kind);
+    const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)].filter((n) => n.startsWith(`${kind}/`));
+    return Promise.all(names.map((n) => this.fetchImg(n))).then(() => {});
+  }
+  /** 使い終わった画面の絵を手放す（メモリを空ける） */
+  dropScreen(kind: 'load' | 'res') {
+    if (!this.screenWant.delete(kind)) return;
+    for (const n of [...Object.keys(this.man.img), ...Object.keys(this.man.anim)]) {
+      if (!n.startsWith(`${kind}/`)) continue;
+      for (const key of this.keysOf(n)) {
+        const im = this.imgs.get(key);
+        if (im && 'close' in im) im.close();
+        this.imgs.delete(key);
+        this.loading.delete(key);
+      }
+    }
+  }
+  /** 絵（読み込めていなければ null） */
+  pic(name: string) {
+    return this.img(name);
+  }
+  /** 絵の情報（切り出した絵は、元の絵での位置 x, y と元の大きさ ow, oh） */
+  meta(name: string): { w: number; h: number; x?: number; y?: number; ow?: number; oh?: number; n?: number; cols?: number } | null {
+    return (this.man.img[name] ?? this.man.anim[name] ?? null) as never;
+  }
+  /** 読み込み画面のヒントの数 */
+  get hintCount() {
+    return (this.man as unknown as { loadHints?: number }).loadHints ?? 0;
+  }
+  /** 元の大きさの単位で描く（細かくしてある絵も同じ座標で） */
+  blit(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
+    this.di(c, im, ...a);
+  }
+  /** 連番の n コマ目を (x, y) に k 倍で */
+  anim(c: CanvasRenderingContext2D, name: string, n: number, x: number, y: number, k = S) {
+    this.frame(c, name, n, x, y, k);
+  }
+  /** 不透明度をかけて描く */
+  fade(c: CanvasRenderingContext2D, a: number, f: () => void) {
+    this.alpha(c, a, f);
+  }
+  /** ネームプレート（称号のキラキラも）を、プレイ画面の位置から (dx, dy) ずらして描く */
+  plate(c: CanvasRenderingContext2D, F: Pick<TndeFrame, 'name' | 'title' | 'profile' | 'wall'>, dx: number, dy: number) {
+    const G = F as TndeFrame;
+    c.save();
+    c.translate(dx, dy);
+    this.drawNameplate(c, G, false);
+    if ((F.profile ?? DEFAULT_PROFILE).titleStyle !== 'wood') this.drawTitleShine(c, F.wall);
+    this.drawNameplate(c, G, true);
+    c.restore();
   }
 
   /** 使う絵を読み込み、使わない絵を手放す */
@@ -539,6 +599,82 @@ export class TndeSkin {
     this.balloonUntil = 0;
     this.last = { combo: 0, gauge: 0, gogo: false, score: 0, roll: 0, balloon: 0, popped: -1 };
     this.fireworks = [];
+    this.addPops = [];
+    this.rankPops = [];
+    this.bestAt = -1;
+  }
+
+  /** スコアの加算の数字（出た時刻） */
+  private addPops: { v: number; t: number }[] = [];
+  /** スコアランクの絵（何番目・出た時刻） */
+  private rankPops: { i: number; t: number }[] = [];
+  /** 自己ベストを超えた時刻（-1 = まだ） */
+  private bestAt = -1;
+
+  /** 加算の数字: 右から入ってきて止まり、少し上がってから下へ消える（TJAPlayer3 系と同じ動き。1 目盛り 2ms） */
+  private drawAddPops(c: CanvasRenderingContext2D, wall: number) {
+    const im = this.img('taiko/Score');
+    if (!im) return;
+    this.addPops = this.addPops.filter((p) => wall - p.t < 930);
+    const cw = this.lw(im) / 10;
+    const ch = this.lh(im) / 3;
+    for (const p of this.addPops) {
+      const v = (wall - p.t) / 2;
+      const xAdd = v < 10 ? 25 : v < 20 ? 10 : v < 30 ? -5 : v < 40 ? -9 : v < 50 ? -10 : v < 60 ? -9 : v < 70 ? -5 : v < 80 ? -3 : 0;
+      let a = v < 10 ? 150 : v < 20 ? 200 : v < 30 ? 250 : 256;
+      let yAdd = 0;
+      if (v > 120) yAdd = -1;
+      if (v > 130) yAdd = -5;
+      if (v > 140) yAdd = -7;
+      if (v > 150) yAdd = -8;
+      if (v > 170) yAdd = -6;
+      if (v > 180) yAdd = 0;
+      if (v > 190) { yAdd = 5; a = 200; }
+      if (v > 200) { yAdd = 12; a = 150; }
+      if (v > 210) { yAdd = 20; a = 0; }
+      if (a <= 0) continue;
+      const s = String(p.v).padStart(7, ' ');
+      this.alpha(c, Math.min(1, a / 256), () => {
+        for (let i = 0; i < 7; i++) {
+          if (s[i] === ' ') continue;
+          // スコアの 40（1280×720）上に、同じ桁の位置で
+          this.di(c, im, +s[i] * cw, ch, cw, ch, 52.5 + 29.5 * i + P(xAdd), 336.5 - 60 + P(yAdd) - ch * S, cw * S, ch * S);
+        }
+      });
+    }
+  }
+
+  /** スコアランク: 下から 0.25 秒で出て、少し大きくなって戻り、3 秒で上へ消える */
+  private drawRankPops(c: CanvasRenderingContext2D, wall: number) {
+    const im = this.img('game/ScoreRank');
+    if (!im) return;
+    this.rankPops = this.rankPops.filter((p) => wall - p.t < 3000);
+    for (const p of this.rankPops) {
+      const v = wall - p.t;
+      let a = 1;
+      let k = 1;
+      let y = 0;
+      if (v <= 255) { a = v / 255; y = (v / 255 - 1) * -20; }
+      else if (v <= 435) k = 1 + Math.sin(((v - 255) * Math.PI) / 180) * 0.2;
+      else if (v >= 2745) { a = Math.max(0, 255 - (v - 2745)) / 255; y = ((v - 2745) / 255) * -20; }
+      this.alpha(c, a, () => this.di(c, im, 0, p.i * 120, 140, 120, P(87 - 70 * k), P(98 + y - 60 * k), P(140 * k), P(120 * k)));
+    }
+  }
+
+  /** 自己ベストを超えたら、スコアの下に「ベストスコア更新」（出るときに光の筋） */
+  private drawBest(c: CanvasRenderingContext2D, wall: number) {
+    if (this.bestAt < 0) return;
+    const v = wall - this.bestAt;
+    const im = this.img('game/BestScore');
+    if (im) {
+      const k = v < 120 ? 1.25 - (v / 120) * 0.25 : 1;
+      const cx = 4 + 110;
+      const cy = 185 + 71;
+      this.alpha(c, Math.min(1, v / 120), () => this.di(c, im, 0, 40, 222, 60, P(cx - 111 * k), P(cy - 30 * k), P(222 * k), P(60 * k)));
+    }
+    const fx = this.img('game/BestScoreFx');
+    const m = this.man.img['game/BestScoreFx'] as ImgInfo & { x?: number; y?: number };
+    if (fx && m && v < 600) this.alpha(c, 1 - v / 600, () => this.di(c, fx, P(m.x ?? 0), P(m.y ?? 0), P(m.w), P(m.h)));
   }
 
   private watch(F: TndeFrame, gogo: boolean, beatSec: number) {
@@ -569,7 +705,17 @@ export class TndeSkin {
         act(max ? 'chara/10combo_Max' : 'chara/10combo', beatSec * 2000);
       }
     }
-    if (st.score > L.score) this.scoreAt = wall;
+    if (st.score > L.score) {
+      this.scoreAt = wall;
+      // 加算の数字（叩くたびに、スコアの上にオレンジの数字）。途中から始めたときなど、一度に大きく増えたときは出さない
+      if (L.score > 0 || st.score - L.score < 100000) this.addPops.push({ v: st.score - L.score, t: wall });
+      if (this.addPops.length > 10) this.addPops.shift();
+      // スコアランク（粋・雅・極）: 超えたときに 3 秒出す
+      const RANKS = [500000, 600000, 700000, 800000, 900000, 950000, 1000000];
+      RANKS.forEach((r, i) => { if (L.score < r && st.score >= r) this.rankPops.push({ i, t: wall }); });
+      // 自己ベストを超えた
+      if (F.best && L.score <= F.best && st.score > F.best && this.bestAt < 0) this.bestAt = wall;
+    }
     const r = F.fx.rollFx;
     if (r && r.t !== L.roll) {
       L.roll = r.t;
@@ -664,6 +810,9 @@ export class TndeSkin {
     this.drawCombo(c, st.combo, wall);
     this.drawScore(c, wall);
     if (all) {
+      this.drawAddPops(c, wall);
+      this.drawBest(c, wall);
+      this.drawRankPops(c, wall);
       this.drawRainbow(c, F);
       this.drawFireworks(c, wall);
       this.drawSoulFx(c, F);

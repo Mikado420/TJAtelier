@@ -76,12 +76,20 @@ export class AudioEngine {
     } else src.connect(out);
     return src;
   }
-  /** 画面の音を鳴らす */
-  playUi(name: string) {
+  /** 画面の音を鳴らす（loop = くり返す）。止めるための物を返す（鳴らせなければ null） */
+  playUi(name: string, loop = false): { stop(): void; duration: number } | null {
     const buf = this.uiBufs.get(name);
-    if (!buf || this.mix.ui <= 0) return;
+    if (!buf || this.mix.ui <= 0) return null;
     if (this.ctx.state !== 'running') void this.ctx.resume();
-    this.uiSource(this.ctx, name, buf, this.uiGain).start();
+    const src = this.uiSource(this.ctx, name, buf, this.uiGain);
+    src.loop = loop;
+    src.start();
+    return {
+      stop: () => {
+        try { src.stop(); } catch { /* もう止まっている */ }
+      },
+      duration: buf.duration,
+    };
   }
 
   /** 音量の比率（音源・打音・メトロノーム）を変える */

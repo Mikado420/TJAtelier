@@ -352,6 +352,8 @@ export class Renderer {
 
   /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */
   tnde: TndeSkin | null = null;
+  /** 自己ベスト（TNDE スキンの「ベストスコア更新」） */
+  prevBest: number | null = null;
   /** ネームプレートの称号と名前 */
   plate: { title: string; name: string; profile?: PlateStyle } = { title: 'TJAtelier テストプレイ', name: 'プレイヤー' };
   /** 後ろに置く、動かない背景の canvas */
@@ -1047,6 +1049,7 @@ export class Renderer {
       bgMode: this.videoMode,
       end: this.endFx,
       branch: this.tndeBranch(game, now),
+      best: this.prevBest,
     });
     } catch (e) {
       // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）

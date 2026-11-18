@@ -10,6 +10,7 @@ import { isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
 import { Broadcast, type PlayInfo } from './broadcast';
+import { TndeOverlay } from './tndeflow';
 
 /** Expo Go のアプリ（expo/App.js）の中で動いているか */
 export function isNativeHost() {
@@ -136,6 +137,8 @@ export class PlayMode {
   /** 終わったとき（自己ベストを更新したら true を返す） */
   /** 遊び終わったとき（記録を残す）。自己ベストを更新したか・自己ベストとの差（初めてなら null）・遊んだ回数。記録しないときは null */
   onFinished: (r: { score: number; crown: 'allgood' | 'fc' | 'clear' | 'fail' }) => { best: boolean; diff: number | null; plays: number } | null = () => null;
+  /** 今の曲の自己ベスト（記録しないときは null） */
+  bestScore: () => number | null = () => null;
   /** ポーズの画面を出したとき（設定の欄を作る） */
   onPauseOpen: () => void = () => {};
   /** いちばん最後に始めたときの引数（「やりなおす」で同じ所から） */
@@ -289,6 +292,7 @@ export class PlayMode {
     // 終わりの帯は、音源と譜面がどちらも終わってから
     this.cur = { course, info, endAt, clicks: [], fxAt: this.endFxTime(lastTime, course.endTime), tailEnd };
     this.endWall = 0;
+    this.fadeAt = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
   }
@@ -339,6 +343,7 @@ export class PlayMode {
 
   /** プレイ画面を閉じる（結果画面は出さない） */
   private leaveScreen() {
+    this.closeTnde();
     this.stopVideo();
     this.bc.hide();
     this.root.classList.add('hidden');
@@ -464,6 +469,20 @@ export class PlayMode {
     resetTouchStats();
     this.game = game;
 
+    this.closeTnde();
+    this.renderer.prevBest = this.auto || clicks || fromTime > 0 ? null : this.bestScore();
+    // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
+    const prep = Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+    // TNDE スキンで曲の最初から遊ぶとき: 本家と同じ読み込み画面（幕が閉じて曲名 → 用意ができたら幕が開く）
+    let curtain: { open(): Promise<void> } | null = null;
+    if (this.settings.skin === 'tnde' && this.tnde && !clicks && fromTime <= 0 && !cmp) {
+      const sk = this.tnde;
+      const ok = await Promise.race([sk.needScreen('load').then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 1500))]);
+      if (ok) {
+        this.audio.playUi('tnde:decide');
+        curtain = await this.overlay.loading(sk, info.title, info.sub, prep);
+      }
+    }
     // スキンの用意ができて最初のコマを描くまでは、ゲーム画面を隠しておく（前のコマやいつもの見た目が一瞬見えないように）
     this.canvasEl.style.visibility = 'hidden';
     this.firstFrame = true;
@@ -475,8 +494,7 @@ export class PlayMode {
     this.renderer.broadcast = this.broadcastOn;
     this.applyVideo(false);
     this.resetRes();
-    // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
-    await Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+    await prep;
     this.renderer.resize();
     this.placeVideo();
     this.showBroadcast(course, info);
@@ -490,6 +508,7 @@ export class PlayMode {
     postNative({ type: 'play', active: true });
     await this.audio.startAt(from - 2, 1);
     for (const t of clicks ?? []) this.audio.scheduleTick(t);
+    if (curtain) void curtain.open().then(() => this.tnde?.dropScreen('load'));
 
     const lastTime = Math.max(from, ...notes.filter((n) => !n.dummy).map((n) => n.endTime ?? n.time));
     // 音源があるときは、音源が完全に終わってから 1 秒後に終える。ないときは最後の音符の 2 秒後
@@ -507,6 +526,7 @@ export class PlayMode {
     const fxAt = this.calibrating ? lastTime + 0.4 : this.endFxTime(lastTime, course.endTime);
     this.cur = { course, info, endAt, clicks: clicks ?? [], fxAt, tailEnd };
     this.endWall = 0;
+    this.fadeAt = 0;
     this.timeFloor = -Infinity;
     this.runLoop();
   }
@@ -604,12 +624,25 @@ export class PlayMode {
         const fc = st.bad === 0 && game.totalHitNotes > 0;
         const kind = fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
         this.endHold = this.renderer.showEnd(kind, (this.cur?.tailEnd ?? 0) > 0);
+        // リザルト画面の絵を読み込み始める
+        if (this.tndeResult()) void this.tnde!.needScreen('res');
         // TNDE スキン: 「クリア成功！」「フルコンボだドン！」などの声
         if (this.renderer.skinEnd(kind)) this.audio.playUi(`tnde:${kind}`);
       }
       // 帯を出したら、曲が終わっても帯を見せきってから結果へ
       // 演出を出す前に曲が終わっても、演出を見せてから結果へ（演出の時刻より前には終えない）
       if (this.endWall ? performance.now() - this.endWall > this.endHold && now > (this.cur?.tailEnd ?? 0) + 1 : now > endAt && (this.calibrating || this.spectating || now > (this.cur?.fxAt ?? 0))) {
+        // TNDE スキン: 本家と同じく、1.5 秒かけて暗くしてからリザルトへ
+        if (this.tndeResult() && this.endWall) {
+          if (!this.fadeAt) {
+            this.fadeAt = performance.now();
+            this.overlay.fadeOut(1500);
+          }
+          if (performance.now() - this.fadeAt < 1500) {
+            this.raf = requestAnimationFrame(loop);
+            return;
+          }
+        }
         this.finish();
         return;
       }
@@ -671,6 +704,25 @@ export class PlayMode {
   /** 設定（ハイスピード・ドンの幅・太鼓の表示など）を今のプレイに反映する */
   /** TNDE スキン（初めて使うときに読み込む） */
   private tnde: TndeSkin | null = null;
+  /** TNDE スキンの読み込み画面・リザルト画面を描く所 */
+  private overlay = new TndeOverlay();
+  /** リザルトの曲 */
+  private resBgm: { stop(): void } | null = null;
+  private resBgmTimer = 0;
+  /** 終わりの暗転を始めた時刻（performance.now()。0 = まだ） */
+  private fadeAt = 0;
+  /** 読み込み画面・リザルト画面を消す（曲も止める） */
+  closeTnde() {
+    this.overlay.hide();
+    clearTimeout(this.resBgmTimer);
+    this.resBgm?.stop();
+    this.resBgm = null;
+    this.tnde?.dropScreen('res');
+  }
+  /** TNDE スキンのリザルト画面を出すか */
+  private tndeResult() {
+    return !!this.tnde && this.renderer.tnde === this.tnde && this.settings.skin === 'tnde' && !this.calibrating && !this.spectating && !this.online;
+  }
   private tndeLoad: Promise<void> | null = null;
   /** スキンの用意ができてから最初のコマを描くまで（ゲーム画面を隠しておく） */
   private firstFrame = false;
@@ -697,6 +749,9 @@ export class PlayMode {
       (s) => {
         this.tnde = s;
         for (const [k, f] of [['clear', 'clear'], ['fc', 'fc'], ['allgood', 'dfc']]) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${f}.ogg`, true);
+        // 読み込み画面・リザルト画面の音（声は曲と同じくらいの大きさに）
+        for (const k of ['decide', 'resGauge', 'resPom', 'rankIn', 'crownClear', 'crownFc', 'crownDfc', 'best', 'resIn', 'resBgm']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`);
+        for (const k of ['resClear', 'resFailed']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`, true);
         if (this.settings.skin === 'tnde') {
           R.tnde = s;
           R.resize();
@@ -1434,7 +1489,52 @@ export class PlayMode {
       }
     }
     this.result.querySelector('dl')!.innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+    if (this.tndeResult() && this.showTndeResult(g, acc)) return;
     this.showResultCard(g, acc);
+  }
+
+  /** TNDE スキンのリザルト画面（絵が読み込めていなければ false: いつもの結果を出す） */
+  private showTndeResult(g: Game, acc: number) {
+    const sk = this.tnde!;
+    if (!sk.pic('res/Panel3') || !sk.pic('res/Bg0')) return false;
+    const s = g.stats;
+    const info = this.cur?.info ?? { title: '', course: '', level: 0 };
+    const fc = s.bad === 0 && g.totalHitNotes > 0;
+    const allGood = fc && s.ok === 0;
+    const rec = this.showResultCard(g, acc, undefined, false);
+    const pf = this.settings.profile;
+    const COURSE: Record<string, number> = { Easy: 0, Normal: 1, Hard: 2, Oni: 3, Edit: 4 };
+    this.audio.stop();
+    // 曲: 始まりの音 → くり返しの曲
+    const intro = this.audio.playUi('tnde:resIn');
+    this.resBgmTimer = window.setTimeout(() => { this.resBgm = this.audio.playUi('tnde:resBgm', true); }, (intro?.duration ?? 0) * 1000);
+    const back = document.getElementById('back');
+    this.overlay.showResult(
+      sk,
+      {
+        title: info.title,
+        stage: info.stage ?? 1,
+        course: COURSE[info.course] ?? 3,
+        score: s.score,
+        good: s.good,
+        ok: s.ok,
+        bad: s.bad,
+        rolls: s.rolls,
+        maxCombo: s.maxCombo,
+        gauge: Math.max(0, Math.min(100, s.gauge)),
+        clearLine: CLEAR_LINE,
+        crown: allGood ? 'dfc' : fc ? 'fc' : s.gauge >= CLEAR_LINE ? 'clear' : 'none',
+        best: rec?.best ? Math.max(0, rec.diff ?? 0) : null,
+        plate: { name: pf?.name || 'プレイヤー', title: pf?.title ?? '', profile: pf ? { ...pf } : undefined },
+      },
+      (n) => this.audio.playUi(`tnde:${n}`),
+      [
+        ['もう一度', () => { this.closeTnde(); document.getElementById('retry')?.click(); }],
+        [back?.textContent || 'エディタへ', () => { this.closeTnde(); back?.click(); }],
+        ['くわしく', () => { this.closeTnde(); this.showResultCard(g, acc, rec); }],
+      ],
+    );
+    return true;
   }
 
   /**
@@ -1486,7 +1586,7 @@ export class PlayMode {
   }
 
   /** 結果のカード（スコア・良可不可・王冠など）を出して、数を数え上げる */
-  private showResultCard(g: Game, acc: number) {
+  private showResultCard(g: Game, acc: number, given?: ReturnType<PlayMode['onFinished']>, show = true) {
     const R = this.result;
     const s = g.stats;
     const info = this.cur?.info ?? { title: '', course: '', level: 0 };
@@ -1501,7 +1601,7 @@ export class PlayMode {
     R.classList.remove('res-calib', 'go', 'counting', 'r-best', 'r-allgood', 'r-fc', 'r-clear', 'r-fail');
     R.classList.add(`r-${rank}`);
     // 自己ベストを更新したときだけ印を出す（はじめて遊んだときは出さない）
-    const rec = this.auto ? null : this.onFinished({ score: s.score, crown: rank });
+    const rec = given !== undefined ? given : this.auto ? null : this.onFinished({ score: s.score, crown: rank });
     if (rec?.best) R.classList.add('r-best');
     // 記録の 1 行: 自己ベストとの差（はじめてのときは出さない）とプレイ回数
     R.querySelector('.res-rec')!.classList.toggle('hidden', !rec);
@@ -1533,6 +1633,7 @@ export class PlayMode {
     const targets: [HTMLElement, number][] = [[R.querySelector<HTMLElement>('#resScore')!, s.score]];
     for (const k of ['good', 'ok', 'bad', 'rolls', 'maxCombo'] as const) targets.push([R.querySelector<HTMLElement>(`[data-c="${k}"]`)!, s[k]]);
     for (const [el] of targets) el.textContent = '0';
+    if (!show) return rec;
     R.classList.remove('hidden');
     this.audio.playUi('result');
     // 数え上げ（0.35 秒後から 0.8 秒かけて）→ 背景が明るくなり、王冠と吹き出しが出る（CSS）
@@ -1547,6 +1648,7 @@ export class PlayMode {
       else R.classList.add('go');
     };
     requestAnimationFrame(step);
+    return rec;
   }
 
   /** 結果画面で提案する判定調整の値（ms） */
