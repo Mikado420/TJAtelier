@@ -6,6 +6,7 @@ import type { TndeSkin } from '../render/tnde';
 import { TndeLoading, TndeResult, LOAD_CLOSE, LOAD_OPEN, type TndeResultData, type ResultSound } from '../render/tndescreens';
 
 const W = 1920;
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const H = 1080;
 
 export class TndeOverlay {
@@ -164,7 +165,7 @@ export class TndeOverlay {
   showResult(sk: TndeSkin, d: TndeResultData, sound: (n: ResultSound) => { stop(): void } | null, buttons: [string, () => void][]) {
     const R = new TndeResult(sk, d, sound);
     this.result = R;
-    let black = 500;
+    let black = 300;
     this.band = 1;
     this.buttons.replaceChildren(
       ...buttons.map(([label, f], i) => {
@@ -182,17 +183,16 @@ export class TndeOverlay {
     this.buttons.classList.add('hidden');
     window.addEventListener('keydown', this.onKey, true);
     this.run((c, dt) => {
-      // 黒のまま 0.3 秒 → 0.5 秒で明るく
+      // 黒のまま 0.3 秒 → 0.27 秒で明るく（明るくなり始めたところから時間が進む。本家の参考動画で測った）
       if (black > 0) black -= dt;
       R.draw(c, black > 0 ? 0 : dt);
-      const a = black > 200 ? 1 : black > 0 ? black / 200 : 0;
-      const fin = R.done;
-      if (fin && this.buttons.classList.contains('hidden')) this.buttons.classList.remove('hidden');
-      if (black > 0 && a > 0) {
+      const a = black > 0 ? 1 : clamp01(1 - R.t / 270);
+      if (R.done && this.buttons.classList.contains('hidden')) this.buttons.classList.remove('hidden');
+      if (a > 0) {
         c.fillStyle = `rgba(0,0,0,${a})`;
         c.fillRect(0, 0, W, H);
+        R.drawCoin(c);
       }
-      if (black > 0) R.drawCoin(c);
     });
   }
 

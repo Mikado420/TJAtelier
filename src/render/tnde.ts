@@ -661,20 +661,70 @@ export class TndeSkin {
     }
   }
 
-  /** 自己ベストを超えたら、スコアの下に「ベストスコア更新」（出るときに光の筋） */
+  /**
+   * 自己ベストを超えたら、スコアの下に「ベストスコア更新」を 5 秒（参考動画で測った）。
+   * 横に少し広く薄い所から 0.17 秒で出て、0.16 秒黄色く光る。絵は 1.45 倍で (0, 278) に置く
+   */
   private drawBest(c: CanvasRenderingContext2D, wall: number) {
     if (this.bestAt < 0) return;
     const v = wall - this.bestAt;
+    if (v > 5200) return;
     const im = this.img('game/BestScore');
-    if (im) {
-      const k = v < 120 ? 1.25 - (v / 120) * 0.25 : 1;
-      const cx = 4 + 110;
-      const cy = 185 + 71;
-      this.alpha(c, Math.min(1, v / 120), () => this.di(c, im, 0, 40, 222, 60, P(cx - 111 * k), P(cy - 30 * k), P(222 * k), P(60 * k)));
+    if (!im) return;
+    const K = 1.45;
+    const a = v < 170 ? v / 170 : v > 5000 ? 1 - (v - 5000) / 200 : 1;
+    const kx = v < 170 ? 1.08 - (v / 170) * 0.08 : 1;
+    // 帯の絵（332×176 の y 44〜100）
+    const sx = 0, sy = 44, sw = 332, sh = 56;
+    const cx = (sw * K) / 2;
+    const dx = cx - (sw * K * kx) / 2;
+    const y = 278.2 + sy * K;
+    this.alpha(c, a, () => this.di(c, im, sx, sy, sw, sh, dx, y, sw * K * kx, sh * K));
+    const fl = v >= 170 && v < 330 ? 1 - (v - 170) / 160 : 0;
+    if (fl > 0) {
+      const tc = this.tintPart(im, '#ffe600', sx, sy, sw, sh);
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha *= fl * 0.8;
+      c.drawImage(tc, 0, y, sw * K, sh * K);
+      c.restore();
     }
+  }
+
+  /** ベストスコアを更新している間の、スコアの後ろの光（足し算で重ねる） */
+  private drawBestGlow(c: CanvasRenderingContext2D, wall: number) {
+    if (this.bestAt < 0) return;
+    const v = wall - this.bestAt;
+    if (v > 5200) return;
     const fx = this.img('game/BestScoreFx');
     const m = this.man.img['game/BestScoreFx'] as ImgInfo & { x?: number; y?: number };
-    if (fx && m && v < 600) this.alpha(c, 1 - v / 600, () => this.di(c, fx, P(m.x ?? 0), P(m.y ?? 0), P(m.w), P(m.h)));
+    if (!fx || !m) return;
+    const a = v < 170 ? v / 170 : v > 5000 ? 1 - (v - 5000) / 200 : 0.85 + Math.sin(v / 160) * 0.15;
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    c.globalAlpha *= a;
+    // 絵の不透明度がとても低い（最大 16%）ので、本家の明るさになるよう 5 回重ねる
+    for (let i = 0; i < 3; i++) this.di(c, fx, P(m.x ?? 0), P(m.y ?? 0), P(m.w), P(m.h));
+    // 本家は金色に近いので、黄色にした光も重ねる
+    const y = this.tintPart(fx, '#ffd23a', 0, 0, m.w, m.h);
+    for (let i = 0; i < 3; i++) c.drawImage(y, P(m.x ?? 0), P(m.y ?? 0), P(m.w), P(m.h));
+    c.restore();
+  }
+
+  private tintPartCv: HTMLCanvasElement | null = null;
+  /** 絵の一部を 1 色に塗った絵（光らせるとき用） */
+  private tintPart(im: CanvasImageSource, col: string, sx: number, sy: number, sw: number, sh: number) {
+    const cv = (this.tintPartCv ??= document.createElement('canvas'));
+    cv.width = Math.ceil(sw * 1.5);
+    cv.height = Math.ceil(sh * 1.5);
+    const g = cv.getContext('2d')!;
+    g.globalCompositeOperation = 'source-over';
+    g.clearRect(0, 0, cv.width, cv.height);
+    this.di(g, im, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = col;
+    g.fillRect(0, 0, cv.width, cv.height);
+    return cv;
   }
 
   private watch(F: TndeFrame, gogo: boolean, beatSec: number) {
@@ -808,6 +858,7 @@ export class TndeSkin {
     this.drawPanel(c, F);
     if (all) this.drawSplash(c, wall);
     this.drawCombo(c, st.combo, wall);
+    if (all) this.drawBestGlow(c, wall);
     this.drawScore(c, wall);
     if (all) {
       this.drawAddPops(c, wall);
@@ -1074,28 +1125,33 @@ export class TndeSkin {
     }
   }
 
-  /** 紙ふぶき（フルコンボ・ドンだフルコンボ）。レーンの真ん中あたりの上から舞い落ちる */
+  /**
+   * 紙ふぶき（フルコンボ・ドンだフルコンボ）。レーンの横いっぱいに、ゲージの上からゆっくり舞い落ちる小さな紙（青・紫が多い）。
+   * 落ちる速さ・数・大きさは参考動画で測った（1 秒に 150 px ほど、いつも 25 枚ほど）
+   */
   private confetti(c: CanvasRenderingContext2D, t: number) {
-    const N = 26;
+    const N = 30;
     for (let i = 0; i < N; i++) {
-      const life = 1800 + (hash(`c${i}`) % 900);
-      const born = (hash(`b${i}`) % 2400);
+      const speed = 0.13 + (hash(`v${i}`) % 60) / 1000;
+      const life = 320 / speed;
+      const born = (hash(`b${i}`) % 1600);
       const lt = t - born;
       if (lt < 0) continue;
       const cyc = Math.floor(lt / life);
       const u = (lt % life) / life;
       const h = hash(`p${i}_${cyc}`);
-      const x = 800 + (h % 760) + Math.sin(u * 7 + i) * 18;
-      const y = 280 + u * 250;
-      const a = u < 0.1 ? u / 0.1 : u > 0.8 ? (1 - u) / 0.2 : 1;
+      const x = 520 + (h % 1380) + Math.sin(u * 6 + i) * 14;
+      const y = 195 + u * 320;
+      const a = u < 0.06 ? u / 0.06 : u > 0.85 ? (1 - u) / 0.15 : 1;
       const col = CONFETTI[h % CONFETTI.length];
+      const s = 0.8 + ((h >> 4) % 40) / 100;
       c.save();
       c.globalAlpha = a;
       c.translate(x, y);
-      c.rotate(u * 9 + i);
-      c.scale(1, Math.cos(u * 11 + i));
+      c.rotate(u * 8 + i);
+      c.scale(1, Math.max(0.15, Math.abs(Math.cos(u * 10 + i))));
       c.fillStyle = col;
-      c.fillRect(-6, -4, 12, 8);
+      c.fillRect(-6 * s, -5 * s, 12 * s, 10 * s);
       c.restore();
     }
   }
@@ -2347,7 +2403,7 @@ const STARS: number[][] = [
   [1443, 442, 0.46, 383], [1310, 457, 1.0, 500], [966, 441, 0.25, 533],
 ];
 const STAR_PERIOD = 1575;
-const CONFETTI = ['#ff4fa3', '#3d8bff', '#38d66b', '#9b5cff', '#ff3b3b', '#2fd8e0', '#ffcf3a'];
+const CONFETTI = ['#3b5cff', '#2f6bff', '#5a3cff', '#7a3cff', '#9b40ff', '#c43cf0', '#ff3b8a', '#3b5cff', '#5a3cff'];
 /** 神さまのバチおの跳ね方（1 コマごとの y。参考動画で測った） */
 const GOD_JUMP = [278, 281, 285, 288, 290, 291, 292, 292, 292, 292, 292, 292, 292, 290, 287, 285, 280, 275, 269, 265, 261, 257, 254, 251, 248, 246, 244, 242, 241, 240, 240, 240, 240, 241, 242, 244, 246, 249, 251, 254, 257, 260, 264, 268, 273, 277, 282, 286, 288, 289, 289, 285, 282, 280, 278];
 function godJump(f: number) {

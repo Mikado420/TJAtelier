@@ -225,52 +225,45 @@ const PSHINE_Y = [670, 620, 650, 687, 558, 542];
 export type ResultSound = 'resGauge' | 'resPom' | 'rankIn' | 'crownClear' | 'crownFc' | 'crownDfc' | 'best' | 'resClear' | 'resFailed';
 
 export class TndeResult {
-  /** 始まってからの時間（ms） */
+  /** 始まってからの時間（ms。黒から明るくなり始めたところが 0） */
   t = 0;
   private played = new Set<string>();
-  private gaugeSnd: { stop(): void } | null = null;
   private title: ReturnType<typeof textCanvas>;
   private songCount: ReturnType<typeof textCanvas>[];
   private bestText: ReturnType<typeof textCanvas> | null;
   private coin: ReturnType<typeof textCanvas>;
-  private readonly G: number;
-  private readonly A: number;
-  private readonly SC: number;
-  private readonly M: number;
+  /** 数字・スコア・ゲージがいっせいに出る時刻（本家: 明るくなってから 1.2 秒） */
+  private readonly T0 = 1200;
+  /** 背景がクリアの色に変わり始める時刻 */
+  private readonly M = 1200 + 66;
   private readonly rank: number;
   private readonly cleared: boolean;
   private readonly textRow = Math.floor(Math.random() * 3);
   /** 切り替わってからの時間（どんちゃんの動き） */
   private charaT = 0;
+  private bandCv: HTMLCanvasElement | null = null;
 
   constructor(private readonly sk: TndeSkin, private readonly d: TndeResultData, private readonly sound: (n: ResultSound) => { stop(): void } | null) {
-    this.G = Math.floor(clamp(d.gauge, 0, 100) / 2);
-    this.A = 3000 + this.G * 59;
-    this.SC = this.A + 420 * 4 + 840;
-    this.M = 10275 + 66 * this.G;
     this.cleared = d.gauge >= d.clearLine;
     const ranks = [500000, 600000, 700000, 800000, 900000, 950000, 1000000];
     this.rank = ranks.filter((r) => d.score >= r).length;
     // 曲名は勘亭流（プレイ画面と同じ字）
     this.title = textCanvas(d.title, 52, P(660), '#fff', '#000', 14, KANTEI);
-    // 何曲目: 黒い字に白い縁（参考動画で測った大きさ）
-    this.songCount = [textCanvas(String(Math.max(1, d.stage)), 36, 999, '#111', '#fff', 5, KANTEI), textCanvas('∞', 28, 999, '#111', '#fff', 5, KANTEI)];
+    // 何曲目: 黒い丸ゴシックに太い白の縁（参考動画で測った大きさ）
+    this.songCount = [textCanvas(String(Math.max(1, d.stage)), 42, 999, '#000', '#fff', 9), textCanvas('∞', 30, 999, '#000', '#fff', 7)];
     this.coin = textCanvas('0コイン', 38, 999, '#fff', '#000', 10, KANTEI);
-    this.bestText = d.best !== null ? textCanvas(`${d.best}`, 26, 999, '#fff', 'rgba(0,0,0,0)', 0) : null;
+    this.bestText = d.best !== null ? textCanvas(`${d.best}`, 25, 999, '#fff', 'rgba(0,0,0,0)', 0) : null;
   }
 
   /** 動きが全部終わったか */
   get done() {
-    return this.t >= Math.max(this.SC + 2800, this.M + 600);
+    return this.t >= this.M + 1500;
   }
 
-  /** 叩いたら、途中を飛ばして山が出るところへ */
+  /** 叩いたら、途中を飛ばして数字が出るところへ */
   skip() {
-    if (this.t >= this.M) return false;
-    for (const k of ['g', 'p0', 'p1', 'p2', 'p3', 'p4', 'sc', 'rk', 'cr']) this.played.add(k);
-    this.gaugeSnd?.stop();
-    this.gaugeSnd = null;
-    this.t = this.M;
+    if (this.t >= this.T0) return false;
+    this.t = this.T0;
     return true;
   }
 
@@ -282,20 +275,14 @@ export class TndeResult {
   }
 
   private sounds() {
-    const { t } = this;
-    this.once('g', 2000, () => { this.gaugeSnd = this.sound('resGauge'); });
-    // ゲージが伸び終わったら止める（満タンまで行ったときは鳴らしきる）
-    if (this.gaugeSnd && t >= 2000 + this.G * 59 && this.G < 50) {
-      this.gaugeSnd.stop();
-      this.gaugeSnd = null;
-    }
-    for (let k = 0; k < 5; k++) this.once(`p${k}`, this.A + 420 * k, () => this.sound('resPom'));
-    this.once('sc', this.SC, () => this.sound(this.d.best !== null ? 'best' : 'resPom'));
-    if (this.rank > 0) this.once('rk', this.SC + 1180, () => this.sound('rankIn'));
+    const { T0 } = this;
+    this.once('p', T0, () => this.sound('resPom'));
+    if (this.rank > 0) this.once('rk', T0 + 17, () => this.sound('rankIn'));
     if (this.d.crown !== 'none') {
       const n = ({ clear: 'crownClear', fc: 'crownFc', dfc: 'crownDfc' } as const)[this.d.crown];
-      this.once('cr', this.SC + 2680, () => this.sound(n));
+      this.once('cr', T0 + 33, () => this.sound(n));
     }
+    if (this.d.best !== null) this.once('bs', T0 + 33, () => this.sound('best'));
     this.once('mt', this.M, () => {
       this.charaT = 0;
       this.sound(this.cleared ? 'resClear' : 'resFailed');
@@ -306,9 +293,10 @@ export class TndeResult {
     this.t += dt;
     this.charaT += dt;
     this.sounds();
-    const { sk, d, t, M } = this;
+    const { sk, d, t, M, T0 } = this;
     const mtOn = t >= M;
-    const clearF = this.cleared && mtOn ? clamp(((t - M) * 3) / 255) : 0;
+    // 背景は 0.23 秒で切り替わる（参考動画で測った）
+    const clearF = this.cleared && mtOn ? clamp((t - M) / 230) : 0;
 
     // ---------- 背景 ----------
     full(sk, c, 'res/Bg0');
@@ -358,24 +346,24 @@ export class TndeResult {
     full(sk, c, 'res/Header');
     putText(c, this.title, 958, 100);
     full(sk, c, 'res/SongCount');
-    const sc = sk.meta('res/SongCount');
-    if (sc) {
-      putText(c, this.songCount[0], 1686, 41);
-      putText(c, this.songCount[1], 1831, 46);
-    }
+    putText(c, this.songCount[0], 1686, 42);
+    putText(c, this.songCount[1], 1829, 45);
 
     // ---------- パネル ----------
     full(sk, c, 'res/Panel0');
     const db = sk.pic('res/DifficultyBar');
-    if (db) sk.blit(c, db, 0, clamp(d.course, 0, 4) * 50, 153, 50, P(27), P(102), P(153), P(50));
+    if (db) sk.blit(c, db, 0, clamp(d.course, 0, 4) * 50, 153, 50, 37, 162, 153 * 1.45, 50 * 1.45);
     this.drawGauge(c);
-    this.drawCounts(c);
-    this.drawScore(c);
-    this.drawRank(c);
-    this.drawCrown(c);
+    if (t >= T0) {
+      this.drawCounts(c);
+      this.drawBand(c);
+      this.drawScore(c);
+      this.drawRank(c);
+      this.drawCrown(c);
+    }
     this.drawChara(c);
-    if (mtOn && d.gauge >= 80) this.drawFlowers(c);
-    if (mtOn) this.drawBubble(c);
+    if (this.cleared && t >= M + 100 && d.gauge >= 80) this.drawFlowers(c);
+    if (t >= T0 + 33) this.drawBubble(c);
     sk.plate(c, { ...d.plate, wall: performance.now() }, P(28) + 6, P(621) - 443.5);
     this.drawCoin(c);
   }
@@ -385,84 +373,146 @@ export class TndeResult {
     putText(c, this.coin, 970, 1055);
   }
 
+  /** ゲージ: 数字といっしょに一度に満ちる。満タンなら虹と炎（炎は 50ms ごとに色が変わる） */
   private drawGauge(c: CanvasRenderingContext2D) {
-    const { sk, t, d } = this;
+    const { sk, t, d, T0 } = this;
     full(sk, c, 'res/Gauge_Base', 1, 55, 140);
-    if (t < 2000) {
-      // ゲージが伸び始めるまでも、暗い「魂」は出しておく
-      const st0 = sk.pic('res/Soul_Text');
-      if (st0) sk.blit(c, st0, 0, 0, 37, 37, P(575 - 18.5), P(159 - 18.5), P(37), P(37));
-      return;
-    }
-    const seg = Math.min(this.G, Math.floor((t - 2000) / 59));
-    const pct = seg * 2;
+    const on = t >= T0;
+    const pct = on ? Math.floor(clamp(d.gauge, 0, 100) / 2) * 2 : 0;
     const g = sk.pic('res/Gauge');
     if (g && pct > 0) sk.blit(c, g, 0, 0, (487 * pct) / 100, 36, P(57), P(140), P((487 * pct) / 100), P(36));
-    const full100 = seg >= 50;
+    const full100 = pct >= 100;
     if (full100) {
       const n = sk.meta('res/Rainbow')?.n ?? 1;
-      sk.anim(c, 'res/Rainbow', Math.floor((t - 2000 - 50 * 59) / (1000 / 60)) % n, P(57), P(144));
+      // 虹は 2 コマで濃くなる
+      sk.fade(c, clamp((t - T0) / 33), () => sk.anim(c, 'res/Rainbow', Math.floor((t - T0) / (1000 / 60)) % n, P(57), P(144)));
     }
-    const lit = pct >= d.clearLine;
-    if (g) sk.blit(c, g, lit ? 42 : 0, 35, 42, 20, P(441), P(142), P(42), P(20));
-    // 魂: 満タンなら炎も
-    if (full100) {
+    if (g) sk.blit(c, g, 0, 35, 42, 20, P(441), P(142), P(42), P(20));
+    if (full100 && t >= T0 + 33) {
       const f = sk.pic('res/Result_Soul_Fire');
       if (f) {
-        const k = Math.floor(t / 33) % 8;
-        sk.blit(c, f, k * 150, 0, 150, 131, P(576 - 75), P(160 - 65.5), P(150), P(131));
+        const k = 1 + (Math.floor((t - T0 - 33) / 50) % 7);
+        sk.blit(c, f, k * 150, 0, 150, 131, 770, 135, 150 * 1.45, 131 * 1.45);
       }
     }
     const st = sk.pic('res/Soul_Text');
-    if (st) sk.blit(c, st, (full100 ? 2 : lit ? 1 : 0) * 37, 0, 37, 37, P(575 - 18.5), P(159 - 18.5), P(37), P(37));
+    if (st) {
+      const cellI = !on ? 0 : full100 ? 2 : pct >= d.clearLine ? 1 : 0;
+      sk.blit(c, st, cellI * 37, 0, 37, 37, 827, 211, 37 * 1.45, 37 * 1.45);
+    }
   }
 
-  /** 良・可・不可・連打数・最大コンボ数（右寄せ。出るときに 1.3 倍から縮む） */
+  /** 良・可・不可・連打数・最大コンボ数（右寄せ。出るときに少し大きく） */
   private drawCounts(c: CanvasRenderingContext2D) {
-    const { sk, t, d } = this;
-    const im = sk.pic('res/Number');
-    if (!im) return;
+    const { sk, t, d, T0 } = this;
+    if (!sk.pic('res/Number')) return;
     const W = 355 / 11;
     const H = 40;
     const vals = [d.good, d.ok, d.bad, d.rolls, d.maxCombo];
-    const ys = [188, 230, 272, 314, 356];
+    const ys = [209.3, 250.7, 292, 333.3, 374.7];
+    const u = t - T0;
+    const pop = u < 50 ? 1.12 - (u / 50) * 0.12 : 1;
     for (let k = 0; k < 5; k++) {
-      const at = this.A + 420 * k;
-      if (t < at) break;
-      const pop = t <= at + 135 ? 1.3 - Math.sin(rad((t - at) / (135 / 90))) * 0.3 : 1;
       const ds = String(Math.max(0, vals[k])).split('').reverse();
-      ds.forEach((ch, j) => {
-        const cx = 490 - 22 * j + W * 2 + W / 2;
-        cell(sk, c, 'res/Number', W * Number(ch), 0, W, H, cx, ys[k] + H / 2, pop);
-      });
+      ds.forEach((ch, j) => cell(sk, c, 'res/Number', W * Number(ch), 0, W, H, 574 - 20.9 * j, ys[k], 0.967 * pop));
     }
   }
 
+  /** スコア: 0.9 倍で出て 1.35 倍まで膨らみ、戻る（参考動画で 1 コマずつ測った） */
   private drawScore(c: CanvasRenderingContext2D) {
-    const { sk, t, d, SC } = this;
-    if (t < SC) return;
-    const u = t - SC;
-    const k = u <= 270 ? 1 + Math.sin(rad(u / 1.5)) * 0.65 : u <= 360 ? 1 - Math.sin(rad(u - 270)) * 0.1 : 1;
-    if (d.best !== null) {
-      full(sk, c, 'res/BestScore', 1, 50, 183);
-      if (this.bestText && d.best > 0) {
-        const tc = this.bestText;
-        c.save();
-        c.drawImage(tc.cv, P(313) - tc.tw - (tc.cv.width - tc.tw) / 2, P(197.5) - tc.cv.height / 2);
-        c.restore();
-      }
-    }
+    const { sk, t, d, T0 } = this;
+    const u = t - T0;
+    const k = u < 80 ? 0.9 + Math.sin((u / 80) * (Math.PI / 2)) * 0.45 : u < 140 ? 1.35 : u < 185 ? 1.35 - Math.sin(((u - 140) / 45) * (Math.PI / 2)) * 0.35 : 1;
     const ds = String(Math.max(0, Math.floor(d.score))).split('').reverse();
-    ds.forEach((ch, j) => cell(sk, c, 'res/Score_Number', 51 * Number(ch), 0, 51, 60, 295 - 33 * j, 212 + 30, k));
+    ds.forEach((ch, j) => cell(sk, c, 'res/Score_Number', 51 * Number(ch), 0, 51, 60, 284.7 - 31.1 * j, 242, 0.967 * k));
   }
 
-  /** 出るときの動き（大きく → 縮んで → 戻る）。at = 出始め */
-  private stamp(at: number) {
-    const u = this.t - at;
-    if (u < 0) return null;
-    if (u <= 180) return { a: u / 180, k: 1 + Math.sin(rad((u + 90) / 1.5)) * 1.4 };
-    if (u <= 270) return { a: 1, k: 0.5 + Math.sin(rad(u - 180)) * 0.5 };
-    return { a: 1, k: 1 };
+  /**
+   * 「ベストスコア更新!」の帯: 上から金の帯が下りてきて（字はまだ無い）、字が出て黄色く光り、白い光が左から右へ流れる。
+   * 時刻は数字が出てからの ms（参考動画で測った）
+   */
+  private drawBand(c: CanvasRenderingContext2D) {
+    const { sk, t, d, T0 } = this;
+    if (d.best === null) return;
+    const u = t - T0 - 33;
+    if (u < 0) return;
+    const im = sk.pic('res/BestScore');
+    if (!im) return;
+    const X = 75, Y = 274, BW = 288 * 1.5, BH = 29 * 1.5;
+    // 帯（と差の数字）を 1 枚に描いておく
+    let cv = this.bandCv;
+    if (!cv) {
+      cv = this.bandCv = document.createElement('canvas');
+      cv.width = Math.ceil(BW);
+      cv.height = Math.ceil(BH);
+      const g = cv.getContext('2d')!;
+      sk.blit(g, im, 0, 0, BW, BH);
+      const tc = this.bestText;
+      if (tc && d.best > 0) g.drawImage(tc.cv, 383 - X - tc.tw - (tc.cv.width - tc.tw) / 2, 293 - Y - tc.cv.height / 2);
+    }
+    const slide = u < 150 ? 1 - u / 150 : 0;
+    const a = clamp(u / 100);
+    c.save();
+    c.globalAlpha *= a;
+    c.drawImage(cv, X, Y - 18 * slide * slide);
+    // 字が出るまでは、字の所を金で隠す
+    if (u < 300) {
+      const hide = u < 250 ? 1 : 1 - (u - 250) / 50;
+      const gr = c.createLinearGradient(X, Y, X + BW * 0.62, Y + BH);
+      gr.addColorStop(0, '#fffbe0');
+      gr.addColorStop(0.45, '#f7d23a');
+      gr.addColorStop(1, '#d9a400');
+      c.globalAlpha = a * hide;
+      c.fillStyle = gr;
+      c.beginPath();
+      c.roundRect(X + 6, Y - 18 * slide * slide + 6, BW * 0.6, BH - 12, (BH - 12) / 2);
+      c.fill();
+    }
+    c.restore();
+    // 黄色く光る（字が出たところから 0.2 秒）
+    const fl = u >= 270 && u < 470 ? 1 - (u - 270) / 200 : 0;
+    if (fl > 0) {
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha *= fl * 0.85;
+      const g2 = this.tint(cv, '#ffe600');
+      c.drawImage(g2, X, Y);
+      c.restore();
+    }
+    // 白い光が左から右へ（0.3 秒）
+    const sw = u >= 520 && u < 820 ? (u - 520) / 300 : -1;
+    if (sw >= 0) {
+      const sx = X - 120 + (BW + 240) * sw;
+      const m = this.tint(cv, '#ffffff', (g) => {
+        g.globalCompositeOperation = 'destination-in';
+        g.beginPath();
+        g.moveTo(sx - X - 40, 0);
+        g.lineTo(sx - X + 60, 0);
+        g.lineTo(sx - X + 20, BH);
+        g.lineTo(sx - X - 80, BH);
+        g.closePath();
+        g.fill();
+      });
+      c.drawImage(m, X, Y);
+    }
+  }
+
+  private tintCv: HTMLCanvasElement | null = null;
+  /** 絵の形のまま 1 色に塗った絵（clip で一部だけにもできる） */
+  private tint(src: HTMLCanvasElement, col: string, clip?: (g: CanvasRenderingContext2D) => void) {
+    const cv = (this.tintCv ??= document.createElement('canvas'));
+    cv.width = src.width;
+    cv.height = src.height;
+    const g = cv.getContext('2d')!;
+    g.drawImage(src, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = col;
+    g.fillRect(0, 0, cv.width, cv.height);
+    if (clip) {
+      g.fillStyle = '#fff';
+      clip(g);
+    }
+    return cv;
   }
 
   /** きらっと光る絵の段（0 = ふつう、1〜3 = 光） */
@@ -476,50 +526,53 @@ export class TndeResult {
   }
 
   private drawRank(c: CanvasRenderingContext2D) {
-    if (this.rank <= 0) return;
-    const s = this.stamp(this.SC + 1000);
-    if (!s) return;
-    cell(this.sk, c, 'res/ScoreRank', this.flash(1500) * 142, (this.rank - 1) * 124, 142, 124, 135, 339, s.k, s.a);
+    if (this.rank <= 0 || this.t < this.T0 + 17) return;
+    cell(this.sk, c, 'res/ScoreRank', this.flash(1500) * 142, (this.rank - 1) * 124, 142, 124, 133.3, 340.7, 1);
   }
 
   private drawCrown(c: CanvasRenderingContext2D) {
-    if (this.d.crown === 'none') return;
-    const s = this.stamp(this.SC + 2500);
-    if (!s) return;
+    if (this.d.crown === 'none' || this.t < this.T0 + 33) return;
     const row = { clear: 0, fc: 1, dfc: 2 }[this.d.crown];
-    cell(this.sk, c, 'res/Crown', this.flash(2000) * 101, row * 92, 101, 92, 262, 336, s.k, s.a);
+    cell(this.sk, c, 'res/Crown', this.flash(2000) * 101, row * 92, 101, 92, 262.7, 339.3, 1);
   }
 
-  /** どんちゃん（山が出るまではふつう、出たらクリア・失敗の動き） */
+  /** どんちゃん（数字が出るまではふつう、背景が変わったらクリア・失敗の動き）。本家の大きさ・位置で */
   private drawChara(c: CanvasRenderingContext2D) {
     const { sk, t, M } = this;
+    const K = 1.04;
+    const OX = -44;
+    const OY = 393.3;
+    // 元の絵（1280×720 の画面の絵）の位置を、どんちゃんの位置・大きさに合わせる
+    const place = (name: string, i: number) => {
+      const m = sk.meta(name);
+      const fx = m?.x !== undefined ? (m.x + 4) * K + OX : OX;
+      const fy = m?.y !== undefined ? (m.y - 409) * K + OY : OY;
+      sk.anim(c, name, i, P(fx), P(fy), S * K);
+    };
     const at = (name: string, ms: number, loop: boolean) => {
       const n = sk.meta(name)?.n ?? 1;
       const i = Math.floor(this.charaT / ms);
       return loop ? i % n : Math.min(n - 1, i);
     };
-    if (t < M) {
-      sk.anim(c, 'res/DonNormal', Math.floor(t / 36) % (sk.meta('res/DonNormal')?.n ?? 1), P(-4), P(409));
-    } else if (this.cleared) {
-      sk.anim(c, 'res/DonClear', at('res/DonClear', 33, true), P(-4), P(409));
-    } else {
+    if (t < M) place('res/DonNormal', Math.floor(Math.max(0, t) / 36) % (sk.meta('res/DonNormal')?.n ?? 1));
+    else if (this.cleared) place('res/DonClear', at('res/DonClear', 33, true));
+    else {
       const n = sk.meta('res/DonFailed')?.n ?? 1;
-      const m = sk.meta('res/DonFailed');
-      if (this.charaT < n * 33) sk.anim(c, 'res/DonFailed', at('res/DonFailed', 33, false), P(m?.x ?? 0), P(m?.y ?? 0));
-      else {
-        const L = sk.meta('res/DonFailedLoop');
-        const ln = L?.n ?? 1;
-        sk.anim(c, 'res/DonFailedLoop', Math.floor((this.charaT - n * 33) / 66) % ln, P(L?.x ?? 0), P(L?.y ?? 0));
-      }
+      if (this.charaT < n * 33) place('res/DonFailed', at('res/DonFailed', 33, false));
+      else place('res/DonFailedLoop', Math.floor((this.charaT - n * 33) / 66) % (sk.meta('res/DonFailedLoop')?.n ?? 1));
     }
+  }
+
+  /** 出るときの膨らみ（0.8 倍 → 1.2 倍 → 1 倍。参考動画で測った） */
+  private popIn(u: number) {
+    return u < 50 ? 0.8 + Math.sin((u / 50) * (Math.PI / 2)) * 0.4 : u < 133 ? 1.2 - Math.sin(((u - 50) / 83) * (Math.PI / 2)) * 0.2 : 1;
   }
 
   private drawFlowers(c: CanvasRenderingContext2D) {
     const { sk, t, M } = this;
-    const u = t - M;
-    const pop = u <= 135 ? 1.3 - Math.sin(rad(u / (135 / 90))) * 0.3 : 1;
+    const pop = this.popIn(t - M - 100);
     const fl = sk.meta('res/Flower');
-    if (fl) cell(sk, c, 'res/Flower', 0, 0, fl.w, fl.h / 2, 182, 602, 0.6 * pop);
+    if (fl) cell(sk, c, 'res/Flower', 0, 0, fl.w, fl.h / 2, 168, 582, 0.9 * pop);
     const ft = t % 1500;
     for (let i = 0; i < 5; i++) {
       const s0 = FLOWER_AT[i];
@@ -533,9 +586,10 @@ export class TndeResult {
       if (!im || !m) continue;
       c.save();
       c.globalAlpha *= a;
-      c.translate(P(FLOWER_X[i]), P(FLOWER_Y[i]));
+      // 花の位置は大きい桜に合わせて 1.5 倍に広げる
+      c.translate(P(168 + (FLOWER_X[i] - 182) * 1.5), P(582 + (FLOWER_Y[i] - 602) * 1.5));
       c.rotate((ft - s0) / (FLOWER_SPEED[i] * 360));
-      sk.blit(c, im, P(-m.w * 0.3), P(-m.h * 0.3), P(m.w * 0.6), P(m.h * 0.6));
+      sk.blit(c, im, P(-m.w * 0.45), P(-m.h * 0.45), P(m.w * 0.9), P(m.h * 0.9));
       c.restore();
     }
     // パネルのきらめき
@@ -544,17 +598,16 @@ export class TndeResult {
     for (let i = 0; i < 6; i++) {
       if ((i < 3) !== (st < 500)) continue;
       const a = q >= 100 && q <= 400 ? 1 : Math.min(q, 500 - q) / 100;
-      centered(sk, c, 'res/Shine', PSHINE_X[i], PSHINE_Y[i], 0.15, 0.15, a);
+      centered(sk, c, 'res/Shine', 168 + (PSHINE_X[i] - 182) * 1.5, 582 + (PSHINE_Y[i] - 602) * 1.5, 0.2, 0.2, a);
     }
   }
 
   private drawBubble(c: CanvasRenderingContext2D) {
-    const { sk, t, M, d } = this;
-    const u = t - M;
-    const pop = u <= 135 ? 1.3 - Math.sin(rad(u / (135 / 90))) * 0.3 : 1;
+    const { sk, t, T0, d } = this;
+    const pop = this.popIn(t - T0 - 33);
     const mood = d.gauge >= 100 ? 3 : d.gauge >= 80 ? 2 : d.gauge >= 40 ? 1 : 0;
     const w = 1339 / 4;
     const h = 644 / 3;
-    cell(sk, c, 'res/Speech_Bubble', mood * w, this.textRow * h, w, h, 430, 526, 0.9 * pop);
+    cell(sk, c, 'res/Speech_Bubble', mood * w, this.textRow * h, w, h, 443.5, 529.5, pop);
   }
 }
