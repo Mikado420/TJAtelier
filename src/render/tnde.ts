@@ -2182,14 +2182,8 @@ export class TndeSkin {
         g.closePath();
         g.fill();
         g.restore();
-        g.font = `24px 'TNDE Seurat', sans-serif`;
-        g.lineJoin = 'round';
-        g.lineWidth = 4.5;
-        g.strokeStyle = '#000';
-        g.fillStyle = '#fff';
-        midText(g, String(stage), 1655, cy, 'right');
+        stageNums(g, stage, 1655, 1807, cy, 24, 4.5);
         midText(g, '曲目', GX + 114.5 * GK, cy, 'center');
-        midText(g, '∞', 1807, cy, 'right');
         midText(g, '曲', GX + 213.5 * GK, cy, 'center');
       }));
     }
@@ -2303,6 +2297,27 @@ export class TndeSkin {
 
 /** 幅が max を超えるときは横に縮めて書く（stroke = 先に縁を描く） */
 /** 字の見た目の上下の真ん中を y に合わせて書く（縁取りつき。max より長ければ横に縮める） */
+/**
+ * 「○曲目 / ∞曲」の数字（プレイ画面とリザルトで同じ字）。白い字に黒い縁の丸ゴシック。
+ * 何曲目は右をそろえ、縦は字の真ん中を cy に。∞ は小さい字なので、下を数字の下にそろえる
+ */
+export function stageNums(c: CanvasRenderingContext2D, stage: number, xNum: number, xInf: number, cy: number, px: number, lw: number) {
+  c.font = `${px}px 'TNDE Seurat', sans-serif`;
+  c.lineJoin = 'round';
+  c.lineWidth = lw;
+  c.strokeStyle = '#000';
+  c.fillStyle = '#fff';
+  midText(c, String(Math.max(1, stage)), xNum, cy, 'right');
+  c.textAlign = 'right';
+  c.textBaseline = 'alphabetic';
+  const d = c.measureText('0');
+  const base = cy + (d.actualBoundingBoxAscent - d.actualBoundingBoxDescent) / 2;
+  const m = c.measureText('∞');
+  const by = base + d.actualBoundingBoxDescent - m.actualBoundingBoxDescent;
+  c.strokeText('∞', xInf, by);
+  c.fillText('∞', xInf, by);
+}
+
 function midText(c: CanvasRenderingContext2D, t: string, x: number, y: number, align: CanvasTextAlign, max = Infinity) {
   c.textAlign = align;
   c.textBaseline = 'alphabetic';
