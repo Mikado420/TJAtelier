@@ -2318,7 +2318,8 @@ export function stageNums(c: CanvasRenderingContext2D, stage: number, xNum: numb
   c.fillText('∞', xInf, by);
 }
 
-function midText(c: CanvasRenderingContext2D, t: string, x: number, y: number, align: CanvasTextAlign, max = Infinity) {
+/** 字の上下の真ん中を y にそろえて描く（縁→中の順） */
+export function midText(c: CanvasRenderingContext2D, t: string, x: number, y: number, align: CanvasTextAlign, max = Infinity) {
   c.textAlign = align;
   c.textBaseline = 'alphabetic';
   const m = c.measureText(t);

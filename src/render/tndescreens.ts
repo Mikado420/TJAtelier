@@ -3,7 +3,7 @@
  * 座標は 1280×720 の単位（スキンの絵の大きさ）で書き、描くときに 1.5 倍して 1920×1080 に置く。
  * 動きの時間・位置は TJAPlayer3 系（OpenTaiko）の作りと、本家の参考動画で測った値
  */
-import { stageNums, type TndeSkin, type PlateStyle } from './tnde';
+import { midText, type TndeSkin, type PlateStyle } from './tnde';
 
 const S = 1.5;
 /** 曲名の字（大江戸勘亭流） */
@@ -444,20 +444,23 @@ export class TndeResult {
       g.closePath();
       g.fill();
       g.restore();
-      stageNums(g, this.d.stage, 1702, 1842, 43, 36, 6.75);
+      // 字はプレイ画面と同じ丸ゴシック。何曲目の数字は「曲目」と、∞ は「曲」と上下の真ん中をそろえる
+      const CY = 42, CYS = 43.5;
       g.lineJoin = 'round';
       g.strokeStyle = '#000';
       g.fillStyle = '#fff';
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
+      g.font = `36px 'TNDE Seurat', sans-serif`;
+      g.lineWidth = 8;
+      midText(g, String(Math.max(1, this.d.stage)), 1702, CY, 'right');
       g.font = `34px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 6.5;
-      g.strokeText('曲目', 1745, 41);
-      g.fillText('曲目', 1745, 41);
+      g.lineWidth = 7.5;
+      midText(g, '曲目', 1745, CY, 'center');
+      g.font = `32px 'TNDE Seurat', sans-serif`;
+      g.lineWidth = 7.5;
+      midText(g, '∞', 1842, CYS, 'right');
       g.font = `28px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 5.5;
-      g.strokeText('曲', 1863, 44);
-      g.fillText('曲', 1863, 44);
+      g.lineWidth = 6.5;
+      midText(g, '曲', 1863, CYS, 'center');
       this.songsCv = cv;
     }
     c.drawImage(this.songsCv, X, Y, W, H);
