@@ -229,13 +229,24 @@ export class TndeResult {
   t = 0;
   private played = new Set<string>();
   private title: ReturnType<typeof textCanvas>;
-  private songCount: ReturnType<typeof textCanvas>[];
+  private inf: ReturnType<typeof textCanvas>;
   private bestText: ReturnType<typeof textCanvas> | null;
   private coin: ReturnType<typeof textCanvas>;
   /** 数字・スコア・ゲージがいっせいに出る時刻（本家: 明るくなってから 1.2 秒） */
   private readonly T0 = 1200;
+  /**
+   * 本家の参考動画（60 コマ/秒）で測った、数字が出てからの順番:
+   * ベストスコア更新の帯 0.18 秒 → スコアランク 1.07 秒 → 王冠 1.35 秒 → ふきだし 2.53 秒 → 背景 2.58 秒。
+   * 叩いて飛ばしたときは、残りを 1 コマずつ続けて出す
+   */
+  private tBand = 1200 + 183;
+  private tRank = 1200 + 1067;
+  private tCrown = 1200 + 1350;
+  private tBubble = 1200 + 2533;
   /** 背景がクリアの色に変わり始める時刻 */
-  private readonly M = 1200 + 66;
+  private M = 1200 + 2583;
+  /** 飛ばした（ランク・王冠は大きくから縮めずに、その場で出す） */
+  private fast = false;
   private readonly rank: number;
   private readonly cleared: boolean;
   private readonly textRow = Math.floor(Math.random() * 3);
@@ -249,10 +260,10 @@ export class TndeResult {
     this.rank = ranks.filter((r) => d.score >= r).length;
     // 曲名は勘亭流（プレイ画面と同じ字）
     this.title = textCanvas(d.title, 52, P(660), '#fff', '#000', 14, KANTEI);
-    // 何曲目: 黒い丸ゴシックに太い白の縁（参考動画で測った大きさ）
-    this.songCount = [textCanvas(String(Math.max(1, d.stage)), 42, 999, '#000', '#fff', 9), textCanvas('∞', 30, 999, '#000', '#fff', 7)];
+    // 全部で何曲（数字の絵に無いので字で。数字と同じ白い字に黒い縁）
+    this.inf = textCanvas('∞', 36, 999, '#fff', '#000', 8);
     this.coin = textCanvas('0コイン', 38, 999, '#fff', '#000', 10, KANTEI);
-    this.bestText = d.best !== null ? textCanvas(`${d.best}`, 25, 999, '#fff', 'rgba(0,0,0,0)', 0) : null;
+    this.bestText = d.best !== null ? textCanvas(`${d.best}`, 27, 999, '#fff8dc', 'rgba(0,0,0,0)', 0) : null;
   }
 
   /** 動きが全部終わったか */
@@ -260,10 +271,16 @@ export class TndeResult {
     return this.t >= this.M + 1500;
   }
 
-  /** 叩いたら、途中を飛ばして数字が出るところへ */
+  /** 叩いたら、途中を飛ばして、残りを続けて出す（本家と同じ: 1 コマずつずらして） */
   skip() {
-    if (this.t >= this.T0) return false;
-    this.t = this.T0;
+    if (this.t >= this.M) return false;
+    if (this.t < this.T0) this.t = this.T0;
+    const t = this.t;
+    this.fast = true;
+    this.tRank = Math.min(this.tRank, t + 17);
+    this.tCrown = Math.min(this.tCrown, t + 33);
+    this.tBubble = Math.min(this.tBubble, t + 33);
+    this.M = Math.min(this.M, t + 66);
     return true;
   }
 
@@ -277,12 +294,12 @@ export class TndeResult {
   private sounds() {
     const { T0 } = this;
     this.once('p', T0, () => this.sound('resPom'));
-    if (this.rank > 0) this.once('rk', T0 + 17, () => this.sound('rankIn'));
+    if (this.rank > 0) this.once('rk', this.tRank, () => this.sound('rankIn'));
     if (this.d.crown !== 'none') {
       const n = ({ clear: 'crownClear', fc: 'crownFc', dfc: 'crownDfc' } as const)[this.d.crown];
-      this.once('cr', T0 + 33, () => this.sound(n));
+      this.once('cr', this.tCrown, () => this.sound(n));
     }
-    if (this.d.best !== null) this.once('bs', T0 + 33, () => this.sound('best'));
+    if (this.d.best !== null) this.once('bs', this.tBand, () => this.sound('best'));
     this.once('mt', this.M, () => {
       this.charaT = 0;
       this.sound(this.cleared ? 'resClear' : 'resFailed');
@@ -346,13 +363,13 @@ export class TndeResult {
     full(sk, c, 'res/Header');
     putText(c, this.title, 958, 100);
     full(sk, c, 'res/SongCount');
-    putText(c, this.songCount[0], 1686, 42);
-    putText(c, this.songCount[1], 1829, 45);
+    this.drawSongCount(c);
 
     // ---------- パネル ----------
     full(sk, c, 'res/Panel0');
     const db = sk.pic('res/DifficultyBar');
-    if (db) sk.blit(c, db, 0, clamp(d.course, 0, 4) * 50, 153, 50, 37, 162, 153 * 1.45, 50 * 1.45);
+    // 本家の参考動画に合わせた位置・大きさ（前より少し右・少し大きい）
+    if (db) sk.blit(c, db, 0, clamp(d.course, 0, 4) * 50, 153, 50, 38, 160, 153 * 1.55, 50 * 1.55);
     this.drawGauge(c);
     if (t >= T0) {
       this.drawCounts(c);
@@ -363,9 +380,22 @@ export class TndeResult {
     }
     this.drawChara(c);
     if (this.cleared && t >= M + 100 && d.gauge >= 80) this.drawFlowers(c);
-    if (t >= T0 + 33) this.drawBubble(c);
+    if (t >= this.tBubble) this.drawBubble(c);
     sk.plate(c, { ...d.plate, wall: performance.now() }, P(28) + 6, P(621) - 443.5);
     this.drawCoin(c);
+  }
+
+  /**
+   * 右上の何曲目（白い字に黒い縁の数字の絵。本家の参考動画で測った大きさ・位置）。
+   * 何曲目は右の端をそろえて左へのばす
+   */
+  private drawSongCount(c: CanvasRenderingContext2D) {
+    const { sk } = this;
+    if (!sk.pic('res/Number')) return;
+    const W = 355 / 11;
+    const ds = String(Math.max(1, this.d.stage)).split('').reverse();
+    ds.forEach((ch, j) => cell(sk, c, 'res/Number', W * Number(ch), 0, W, 40, (1691.5 - 24.5 * j) / S, 42.5 / S, 0.753));
+    putText(c, this.inf, 1831, 45);
   }
 
   /** 下のまん中の「0コイン」（黒い間も出しておく） */
@@ -392,7 +422,8 @@ export class TndeResult {
       const f = sk.pic('res/Result_Soul_Fire');
       if (f) {
         const k = 1 + (Math.floor((t - T0 - 33) / 50) % 7);
-        sk.blit(c, f, k * 150, 0, 150, 131, 770, 135, 150 * 1.45, 131 * 1.45);
+        // 炎の丸い所が「魂」の字の後ろに来るように（本家の参考動画で測った）
+        sk.blit(c, f, k * 150, 0, 150, 131, 744, 143, 150 * 1.5, 131 * 1.5);
       }
     }
     const st = sk.pic('res/Soul_Text');
@@ -432,9 +463,9 @@ export class TndeResult {
    * 時刻は数字が出てからの ms（参考動画で測った）
    */
   private drawBand(c: CanvasRenderingContext2D) {
-    const { sk, t, d, T0 } = this;
+    const { sk, t, d } = this;
     if (d.best === null) return;
-    const u = t - T0 - 33;
+    const u = t - this.tBand;
     if (u < 0) return;
     const im = sk.pic('res/BestScore');
     if (!im) return;
@@ -448,7 +479,8 @@ export class TndeResult {
       const g = cv.getContext('2d')!;
       sk.blit(g, im, 0, 0, BW, BH);
       const tc = this.bestText;
-      if (tc && d.best > 0) g.drawImage(tc.cv, 383 - X - tc.tw - (tc.cv.width - tc.tw) / 2, 293 - Y - tc.cv.height / 2);
+      // 差の数字は黒い所の右（矢印の左）にそろえる（本家の参考動画で測った）
+      if (tc && d.best > 0) g.drawImage(tc.cv, 462 - X - tc.tw - (tc.cv.width - tc.tw) / 2, 297 - Y - tc.cv.height / 2);
     }
     const slide = u < 150 ? 1 - u / 150 : 0;
     const a = clamp(u / 100);
@@ -525,15 +557,29 @@ export class TndeResult {
     return 0;
   }
 
+  /**
+   * 判子のように押す: k0 倍・薄い所から D ms でまっすぐ縮んで 1 倍に、そのあと 1 コマだけ少し小さく沈んで戻る。
+   * 本家の参考動画で 1 コマずつ測った（ランク: 4 倍・10 コマ、王冠: 2.6 倍・8 コマ）
+   */
+  private stamp(u: number, k0: number, D: number, dip: number) {
+    if (this.fast) return { k: 1, a: 1 };
+    if (u < D) return { k: k0 - (k0 - 1) * (u / D), a: 0.25 + 0.75 * (u / D) };
+    if (u < D + 17) return { k: dip, a: 1 };
+    if (u < D + 50) return { k: dip + (1 - dip) * ((u - D - 17) / 33), a: 1 };
+    return { k: 1, a: 1 };
+  }
+
   private drawRank(c: CanvasRenderingContext2D) {
-    if (this.rank <= 0 || this.t < this.T0 + 17) return;
-    cell(this.sk, c, 'res/ScoreRank', this.flash(1500) * 142, (this.rank - 1) * 124, 142, 124, 133.3, 340.7, 1);
+    if (this.rank <= 0 || this.t < this.tRank) return;
+    const { k, a } = this.stamp(this.t - this.tRank, 4, 167, 0.9);
+    cell(this.sk, c, 'res/ScoreRank', (k === 1 ? this.flash(1500) : 0) * 142, (this.rank - 1) * 124, 142, 124, 133.3, 340.7, k, a);
   }
 
   private drawCrown(c: CanvasRenderingContext2D) {
-    if (this.d.crown === 'none' || this.t < this.T0 + 33) return;
+    if (this.d.crown === 'none' || this.t < this.tCrown) return;
     const row = { clear: 0, fc: 1, dfc: 2 }[this.d.crown];
-    cell(this.sk, c, 'res/Crown', this.flash(2000) * 101, row * 92, 101, 92, 262.7, 339.3, 1);
+    const { k, a } = this.stamp(this.t - this.tCrown, 2.6, 133, 0.85);
+    cell(this.sk, c, 'res/Crown', (k === 1 ? this.flash(2000) : 0) * 101, row * 92, 101, 92, 262.7, 339.3, k, a);
   }
 
   /** どんちゃん（数字が出るまではふつう、背景が変わったらクリア・失敗の動き）。本家の大きさ・位置で */
@@ -554,12 +600,14 @@ export class TndeResult {
       const i = Math.floor(this.charaT / ms);
       return loop ? i % n : Math.min(n - 1, i);
     };
-    if (t < M) place('res/DonNormal', Math.floor(Math.max(0, t) / 36) % (sk.meta('res/DonNormal')?.n ?? 1));
-    else if (this.cleared) place('res/DonClear', at('res/DonClear', 33, true));
+    // 本家は 1 コマ 1/60 秒（ふつう 28 コマ・クリア 38 コマが、参考動画で 29・39 コマごとにくり返す）
+    const F = 1000 / 60;
+    if (t < M) place('res/DonNormal', Math.floor(Math.max(0, t) / F) % (sk.meta('res/DonNormal')?.n ?? 1));
+    else if (this.cleared) place('res/DonClear', at('res/DonClear', F, true));
     else {
       const n = sk.meta('res/DonFailed')?.n ?? 1;
-      if (this.charaT < n * 33) place('res/DonFailed', at('res/DonFailed', 33, false));
-      else place('res/DonFailedLoop', Math.floor((this.charaT - n * 33) / 66) % (sk.meta('res/DonFailedLoop')?.n ?? 1));
+      if (this.charaT < n * F) place('res/DonFailed', at('res/DonFailed', F, false));
+      else place('res/DonFailedLoop', Math.floor((this.charaT - n * F) / (F * 2)) % (sk.meta('res/DonFailedLoop')?.n ?? 1));
     }
   }
 
@@ -603,8 +651,8 @@ export class TndeResult {
   }
 
   private drawBubble(c: CanvasRenderingContext2D) {
-    const { sk, t, T0, d } = this;
-    const pop = this.popIn(t - T0 - 33);
+    const { sk, t, d } = this;
+    const pop = this.popIn(t - this.tBubble);
     const mood = d.gauge >= 100 ? 3 : d.gauge >= 80 ? 2 : d.gauge >= 40 ? 1 : 0;
     const w = 1339 / 4;
     const h = 644 / 3;
