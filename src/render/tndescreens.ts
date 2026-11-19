@@ -259,6 +259,7 @@ export class TndeResult {
   /** 切り替わってからの時間（どんちゃんの動き） */
   private charaT = 0;
   private bandCv: HTMLCanvasElement | null = null;
+  private songsCv: HTMLCanvasElement | null = null;
 
   constructor(private readonly sk: TndeSkin, private readonly d: TndeResultData, private readonly sound: (n: ResultSound) => { stop(): void } | null) {
     this.cleared = d.gauge >= d.clearLine;
@@ -375,9 +376,7 @@ export class TndeResult {
     // ---------- 上の帯・曲名・何曲目 ----------
     full(sk, c, 'res/Header');
     putText(c, this.title, 958, 100);
-    full(sk, c, 'res/SongCount');
-    // 数字はプレイ画面と同じ字（右上の帯の大きさに合わせて 1.5 倍）
-    stageNums(c, d.stage, 1702, 1843, 43, 36, 6.75);
+    this.drawSongCount(c);
 
     // ---------- パネル ----------
     full(sk, c, 'res/Panel0');
@@ -397,6 +396,71 @@ export class TndeResult {
     if (t >= M) this.drawBubble(c);
     sk.plate(c, { ...d.plate, wall: performance.now() }, P(28) + 6, P(621) - 443.5);
     this.drawCoin(c);
+  }
+
+  /**
+   * 右上の何曲目: 帯は白と本家の灰色がかった青（右を斜めに切る）、字はプレイ画面と同じ丸ゴシック。
+   * 一度だけ 2 倍の細かさで描いておく
+   */
+  private drawSongCount(c: CanvasRenderingContext2D) {
+    const X = 1630, Y = 0, W = 290, H = 76, Z = 2;
+    if (!this.songsCv) {
+      const cv = document.createElement('canvas');
+      cv.width = W * Z;
+      cv.height = H * Z;
+      const g = cv.getContext('2d');
+      if (!g) return;
+      g.setTransform(Z, 0, 0, Z, -X * Z, -Y * Z);
+      const x0 = 1650, y0 = 15, x1 = 1906, y1 = 65, r = (y1 - y0) / 2;
+      const path = () => {
+        g.beginPath();
+        g.moveTo(x0 + r, y0);
+        g.lineTo(x1 - r, y0);
+        g.arc(x1 - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
+        g.lineTo(x0 + r, y1);
+        g.arc(x0 + r, y0 + r, r, Math.PI / 2, Math.PI * 1.5);
+        g.closePath();
+      };
+      // 下の影
+      g.save();
+      g.shadowColor = 'rgba(120,115,105,0.5)';
+      g.shadowBlur = 4 * Z;
+      g.shadowOffsetY = 4 * Z;
+      g.fillStyle = '#fff';
+      path();
+      g.fill();
+      g.restore();
+      g.save();
+      path();
+      g.clip();
+      g.fillStyle = '#fff';
+      g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      g.fillStyle = '#b9cbdb';
+      g.beginPath();
+      g.moveTo(1805, y0);
+      g.lineTo(x1, y0);
+      g.lineTo(x1, y1);
+      g.lineTo(1788, y1);
+      g.closePath();
+      g.fill();
+      g.restore();
+      stageNums(g, this.d.stage, 1702, 1842, 43, 36, 6.75);
+      g.lineJoin = 'round';
+      g.strokeStyle = '#000';
+      g.fillStyle = '#fff';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = `34px 'TNDE Seurat', sans-serif`;
+      g.lineWidth = 6.5;
+      g.strokeText('曲目', 1745, 41);
+      g.fillText('曲目', 1745, 41);
+      g.font = `28px 'TNDE Seurat', sans-serif`;
+      g.lineWidth = 5.5;
+      g.strokeText('曲', 1863, 44);
+      g.fillText('曲', 1863, 44);
+      this.songsCv = cv;
+    }
+    c.drawImage(this.songsCv, X, Y, W, H);
   }
 
   /** 下のまん中の「0コイン」（黒い間も出しておく） */
