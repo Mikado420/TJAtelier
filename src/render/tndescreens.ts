@@ -559,26 +559,44 @@ export class TndeResult {
   }
 
   /**
-   * 判子のように押す（OpenTaiko と同じ）: 0.18 秒で薄い所から濃く、3.2 倍から 1 倍に縮み、
-   * そのあと 0.09 秒で 0.5 倍から 1 倍に戻る
+   * 判子のように押す: 0.18 秒で薄い所から濃く、3.2 倍から 1 倍に縮む（OpenTaiko と同じ時間・式）。
+   * そのあと 0.09 秒で少し沈んで戻る（深さは本家の動画で測った: ランク 0.9 倍・王冠 0.85 倍）
    */
-  private stamp(u: number) {
+  private stamp(u: number, dip: number) {
     if (u <= 180) return { k: 1 + Math.sin(rad((u + 90) / 1.5)) * 1.4, a: u / 180 };
-    if (u <= 270) return { k: 0.5 + Math.sin(rad(u - 180)) * 0.5, a: 1 };
+    if (u <= 270) return { k: 1 - Math.sin(rad((u - 180) * 2)) * (1 - dip), a: 1 };
     return { k: 1, a: 1 };
+  }
+
+  /**
+   * 押されるときの残像（本家の動画: 縮む間、少し前の大きさのものが薄く後ろに残る）。
+   * 50ms 前・100ms 前の大きさで、薄く重ねる
+   */
+  private ghosts(u: number, draw: (k: number, a: number) => void) {
+    if (u > 180) return;
+    const a = u / 180;
+    for (const [d, f] of [[100, 0.3], [50, 0.5]] as const) {
+      const v = Math.max(-90, u - d);
+      draw(1 + Math.sin(rad((v + 90) / 1.5)) * 1.4, a * f);
+    }
   }
 
   private drawRank(c: CanvasRenderingContext2D) {
     if (this.rank <= 0 || this.t < this.tRank) return;
-    const { k, a } = this.stamp(this.t - this.tRank);
-    cell(this.sk, c, 'res/ScoreRank', this.flash(1500) * 142, (this.rank - 1) * 124, 142, 124, 133.3, 340.7, k, a);
+    const u = this.t - this.tRank;
+    const sx = this.flash(1500) * 142, sy = (this.rank - 1) * 124;
+    this.ghosts(u, (k, a) => cell(this.sk, c, 'res/ScoreRank', sx, sy, 142, 124, 133.3, 340.7, k, a));
+    const { k, a } = this.stamp(u, 0.9);
+    cell(this.sk, c, 'res/ScoreRank', sx, sy, 142, 124, 133.3, 340.7, k, a);
   }
 
   private drawCrown(c: CanvasRenderingContext2D) {
     if (this.d.crown === 'none' || this.t < this.tCrown) return;
-    const row = { clear: 0, fc: 1, dfc: 2 }[this.d.crown];
-    const { k, a } = this.stamp(this.t - this.tCrown);
-    cell(this.sk, c, 'res/Crown', this.flash(2000) * 101, row * 92, 101, 92, 262.7, 339.3, k, a);
+    const u = this.t - this.tCrown;
+    const sx = this.flash(2000) * 101, sy = { clear: 0, fc: 1, dfc: 2 }[this.d.crown] * 92;
+    this.ghosts(u, (k, a) => cell(this.sk, c, 'res/Crown', sx, sy, 101, 92, 262.7, 339.3, k, a));
+    const { k, a } = this.stamp(u, 0.85);
+    cell(this.sk, c, 'res/Crown', sx, sy, 101, 92, 262.7, 339.3, k, a);
   }
 
   /** どんちゃん（数字が出るまではふつう、背景が変わったらクリア・失敗の動き）。本家の大きさ・位置で */
