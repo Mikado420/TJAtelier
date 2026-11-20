@@ -378,16 +378,19 @@ export class TndeSkin {
     const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)];
     if (set !== this.loadedSet) {
       this.loadedSet = set;
+      let freed = false;
       for (const n of names) {
         if (this.wants(n)) continue;
         for (const key of this.keysOf(n)) {
           const im = this.imgs.get(key);
+          if (im) freed = true;
           if (im && 'close' in im) im.close();
           this.imgs.delete(key);
           this.loading.delete(key);
         }
       }
-      this.dropCaches();
+      // 絵を手放したときだけ、まとめた絵を作り直す（足すだけのときは今のままで同じ見た目。全部を一度に作り直すとカクつく）
+      if (freed) this.dropCaches();
     }
     // 読む順: 背景・レーン・音符などの画面の土台 → 演出 → 大きな動き（どんちゃんの GoGo など）
     const want = names.filter((n) => this.wants(n)).sort((a, b) => prio(a) - prio(b));
@@ -431,6 +434,7 @@ export class TndeSkin {
       if (this.loading.get(key) !== p) { if ('close' in v) v.close(); return null; }
       if (k && k !== 1) this.hq.set(v, k);
       this.imgs.set(key, v);
+      this.warm.push(v);
       return v;
     });
     this.loading.set(key, p);
@@ -910,6 +914,24 @@ export class TndeSkin {
 
   // ---------- 1 フレーム ----------
 
+  /** 読み込んだばかりで、まだ一度も描いていない絵 */
+  private warm: (ImageBitmap | HTMLImageElement)[] = [];
+  /**
+   * 読み込んだ絵を、使う前に 1 枚ずつ（1 フレームに 1 枚）レーンの下に 1 px で描いておく。
+   * 初めて描く絵は端末が GPU に移すのに時間がかかるので、ゴーゴー・クリアなどで初めて出るときにカクつかないように
+   */
+  private warmUp(c: CanvasRenderingContext2D) {
+    let im = this.warm.shift();
+    // 手放した絵（大きさが 0）はとばす
+    while (im && im.width === 0) im = this.warm.shift();
+    if (!im) return;
+    c.save();
+    c.globalAlpha = 1 / 255;
+    c.imageSmoothingEnabled = false;
+    c.drawImage(im, LANE_X + 10, FIELD_Y + 10, 1, 1);
+    c.restore();
+  }
+
   draw(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { game, course, now, wall } = F;
     this.choose(F.info.title);
@@ -951,6 +973,7 @@ export class TndeSkin {
       this.drawChara(c, beat, gogo, F);
       if (!noDown) this.drawMob(c, beat, wall);
     }
+    this.warmUp(c);
     this.drawLane(c, F, gogo);
     if (all) this.drawGauge(c, st.gauge, wall);
     this.drawJudgeFrame(c, F, gogo, jx);
