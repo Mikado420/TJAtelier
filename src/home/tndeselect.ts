@@ -202,6 +202,9 @@ export class TndeSelect {
   private ura = false;
   private cursorT = 1e9;
   private startT = -1;
+  /** ほかの画面が上に重なっているか（見るのは 200ms ごと） */
+  private covered = false;
+  private coverAt = -1e9;
   private previewed: SongEntry | null = null;
   private best: Best = {};
   /** 難易度えらびで最後に選んでいたカード（エディタ・譜面情報で開く難易度） */
@@ -246,6 +249,8 @@ export class TndeSelect {
     this.loaded ??= this.load();
     this.sk ??= await this.host.skin();
     await this.loaded;
+    // 待っている間に隠された（プレイなどに移った）ら、出さない
+    if (!this.on) return;
     this.diffT = -1; this.diffOut = -1; this.startT = -1; this.boxT = -1;
     this.opt.open = false; this.opt.t = 1e9;
     this.pop = null;
@@ -840,8 +845,14 @@ export class TndeSelect {
       this.host.preview(want);
     }
     // 選曲の BGM: 試聴が鳴っている間と、曲を決めたあとは消す
+    // 設定・対戦ルーム・譜面情報など、ほかの画面が上に重なっている間も消す（画面のまんなかに見えているものが選曲画面かで見る）
+    if (this.wall - this.coverAt >= 200) {
+      this.coverAt = this.wall;
+      const top = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+      this.covered = !!top && top !== this.el && !this.el.parentElement?.contains(top);
+    }
     const A = this.host.audio;
-    if (A.bgmStart('tsel:BgmIn', 'tsel:Bgm')) A.bgmLevel(A.previewing || this.startT >= 0 ? 0 : 1);
+    if (A.bgmStart('tsel:BgmIn', 'tsel:Bgm')) A.bgmLevel(A.previewing || this.startT >= 0 || this.covered ? 0 : 1);
   }
 
   /** 帯が開いた量（0〜62。本家は止まって 400ms から 120ms で開くが、待たずに使えるよう 60ms から 140ms で開く） */
@@ -1190,7 +1201,7 @@ export class TndeSelect {
     // もどる・設定の下に、同じ形のボタン（1 列 2 つ）
     this.sqBtn(382, 537, 'edit', [214, 140, 235], [150, 80, 200]);
     this.sqBtn(514, 537, 'info', [140, 200, 250], [60, 140, 220]);
-    this.songInfo(s, 1700, 300, 180, 1650, 500);
+    this.songInfo(s, 1700, 350, 180, 1650, 550);
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
     // 選んでいる所の枠（カードの後ろ）
