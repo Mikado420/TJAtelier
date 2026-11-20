@@ -6,7 +6,7 @@ import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import { starSlots } from '../chart/stars';
-import { TndeSelect } from './tndeselect';
+import { TndeSelect, type PlayOpts } from './tndeselect';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
@@ -16,15 +16,15 @@ import {
 export interface HomeHost {
   /** 曲を開く（編集・プレイ）。course を渡すとその難易度で */
   open(id: string, mode: 'edit' | 'play', course?: string): Promise<void>;
-  /** 難易度えらびに出す、プレイの設定（ハイスピード・オート） */
-  playOpts(): { speed: number; auto: boolean };
+  /** 難易度えらびに出す、プレイの設定（ハイスピード・オート・演奏オプション） */
+  playOpts(): PlayOpts;
   /** TNDE スキンで遊ぶか（読み込み画面はスキンのものを出す） */
   tndeSkin(): boolean;
   /** TNDE スキン（選曲画面のネームプレートを描く） */
   tndeObj(): Promise<TndeSkin | null>;
   /** ネームプレートの名前・称号 */
   plate(): { name: string; title: string; profile?: PlateStyle };
-  setPlayOpt(key: 'speed' | 'auto', v: number | boolean): void;
+  setPlayOpt<K extends keyof PlayOpts>(key: K, v: PlayOpts[K]): void;
   /** ファイルを選んで読み込む（読み込んだ曲は一覧に入る） */
   importFiles(): void;
   /** 新しい譜面を作って開く */
@@ -192,7 +192,6 @@ export class Home {
   /** TNDE スキンの選曲画面（スキンが TNDE のとき出す） */
   private tsel: TndeSelect | null = null;
   /** TNDE スキンでも、いつもの一覧を見ている */
-  private listMode = false;
 
   constructor(private readonly host: HomeHost) {
     this.el = document.getElementById('home')!;
@@ -250,7 +249,7 @@ export class Home {
     }
     this.render(true);
     this.el.classList.toggle('tnde', this.host.tndeSkin());
-    if (this.host.tndeSkin() && !this.listMode) { await this.openTsel(select ?? this.sel); return; }
+    if (this.host.tndeSkin()) { await this.openTsel(select ?? this.sel); return; }
     // 曲を選んでいるときだけ、その曲の試聴を流す（自動で鳴らせないときは、次に触れたときに）
     const s = this.focus === 'song' ? this.songs.find((x) => x.id === this.sel) : undefined;
     if (s) void this.startPreview(s);
@@ -258,7 +257,6 @@ export class Home {
 
   /** スキンを変えたとき（見えていれば、選曲画面を出し直す） */
   skinChanged() {
-    this.listMode = false;
     if (!this.visible) return;
     if (!this.host.tndeSkin()) { this.tsel?.hide(); this.el.classList.remove('tnde'); return; }
     void this.show(this.sel);
@@ -283,8 +281,12 @@ export class Home {
         void this.host.open(id, 'play', course);
       },
       lastCourse: (id) => lastCourse(id),
-      toList: () => { this.listMode = true; this.tsel?.hide(); this.stopPreview(); this.render(true); },
-      settings: () => this.host.settings(),
+      opts: () => this.host.playOpts(),
+      setOpt: (k, v) => this.host.setPlayOpt(k, v),
+      action: (a) => { this.stopPreview(); void this.action(a); },
+      edit: (id, course) => { this.stopPreview(); void this.host.open(id, 'edit', course); },
+      info: (id, course) => this.host.analyze(id, course),
+      jacket: (s) => this.jacketUrl(s),
     }, this.el);
     await this.tsel.show(select);
   }
@@ -1012,7 +1014,6 @@ export class Home {
   }
 
   private async action(a: string) {
-    if (a === 'tsel') { this.listMode = false; await this.openTsel(this.sel); return; }
     if (a === 'import') this.host.importFiles();
     else if (a === 'settings') this.host.settings();
     else if (a === 'online') { this.stopPreview(); this.host.online(); }

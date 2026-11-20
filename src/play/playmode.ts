@@ -5,6 +5,7 @@ import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
 import { GlBlur } from './glblur';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
+import { applyMods } from '../chart/mods';
 import { BUILD_ID } from '../update';
 import { isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
@@ -57,6 +58,10 @@ export interface PlaySettings {
   offset: number;
   /** オート（譜面確認用に自動で叩く） */
   auto?: boolean;
+  /** 演奏オプション: ドロン（音符を見せない。下の文字は出す）・あべこべ・ランダム */
+  doron?: boolean;
+  mirror?: boolean;
+  random?: 'off' | 'kimagure' | 'detarame';
   /** タッチ用: 中央のドンの帯の幅（画面の幅に対する割合） */
   donWidth?: number;
   /** 叩くたびにずれ（ms）を表示する */
@@ -435,6 +440,12 @@ export class PlayMode {
   async start(course: Course, fromTime: number, info: PlayInfo, clicks?: number[]) {
     this.lastArgs = [course, fromTime, info, clicks];
     if (!clicks) this.calibrating = false;
+    // 演奏オプション（あべこべ・ランダム）。タイミング調整には使わない
+    if (!this.calibrating) {
+      const notes = applyMods(course.notes, { mirror: this.settings.mirror, random: this.settings.random });
+      if (notes !== course.notes) course = { ...course, notes };
+    }
+    this.renderer.doron = !this.calibrating && !!this.settings.doron;
     this.hidePause();
     // fromTime が 0 以下なら曲の最初から（最初の音符が 1 秒より前なら、その 1 秒前から）
     const first = (course.notes[0]?.time ?? 0) - 1;
@@ -480,7 +491,7 @@ export class PlayMode {
       const ok = await Promise.race([sk.needScreen('load').then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 1500))]);
       if (ok) {
         this.audio.playUi('tnde:decide');
-        curtain = await this.overlay.loading(sk, info.title, info.sub, prep);
+        curtain = await this.overlay.loading(sk, info.title, info.sub, prep, undefined, info.jacket);
       }
     }
     // スキンの用意ができて最初のコマを描くまでは、ゲーム画面を隠しておく（前のコマやいつもの見た目が一瞬見えないように）
@@ -1538,6 +1549,14 @@ export class PlayMode {
         [back?.textContent || 'エディタへ', () => { this.closeTnde(); back?.click(); }],
         ['くわしく', () => { this.closeTnde(); this.showResultCard(g, acc, rec); }],
       ],
+      {
+        acc: this.auto ? undefined : `${acc.toFixed(2)}%`,
+        tim: this.auto ? null : timingSpan([...g.deltas, ...g.outside]),
+        don: this.suggestedDonWidth == null ? null : {
+          label: document.getElementById('growFace')?.textContent ?? '',
+          act: () => document.getElementById('growFace')?.click(),
+        },
+      },
     );
     return true;
   }
@@ -1723,3 +1742,22 @@ export class PlayMode {
   }
 }
 
+
+/** タイミングのバー（TNDE のリザルト）: 外れ値を除いた遅れ・早い所と平均を 0〜100%（50 がちょうど）で。少ないときは null */
+function timingSpan(raw: number[]) {
+  const v = raw.filter((d) => Math.abs(d) < 0.3).sort((a, b) => a - b);
+  if (v.length < 8) return null;
+  const q = (p: number) => v[Math.round(p * (v.length - 1))];
+  const q1 = q(0.25), q3 = q(0.75), iqr = q3 - q1;
+  const ok = v.filter((d) => d >= q1 - 1.5 * iqr && d <= q3 + 1.5 * iqr);
+  const early = ok[0], late = ok[ok.length - 1];
+  const mean = ok.reduce((a, b) => a + b, 0) / ok.length;
+  const range = Math.max(0.03, Math.max(Math.abs(early), Math.abs(late)) * 1.25);
+  const x = (d: number) => 50 - (d / range) * 50;
+  const L = x(late), E = x(early);
+  return {
+    late: L < Math.min(E, 50) ? [L, Math.min(E, 50)] as [number, number] : null,
+    early: Math.max(L, 50) < E ? [Math.max(L, 50), E] as [number, number] : null,
+    mean: x(mean),
+  };
+}

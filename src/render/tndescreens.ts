@@ -87,7 +87,15 @@ export class TndeLoading {
   /** 出すヒント（Hints の何枚目か） */
   private hint: number;
 
-  constructor(private readonly sk: TndeSkin, title: string, subtitle?: string) {
+  /** ジャケット（あれば。曲名の帯の左に出す） */
+  private jacket: HTMLImageElement | null = null;
+
+  constructor(private readonly sk: TndeSkin, title: string, subtitle?: string, jacket?: string) {
+    if (jacket) {
+      const im = new Image();
+      im.onload = () => { this.jacket = im; };
+      im.src = jacket;
+    }
     // 曲名は勘亭流（プレイ画面と同じ字）。白い字に黒い縁
     this.title = textCanvas(title, 62, P(710), '#fff', '#000', 14, KANTEI);
     this.sub = subtitle ? textCanvas(subtitle, 40, P(710), '#000', 'rgba(0,0,0,0)', 0) : null;
@@ -137,6 +145,28 @@ export class TndeLoading {
     putText(c, this.title, P(640), P(this.sub ? cy - 15 : cy - 4), a);
     if (this.sub) putText(c, this.sub, P(640), P(cy + 30), a);
     if (this.hint >= 0) full(this.sk, c, `load/hint${this.hint}`, a);
+    // ジャケット: 帯の左（真ん中の高さを帯にそろえる。黒い縁）
+    const im = this.jacket;
+    if (im && im.naturalWidth) {
+      const js = 140, jx = 200, jy = cy - js / 2;
+      const k = Math.max(js / im.naturalWidth, js / im.naturalHeight);
+      const w = js / k, h = js / k;
+      c.save();
+      c.globalAlpha *= a;
+      c.shadowColor = 'rgba(60,30,10,0.35)';
+      c.shadowBlur = P(5);
+      c.shadowOffsetY = P(4);
+      c.fillStyle = '#000';
+      c.fillRect(P(jx), P(jy), P(js), P(js));
+      c.shadowColor = 'transparent';
+      c.drawImage(im, (im.naturalWidth - w) / 2, (im.naturalHeight - h) / 2, w, h, P(jx), P(jy), P(js), P(js));
+      c.beginPath();
+      c.roundRect(P(jx), P(jy), P(js), P(js), P(4));
+      c.lineWidth = P(4);
+      c.strokeStyle = '#1a1410';
+      c.stroke();
+      c.restore();
+    }
   }
 
   /**

@@ -186,6 +186,8 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   layout!: Layout;
   speed = 1;
+  /** 演奏オプションのドロン: 自分のレーンの音符を描かない（下の文字は出す） */
+  doron = false;
   /** タッチ用: 中央のドンの帯の幅（画面の幅に対する割合） */
   donWidth = 0.6;
   /** 画面上部（レーンより上）を「指置き」にする（iPhone の取りこぼし対策） */
@@ -1050,6 +1052,7 @@ export class Renderer {
       end: this.endFx,
       branch: this.tndeBranch(game, now),
       best: this.prevBest,
+      doron: this.doron,
     });
     } catch (e) {
       // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）
@@ -1391,8 +1394,11 @@ export class Renderer {
         if (hidden || x > right + 120) continue;
       }
       const r = isBig(n.type) ? NR * BIG_SCALE : NR;
+      const ghost = this.doron && !opp;
 
-      if (n.type === 'balloon') {
+      if (ghost) {
+        if (n.type === 'balloon' && (s.done && s.count >= (n.hits ?? 5) || now > (n.endTime ?? n.time))) continue;
+      } else if (n.type === 'balloon') {
         if (s.done && s.count >= (n.hits ?? 5)) continue; // 割れた
         const active = now >= n.time && now <= (n.endTime ?? n.time);
         // 叩いている間は、レーンの音符の代わりにふくらむ風船を出す
@@ -1411,6 +1417,8 @@ export class Renderer {
         ctx.restore();
       } else if (n.type === 'roll' || n.type === 'bigRoll') {
         drawAny(ctx, n.type, x, JY, r, endX);
+      }
+      if ((n.type === 'roll' || n.type === 'bigRoll') && !(dy || endDy)) {
         // 音符の下: 「連打━━━━っ!!」
         const ly = (LANE_BOTTOM + TEXT_BOTTOM) / 2 + 3;
         const lx1 = Math.max(x + 44, LANE_X + 10);
@@ -1422,7 +1430,7 @@ export class Renderer {
           ctx.fillRect(lx1, ly - 2, lx2 - lx1, 4);
         }
         if (endX > LANE_X) drawCachedText(ctx, 'っ!!', endX, ly, `900 32px ${FONT}`, '#fff', '#2a2a2a', 7);
-      } else {
+      } else if (!ghost && n.type !== 'balloon') {
         drawNoteHead(ctx, x, JY + dy, r, n.type);
       }
 

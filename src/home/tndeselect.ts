@@ -25,9 +25,24 @@ export interface TselHost {
   /** 選んだ難易度で始める */
   play(id: string, course: string): void;
   lastCourse(id: string): string | undefined;
-  /** いつもの一覧へ */
-  toList(): void;
-  settings(): void;
+  /** 演奏オプション（はやさ・ドロン・あべこべ・ランダム・オート） */
+  opts(): PlayOpts;
+  setOpt<K extends keyof PlayOpts>(k: K, v: PlayOpts[K]): void;
+  /** 下のボタン: 読み込み・新規・対戦・設定 */
+  action(a: 'import' | 'new' | 'online' | 'settings'): void;
+  /** 難易度えらびのボタン: エディタ・譜面情報 */
+  edit(id: string, course: string): void;
+  info(id: string, course: string): void;
+  /** ジャケットの絵の URL（無ければ undefined） */
+  jacket(s: SongEntry): Promise<string | undefined>;
+}
+
+export interface PlayOpts {
+  speed: number;
+  auto: boolean;
+  doron: boolean;
+  mirror: boolean;
+  random: 'off' | 'kimagure' | 'detarame';
 }
 
 const BASE = 'skins/tnde/';
@@ -94,6 +109,45 @@ function posAt(p: number) {
   return { x: lerp(A.x, B.x, t), y: lerp(A.y, B.y, t) };
 }
 
+// ---------- 下のボタン・難易度えらびのボタン・演奏オプション ----------
+const BLUE = '#2f8fd8', GRN = '#39b54a', ORG = '#f39a1e', GRY = '#6c6f7d', PUR = '#8a4fd8';
+type MenuAct = 'search' | 'sort' | 'import' | 'new' | 'online' | 'settings';
+const MENU: { t: string; a: MenuAct; c: string }[] = [
+  { t: '検索', a: 'search', c: BLUE }, { t: '並べ替え', a: 'sort', c: BLUE }, { t: '読み込み', a: 'import', c: GRN },
+  { t: '新規', a: 'new', c: GRN }, { t: '対戦', a: 'online', c: ORG }, { t: '設定', a: 'settings', c: GRY },
+];
+/** 下のボタンの場所（右下に横一列。右の端 1900） */
+function menuRect(i: number): [number, number, number, number] {
+  let x = 1900;
+  for (let k = MENU.length - 1; k >= i; k--) x -= (MENU[k].t.length <= 2 ? 172 : 232) + (k < MENU.length - 1 ? 12 : 0);
+  return [x, 976, MENU[i].t.length <= 2 ? 172 : 232, 86];
+}
+/** 難易度えらびの左のボタン（0 もどる・1 設定・6 エディタ・7 譜面情報） */
+const BTN_X: Record<number, number> = { 0: 382, 1: 514, 6: 382, 7: 514 };
+const BTN_Y: Record<number, number> = { 0: 405, 1: 405, 6: 537, 7: 537 };
+const OPT_ANIM = 220;
+const SPEEDS = [0.5, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.5, 3, 3.5, 4];
+type OptRow = { k: keyof PlayOpts; label: string; vals: (number | boolean | string)[]; names: string[]; def: number | boolean | string };
+const OPT_ROWS: OptRow[] = [
+  { k: 'speed', label: 'はやさ', vals: SPEEDS, names: SPEEDS.map((v) => v.toFixed(1)), def: 1 },
+  { k: 'doron', label: 'ドロン', vals: [false, true], names: ['しない', 'する'], def: false },
+  { k: 'mirror', label: 'あべこべ', vals: [false, true], names: ['しない', 'する'], def: false },
+  { k: 'random', label: 'ランダム', vals: ['off', 'kimagure', 'detarame'], names: ['なし', 'きまぐれ', 'でたらめ'], def: 'off' },
+  { k: 'auto', label: 'オート', vals: [false, true], names: ['しない', 'する'], def: false },
+];
+// 本家の板（1920×1080 の画面で測った）: 左 18・幅 394・見出しから 1 行目の真ん中まで 107・行の間 61.5
+const OPT_X = 18, OPT_W = 394, OPT_H = 107 + 61.5 * (OPT_ROWS.length - 1) + 44, OPT_Y = 1058 - OPT_H;
+const optRowY = (i: number) => OPT_Y + 107 + i * 61.5;
+/** 値の何番目か（はやさは一番近い値） */
+function optIndex(r: OptRow, v: unknown) {
+  if (r.k !== 'speed') return Math.max(0, r.vals.indexOf(v as never));
+  let bi = 0;
+  r.vals.forEach((x, i) => { if (Math.abs((x as number) - (v as number)) < Math.abs((r.vals[bi] as number) - (v as number))) bi = i; });
+  return bi;
+}
+const fmtLen = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+const fmtBpm = (s: SongEntry) => (s.bpmMin && s.bpmMax && Math.round(s.bpmMin) !== Math.round(s.bpmMax) ? `${Math.round(s.bpmMin)}-${Math.round(s.bpmMax)}` : String(Math.round(s.bpm)));
+
 export class TndeSelect {
   readonly el: HTMLCanvasElement;
   private readonly g: CanvasRenderingContext2D;
@@ -129,12 +183,33 @@ export class TndeSelect {
   private startT = -1;
   private previewed: SongEntry | null = null;
   private best: Best = {};
+  /** 難易度えらびで最後に選んでいたカード（エディタ・譜面情報で開く難易度） */
+  private lastCard = 5;
+  // 演奏オプションの板（open: 開いているか・t: 開け閉めの動き ms・row: 選んでいる行）
+  private opt = { open: false, t: 1e9, row: 0 };
+  // 検索・並べ替え
+  private query = '';
+  private sort: 'title' | 'updated' | 'bpm' = 'title';
+  private readonly qEl: HTMLInputElement;
+  private jackets = new Map<string, HTMLImageElement | null>();
 
   constructor(private readonly host: TselHost, parent: HTMLElement) {
     this.el = document.createElement('canvas');
     this.el.className = 'tsel hidden';
     parent.append(this.el);
     this.g = this.el.getContext('2d')!;
+    this.qEl = document.createElement('input');
+    this.qEl.className = 'tsel-q hidden';
+    this.qEl.type = 'search';
+    this.qEl.enterKeyHint = 'search';
+    this.qEl.addEventListener('input', () => { this.query = this.qEl.value.trim(); this.rebuild(); this.still = 0; });
+    this.qEl.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') this.closeSearch();
+      else if (e.key === 'Enter') this.qEl.blur();
+    });
+    parent.append(this.qEl);
+    try { const v = localStorage.getItem('tsel-sort'); if (v === 'title' || v === 'updated' || v === 'bpm') this.sort = v; } catch { /* 無くてよい */ }
     this.bindInput();
     window.addEventListener('resize', () => { if (this.on) this.resize(); });
   }
@@ -151,6 +226,8 @@ export class TndeSelect {
     this.sk ??= await this.host.skin();
     await this.loaded;
     this.diffT = -1; this.diffOut = -1; this.startT = -1; this.boxT = -1;
+    this.opt.open = false; this.opt.t = 1e9;
+    this.qEl.classList.toggle('hidden', !this.query);
     const s = select ? this.host.songs().find((x) => x.id === select) : undefined;
     if (s) {
       const f = s.folders.find((x) => !x.includes('/')) ?? s.folders[0];
@@ -164,6 +241,7 @@ export class TndeSelect {
   hide() {
     this.on = false;
     this.el.classList.add('hidden');
+    this.qEl.classList.add('hidden');
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
@@ -305,10 +383,10 @@ export class TndeSelect {
     return r;
   }
   /** 字を (cx, cy) を真ん中に。maxW を超えたら横を縮める */
-  private put(t: ReturnType<TndeSelect['text']>, cx: number, cy: number, maxW = Infinity, align: 'center' | 'right' = 'center') {
+  private put(t: ReturnType<TndeSelect['text']>, cx: number, cy: number, maxW = Infinity, align: 'center' | 'right' | 'left' = 'center') {
     const sx = t.w > maxW ? maxW / t.w : 1;
     const w = t.w * sx;
-    const x = align === 'right' ? cx - w : cx - w / 2;
+    const x = align === 'right' ? cx - w : align === 'left' ? cx : cx - w / 2;
     this.g.drawImage(t.cv, x, cy - t.ay, w, t.h);
   }
 
@@ -329,10 +407,17 @@ export class TndeSelect {
       const count = key === UNCAT ? songs.filter((s) => !s.folders.length).length : songs.filter((s) => s.folders.some((f) => f === key || f.startsWith(`${key}/`))).length;
       return { kind: 'folder', key, name, look: lookOf(name, colors[key]), count };
     };
-    const byTitle = (a: SongEntry, b: SongEntry) => a.title.localeCompare(b.title, 'ja');
+    const byTitle = this.sort === 'updated' ? (a: SongEntry, b: SongEntry) => b.updatedAt - a.updatedAt
+      : this.sort === 'bpm' ? (a: SongEntry, b: SongEntry) => a.bpm - b.bpm || a.title.localeCompare(b.title, 'ja')
+        : (a: SongEntry, b: SongEntry) => a.title.localeCompare(b.title, 'ja');
     let items: Item[];
     const top = this.topFolders();
-    if (!this.path.length) {
+    if (this.query) {
+      // 検索中: 合う曲だけを、フォルダに分けずに並べる
+      const q = this.query.toLowerCase();
+      items = songs.filter((s) => `${s.title} ${s.subtitle}`.toLowerCase().includes(q)).sort(byTitle)
+        .map((s) => ({ kind: 'song' as const, s, look: lookOf(s.folders[0]?.split('/')[0] ?? '', colors[s.folders[0]?.split('/')[0] ?? '']) }));
+    } else if (!this.path.length) {
       items = top.length ? top.map(folderItem) : [...songs].sort(byTitle).map((s) => ({ kind: 'song' as const, s, look: lookOf('') }));
     } else {
       const key = this.path[this.path.length - 1];
@@ -342,8 +427,9 @@ export class TndeSelect {
       items = [{ kind: 'back', look: BACK_LOOK }, ...subs.map(folderItem), ...inside.map((s) => ({ kind: 'song' as const, s, look }))];
     }
     if (!items.length) items = [{ kind: 'back', look: BACK_LOOK }];
+    const keep = selectId ?? (this.items.length && this.center.kind === 'song' ? this.center.s.id : undefined);
     this.items = items;
-    let i = selectId ? items.findIndex((x) => x.kind === 'song' && x.s.id === selectId) : -1;
+    let i = keep ? items.findIndex((x) => x.kind === 'song' && x.s.id === keep) : -1;
     if (i < 0) i = items.findIndex((x) => x.kind !== 'back');
     this.cur = Math.max(0, i);
     this.scroll = 0;
@@ -357,10 +443,11 @@ export class TndeSelect {
 
   // ---------- 操作 ----------
 
-  private busy() { return this.boxT >= 0 || this.startT >= 0 || (this.diffT >= 0 && this.diffT < 1510) || this.diffOut >= 0; }
+  private busy() { return this.boxT >= 0 || this.startT >= 0 || (this.diffT >= 0 && this.diffT < 1510) || this.diffOut >= 0 || this.opt.t < OPT_ANIM; }
 
   private move(d: number) {
     if (this.busy()) return;
+    if (this.opt.open) { this.optRow(d); return; }
     if (this.diffT >= 0) { this.moveCursor(d); return; }
     if (!this.items.length) return;
     this.cur = (((this.cur + d) % this.items.length) + this.items.length) % this.items.length;
@@ -371,6 +458,7 @@ export class TndeSelect {
 
   private decide() {
     if (this.busy()) return;
+    if (this.opt.open) { this.optChange(1); return; }
     if (this.diffT >= 0) { this.decideDiff(); return; }
     if (this.scroll !== 0 || this.still < 520) return;
     const it = this.center;
@@ -383,6 +471,7 @@ export class TndeSelect {
       this.ura = (last === 'Edit' && has('Edit')) || (!has('Oni') && has('Edit'));
       const want = last && has(last) ? last : ['Oni', 'Edit', 'Hard', 'Normal', 'Easy'].find(has) ?? 'Oni';
       this.dsel = want === 'Edit' ? 5 : 2 + COURSES.indexOf(want);
+      this.lastCard = this.dsel;
       this.cursorT = 1e9;
     } else {
       this.se('Don');
@@ -393,13 +482,14 @@ export class TndeSelect {
 
   private back() {
     if (this.busy()) return;
+    if (this.opt.open) { this.optClose(); return; }
     if (this.diffT >= 0) { this.se('Cancel'); this.diffOut = 0; return; }
-    if (this.path.length) { this.se('Cancel'); this.boxT = 0; this.boxTo = this.path.slice(0, -1); return; }
-    this.host.toList();
+    if (this.query || !this.qEl.classList.contains('hidden')) { this.se('Cancel'); this.closeSearch(); return; }
+    if (this.path.length) { this.se('Cancel'); this.boxT = 0; this.boxTo = this.path.slice(0, -1); }
   }
 
   /** 難易度えらびの並び: 0 もどる・1 設定・2〜5 かんたん〜おに（5 は裏にもなる） */
-  private courseAt(i: number) { return i < 2 ? null : i === 5 && this.ura ? 'Edit' : COURSES[i - 2]; }
+  private courseAt(i: number) { return i < 2 || i > 5 ? null : i === 5 && this.ura ? 'Edit' : COURSES[i - 2]; }
   private hasCourse(i: number) {
     const it = this.center;
     const c = this.courseAt(i);
@@ -414,10 +504,13 @@ export class TndeSelect {
       if (it.s.courses.some((x) => x.name === other)) { this.ura = !this.ura; this.se('Ura'); this.cursorT = 0; }
       return;
     }
-    let j = this.dsel;
-    do j += d; while (j >= 0 && j <= 5 && !this.hasCourse(j));
-    if (j < 0 || j > 5) return;
-    this.dsel = j;
+    // 並び: もどる・設定・エディタ・譜面情報・かんたん〜おに
+    const order = [0, 1, 6, 7, 2, 3, 4, 5];
+    let j = order.indexOf(this.dsel);
+    do j += d; while (j >= 0 && j < order.length && !this.hasCourse(order[j]));
+    if (j < 0 || j >= order.length) return;
+    this.dsel = order[j];
+    if (this.dsel >= 2 && this.dsel <= 5) this.lastCard = this.dsel;
     this.cursorT = 0;
     this.se('Ka');
   }
@@ -425,7 +518,14 @@ export class TndeSelect {
     const it = this.center;
     if (it.kind !== 'song') return;
     if (this.dsel === 0) { this.se('Cancel'); this.diffOut = 0; return; }
-    if (this.dsel === 1) { this.se('Don'); this.host.settings(); return; }
+    if (this.dsel === 1) { this.se('Don'); this.optOpen(); return; }
+    if (this.dsel === 6 || this.dsel === 7) {
+      const c = this.courseAt(this.lastCard) ?? this.focusCourse();
+      this.se('Don');
+      if (this.dsel === 6) this.host.edit(it.s.id, c);
+      else this.host.info(it.s.id, c);
+      return;
+    }
     this.se('Don');
     this.startT = 0;
   }
@@ -476,6 +576,7 @@ export class TndeSelect {
       // 設定などの面が開いているときは動かさない
       if (document.getElementById('sheet')?.classList.contains('hidden') === false) return;
       const k = e.key;
+      if (this.opt.open && !this.busy() && (k === 'ArrowLeft' || k === 'ArrowRight')) { this.optChange(k === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return; }
       if (k === 'ArrowUp' || k === 'ArrowLeft' || k === 'd' || k === 'D') this.move(-1);
       else if (k === 'ArrowDown' || k === 'ArrowRight' || k === 'k' || k === 'K') this.move(1);
       else if (k === 'Enter' || k === ' ' || k === 'f' || k === 'F' || k === 'j' || k === 'J') this.decide();
@@ -487,16 +588,18 @@ export class TndeSelect {
 
   private tap(p: { x: number; y: number }) {
     if (this.busy()) return;
+    if (this.opt.open) { this.optTap(p); return; }
     if (this.diffT >= 0) {
-      const hit = [[382, 405, 115, 114], [514, 405, 115, 114], ...[647, 861, 1077, 1292].map((x) => [x, 405, 196, 355])];
+      const hit = [[382, 405, 115, 114], [514, 405, 115, 114], ...[647, 861, 1077, 1292].map((x) => [x, 405, 196, 355]), [382, 537, 115, 114], [514, 537, 115, 114]];
       const i = hit.findIndex(([x, y, w, h]) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h);
       if (i < 0 || !this.hasCourse(i)) return;
       if (i === this.dsel) this.decideDiff();
-      else { this.dsel = i; this.cursorT = 0; this.se('Ka'); }
+      else { this.dsel = i; if (i >= 2 && i <= 5) this.lastCard = i; this.cursorT = 0; this.se('Ka'); }
       return;
     }
-    // 左上の太鼓: いつもの一覧へ
-    if (p.x < 300 && p.y < 270) { this.host.toList(); return; }
+    // 下のボタン
+    const b = MENU.findIndex((_, i) => { const r = menuRect(i); return p.x >= r[0] && p.x <= r[0] + r[2] && p.y >= r[1] && p.y <= r[1] + r[3]; });
+    if (b >= 0) { this.menu(MENU[b].a); return; }
     // まんなかの帯: 決める。ほかの帯: そこまで動かす
     if (p.y >= 383 && p.y <= 697 && p.x >= 470 && p.x <= 1450) { this.decide(); return; }
     for (let k = 1; k <= 3; k++) {
@@ -543,6 +646,7 @@ export class TndeSelect {
     } else this.still += dt;
     this.fadeIn += dt;
     this.cursorT += dt;
+    this.opt.t += dt;
     if (this.boxT >= 0) {
       this.boxT += dt;
       // ctBoxOpen: 200 から 1.3ms ごと。1940 で中を入れ替える
@@ -610,6 +714,7 @@ export class TndeSelect {
       g.globalAlpha = listA;
       this.guideTop();
       this.list();
+      this.menuBar();
       g.globalAlpha = 1;
     }
     if (diffA > 0) {
@@ -626,6 +731,7 @@ export class TndeSelect {
       const pl = this.host.plate();
       this.sk.plate(g, { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } as never, 60, 476);
     }
+    this.optPanel();
   }
 
   private pat: CanvasPattern | null = null;
@@ -857,6 +963,7 @@ export class TndeSelect {
       const k = 0.8 + bac / 620;
       this.songIcons(s, lerp(486 + 22, 501, t), lerp(491, 398, t), k * 1.65 / 0.9, lerp(486 + 20, 496, t), lerp(542, 464, t), k * 1.65 / 0.9);
       this.levels(s);
+      this.songInfo(s, 1460, 395, 190, 1460, 600);
     } else {
       const name = it.kind === 'back' ? 'とじる' : it.name;
       this.put(this.text(name, 51, 16, it.look.edge, { kx: 0.96 }), 960, lerp(542, 436, t), 820);
@@ -925,12 +1032,16 @@ export class TndeSelect {
     if (s.subtitle) this.put(this.text(s.subtitle, 30, 10, '#100b0b', { kx: 0.9 }), 962, 256.5, 1100);
     this.blit('diffBar', 0, 0, 77, 76, 382, 405, 77 * 1.5, 76 * 1.5);
     this.blit('diffBar', 88, 0, 77, 76, 514, 405, 77 * 1.5, 76 * 1.5);
+    // もどる・設定の下に、同じ形のボタン（1 列 2 つ）
+    this.sqBtn(382, 537, 'エディタ', [214, 140, 235], [150, 80, 200]);
+    this.sqBtn(514, 537, '譜面\n情報', [140, 200, 250], [60, 140, 220]);
+    this.songInfo(s, 1700, 300, 180, 1650, 500);
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
     // 選んでいる所の枠（カードの後ろ）
     const sel = this.dsel;
     if (sel >= 2) this.blit('diffCursor', 56, 135, 147, 250, cx[sel - 2] + 98.25 - 110.25, 405 + 177.75 - 187.5, 147 * 1.5, 250 * 1.5);
-    else this.blit('diffCursor', 86, 410, 88, 85, [382, 514][sel] + 57.75 - 66, 462 - 63.75, 88 * 1.5, 85 * 1.5);
+    else this.blit('diffCursor', 86, 410, 88, 85, BTN_X[sel] + 57.75 - 66, BTN_Y[sel] + 57 - 63.75, 88 * 1.5, 85 * 1.5);
     cx.forEach((x, i) => {
       const c = this.courseAt(i + 2)!;
       const cs = s.courses.find((q) => q.name === c);
@@ -966,10 +1077,10 @@ export class TndeSelect {
     const ba = inT >= 80 ? clamp((inT - 80) * 2.84 / 255, 0, 1) : 0;
     const drop = inT >= 80 ? Math.sin(rad(Math.min(90, inT - 80))) : 0;
     const bounce = this.cursorT < 180 ? Math.sin(rad(this.cursorT)) * 15 : 0;
-    const bx = sel >= 2 ? cx[sel - 2] + 98.25 : [382, 514][sel] + 57.75;
+    const bx = sel >= 2 && sel <= 5 ? cx[sel - 2] + 98.25 : BTN_X[sel] + 57.75;
     const ga = g.globalAlpha;
     g.globalAlpha = ga * ba;
-    this.blit('diffCursor', 94, 34, 76, 77, bx - 57, 313 - 75 * (1 - drop) - (sel < 2 ? 0 : 0) + bounce, 76 * 1.5, 77 * 1.5);
+    this.blit('diffCursor', 94, 34, 76, 77, bx - 57, 313 - 75 * (1 - drop) + (sel === 6 || sel === 7 ? 132 : 0) + bounce, 76 * 1.5, 77 * 1.5);
     g.globalAlpha = ga;
     // 下の案内
     this.full('guide', 4, 0);
@@ -984,4 +1095,281 @@ export class TndeSelect {
     const x0 = cx - (adv * (ds.length - 1)) / 2 - 13.5;
     ds.forEach((d, i) => this.blit('diffNum', Number(d) * 18, 0, 18, 23, x0 + i * adv, y, 27, 34.5));
   }
+  // ---------- 下のボタン・検索・並べ替え ----------
+
+  private menu(a: MenuAct) {
+    this.se('Don');
+    if (a === 'search') {
+      if (!this.qEl.classList.contains('hidden')) { this.closeSearch(); return; }
+      this.qEl.classList.remove('hidden');
+      this.qEl.focus();
+    } else if (a === 'sort') {
+      const order: typeof this.sort[] = ['title', 'updated', 'bpm'];
+      this.sort = order[(order.indexOf(this.sort) + 1) % order.length];
+      try { localStorage.setItem('tsel-sort', this.sort); } catch { /* 無くてよい */ }
+      this.rebuild();
+      this.still = 0;
+    } else this.host.action(a);
+  }
+
+  private closeSearch() {
+    this.qEl.value = '';
+    this.qEl.classList.add('hidden');
+    this.qEl.blur();
+    if (this.query) { this.query = ''; this.rebuild(); this.still = 0; }
+  }
+
+  private menuBar() {
+    MENU.forEach((m, i) => {
+      const [x, y, w, h] = menuRect(i);
+      const on = m.a === 'search' && !this.qEl.classList.contains('hidden');
+      this.tag(x, y, w, h, on ? '#f6c90e' : m.c, m.t, 40);
+    });
+  }
+
+  /** 角の丸い札（本家の札のように黒い縁・上半分のつや・白い字に黒い縁） */
+  private tag(x: number, y: number, w: number, h: number, fill: string, label: string, px: number) {
+    const g = this.g;
+    const r = h / 2;
+    g.save();
+    g.shadowColor = 'rgba(60,30,10,0.35)';
+    g.shadowBlur = 8 * this.s;
+    g.shadowOffsetY = 6 * this.s;
+    rrect(g, x, y, w, h, r);
+    g.fillStyle = fill;
+    g.fill();
+    g.restore();
+    rrect(g, x, y, w, h, r);
+    g.lineWidth = 5;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    g.save();
+    g.globalAlpha *= 0.27;
+    rrect(g, x + 8, y + 7, w - 16, h / 2 - 9, Math.max(1, r - 8));
+    g.fillStyle = '#fff';
+    g.fill();
+    g.restore();
+    this.put(this.text(label, px, 8, '#000'), x + w / 2, y + h / 2 + 1, w - 24);
+  }
+
+  /** 左に名前・右に値の札（BPM・長さ） */
+  private stat(x: number, y: number, w: number, h: number, label: string, val: string, col: string) {
+    const g = this.g;
+    g.save();
+    g.shadowColor = 'rgba(60,30,10,0.3)';
+    g.shadowBlur = 6 * this.s;
+    g.shadowOffsetY = 5 * this.s;
+    rrect(g, x, y, w, h, 18);
+    g.fillStyle = '#fffaf0';
+    g.fill();
+    g.restore();
+    rrect(g, x, y, w, h, 18);
+    g.lineWidth = 5;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    const lw = w * 0.42;
+    rrect(g, x + 5, y + 5, lw - 5, h - 10, 14);
+    g.fillStyle = col;
+    g.fill();
+    this.put(this.text(label, 28, 6, '#000'), x + 5 + (lw - 5) / 2, y + h / 2, lw - 14);
+    this.put(this.text(val, 32, 0, '#000', { font: SEURAT, fill: '#222' }), x + lw + (w - lw) / 2, y + h / 2 + 1, w - lw - 16);
+  }
+
+  /** ジャケット（あれば）と BPM・長さ */
+  private songInfo(s: SongEntry, jx: number, jy: number, js: number, sx: number, sy: number) {
+    const g = this.g;
+    const im = this.jacketImg(s);
+    if (im) {
+      g.save();
+      g.shadowColor = 'rgba(60,30,10,0.35)';
+      g.shadowBlur = 8 * this.s;
+      g.shadowOffsetY = 6 * this.s;
+      g.fillStyle = '#000';
+      g.fillRect(jx, jy, js, js);
+      g.restore();
+      const k = Math.max(js / im.naturalWidth, js / im.naturalHeight);
+      const w = js / k, h = js / k;
+      g.drawImage(im, (im.naturalWidth - w) / 2, (im.naturalHeight - h) / 2, w, h, jx, jy, js, js);
+      rrect(g, jx, jy, js, js, 6);
+      g.lineWidth = 6;
+      g.strokeStyle = '#1a1410';
+      g.stroke();
+    }
+    this.stat(sx, sy, 240, 50, 'BPM', fmtBpm(s), PUR);
+    if (s.length > 0) this.stat(sx, sy + 60, 240, 50, '長さ', fmtLen(s.length), PUR);
+  }
+
+  private jacketImg(s: SongEntry) {
+    if (!s.jacket) return null;
+    const key = `${s.id}:${s.jacket}`;
+    if (this.jackets.has(key)) return this.jackets.get(key) ?? null;
+    this.jackets.set(key, null);
+    void this.host.jacket(s).then((url) => {
+      if (!url) return;
+      const im = new Image();
+      im.onload = () => this.jackets.set(key, im);
+      im.src = url;
+    });
+    return null;
+  }
+
+  /** もどる・設定と同じ形のボタン（黒い縁・白い縁・上から下へ色の変わる面・つや） */
+  private btnCache = new Map<string, HTMLCanvasElement>();
+  private sqBtn(x: number, y: number, label: string, top: number[], bot: number[]) {
+    const W = 115.5, H = 114;
+    const Z = this.textScale * 2;
+    const key = `${label}|${Z}`;
+    let cv = this.btnCache.get(key);
+    if (!cv) {
+      cv = document.createElement('canvas');
+      cv.width = Math.ceil(W * Z);
+      cv.height = Math.ceil(H * Z);
+      const g = cv.getContext('2d')!;
+      g.scale(Z, Z);
+      rrect(g, 0, 0, W, H, 30);
+      g.fillStyle = '#111';
+      g.fill();
+      rrect(g, 7, 7, W - 14, H - 14, 24);
+      g.fillStyle = '#fff';
+      g.fill();
+      const gr = g.createLinearGradient(0, 11, 0, H - 11);
+      gr.addColorStop(0, `rgb(${top.join(',')})`);
+      gr.addColorStop(1, `rgb(${bot.join(',')})`);
+      rrect(g, 11, 11, W - 22, H - 22, 20);
+      g.fillStyle = gr;
+      g.fill();
+      g.save();
+      g.filter = 'blur(6px)';
+      g.globalAlpha = 0.35;
+      g.beginPath();
+      g.ellipse(W / 2, H / 2 - 4, W / 2 - 18, H / 2 - 22, 0, 0, Math.PI * 2);
+      g.fillStyle = '#fff';
+      g.fill();
+      g.restore();
+      this.btnCache.set(key, cv);
+    }
+    this.g.drawImage(cv, x, y, W, H);
+    const lines = label.split('\n');
+    lines.forEach((l, i) => this.put(this.text(l, lines.length > 1 ? 30 : 27, 7, '#000'), x + W / 2, y + H / 2 + (i - (lines.length - 1) / 2) * 34, W - 14));
+  }
+
+  // ---------- 演奏オプション（本家の左下の板） ----------
+
+  private optOpen() {
+    this.opt.open = true;
+    this.opt.t = 0;
+    this.opt.row = 0;
+  }
+  private optClose() {
+    this.se('Cancel');
+    this.opt.open = false;
+    this.opt.t = 0;
+  }
+  private optRow(d: number) {
+    const r = this.opt.row + d;
+    // 最後の行からさらに下へ: 閉じる（本家と同じ）
+    if (r >= OPT_ROWS.length) { this.optClose(); return; }
+    if (r < 0) return;
+    this.opt.row = r;
+    this.se('Ka');
+  }
+  private optChange(d: number) {
+    const row = OPT_ROWS[this.opt.row];
+    const o = this.host.opts();
+    const n = row.vals.length;
+    const i = (optIndex(row, o[row.k]) + d + n) % n;
+    this.host.setOpt(row.k, row.vals[i] as never);
+    this.se('Don');
+  }
+  private optTap(p: { x: number; y: number }) {
+    if (p.x < OPT_X || p.x > OPT_X + OPT_W || p.y < OPT_Y || p.y > OPT_Y + OPT_H) { this.optClose(); return; }
+    const i = OPT_ROWS.findIndex((_, k) => Math.abs(p.y - optRowY(k)) <= 28);
+    if (i < 0) return;
+    if (i !== this.opt.row) { this.opt.row = i; this.se('Ka'); return; }
+    this.optChange(p.x < 262 ? -1 : 1);
+  }
+
+  private optPanel() {
+    const t = this.opt.t;
+    if (!this.opt.open && t >= OPT_ANIM) return;
+    const g = this.g;
+    // 下からせり上がる（閉じるときは下へ）
+    const e = clamp(t / OPT_ANIM, 0, 1);
+    const k = this.opt.open ? 1 - (1 - e) ** 3 : 1 - e * e;
+    const dy = (1 - k) * (OPT_H + 40);
+    g.save();
+    g.translate(0, dy);
+    const x = OPT_X, y = OPT_Y, w = OPT_W, h = OPT_H;
+    rrect(g, x, y, w, h, 26);
+    g.fillStyle = '#0a0a10';
+    g.fill();
+    rrect(g, x + 7, y + 7, w - 14, h - 14, 20);
+    g.fillStyle = 'rgb(177,224,61)';
+    g.fill();
+    g.save();
+    rrect(g, x + 7, y + 7, w - 14, h - 14, 20);
+    g.clip();
+    g.lineWidth = 6;
+    g.strokeStyle = 'rgba(214,236,180,0.9)';
+    rrect(g, x + 7, y + 7, w - 14, h - 14, 20);
+    g.stroke();
+    g.restore();
+    // 見出し: 赤い玉の「1P」と「演奏オプション」
+    const by = y + 42;
+    g.beginPath();
+    g.arc(64, by, 27, 0, Math.PI * 2);
+    g.fillStyle = '#1a0e0a';
+    g.fill();
+    const rg = g.createLinearGradient(0, by - 23, 0, by + 23);
+    rg.addColorStop(0, '#f2684e');
+    rg.addColorStop(1, '#c8261a');
+    g.beginPath();
+    g.arc(64, by, 22.5, 0, Math.PI * 2);
+    g.fillStyle = rg;
+    g.fill();
+    this.put(this.text('1P', 25, 6, '#000', { font: SEURAT }), 64, by + 1);
+    this.put(this.text('演奏オプション', 37, 9, '#000'), 105, by + 1, 290, 'left');
+    const o = this.host.opts();
+    OPT_ROWS.forEach((r, i) => {
+      const cy = optRowY(i);
+      const sel = i === this.opt.row;
+      rrect(g, 36, cy - 24, 358, 48, 8);
+      g.fillStyle = sel ? 'rgb(247,251,36)' : 'rgba(236,240,224,0.82)';
+      g.fill();
+      this.put(this.text(r.label, 32, 8, '#000'), 44, cy + 1, 160, 'left');
+      const vi = optIndex(r, o[r.k]);
+      const changed = r.vals[vi] !== r.def;
+      rrect(g, 212, cy - 20, 176, 40, 20);
+      g.fillStyle = changed && !sel ? 'rgb(255,236,0)' : '#fff';
+      g.fill();
+      this.put(this.text(r.names[vi], 30, 8, '#000'), 300, cy + 1, 100);
+      if (sel) {
+        for (const sgn of [-1, 1]) {
+          const ax = 300 + sgn * 67;
+          g.beginPath();
+          g.moveTo(ax + sgn * 11, cy);
+          g.lineTo(ax - sgn * 9, cy - 13);
+          g.lineTo(ax - sgn * 9, cy + 13);
+          g.closePath();
+          const ag = g.createLinearGradient(0, cy - 13, 0, cy + 13);
+          ag.addColorStop(0, '#6fd3f7');
+          ag.addColorStop(1, '#1d77c4');
+          g.fillStyle = ag;
+          g.fill();
+          g.lineJoin = 'round';
+          g.lineWidth = 3.5;
+          g.strokeStyle = '#0b1a2a';
+          g.stroke();
+        }
+      }
+    });
+    g.restore();
+  }
+}
+
+/** 角の丸い四角の道 */
+function rrect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const q = Math.min(r, w / 2, h / 2);
+  g.beginPath();
+  g.roundRect(x, y, w, h, q);
 }

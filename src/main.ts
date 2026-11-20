@@ -83,6 +83,9 @@ const settings = {
   hitMode: 'on' as 'on' | 'playOff' | 'off',
   metronome: false,
   auto: false,
+  doron: false,
+  mirror: false,
+  random: 'off' as 'off' | 'kimagure' | 'detarame',
   showTiming: false,
   pointerInput: false,
   // iPhone / iPad の Safari は両手交互の速い連打でタッチを落とすので、既定で指置きを使う（Expo Go の中では使わない）
@@ -3062,13 +3065,12 @@ mountGridBg($('home'));
 const home = new Home({
   audio,
   open: openSong,
-  playOpts: () => ({ speed: settings.speed, auto: !!settings.auto }),
+  playOpts: () => ({ speed: settings.speed, auto: !!settings.auto, doron: !!settings.doron, mirror: !!settings.mirror, random: settings.random ?? 'off' }),
   tndeSkin: () => settings.skin === 'tnde',
   tndeObj: () => play.tndeSkin(),
   plate: () => ({ name: settings.profile.name || 'プレイヤー', title: settings.profile.title, profile: { ...settings.profile } }),
   setPlayOpt: (k, v) => {
-    if (k === 'speed') settings.speed = v as number;
-    else settings.auto = v as boolean;
+    (settings as Record<string, unknown>)[k] = v;
     saveSettings();
     if (k === 'speed') applyPlayZoom();
   },

@@ -3274,13 +3274,47 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 
 /* TNDE スキンの読み込み画面・リザルト画面（プレイ画面・幕より手前） */
 .tnde-overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 90; touch-action: none; }
-.tnde-res-btns { position: fixed; z-index: 91; right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 8px; }
-.tnde-res-btns.hidden { display: none; }
-.tnde-res-btns button { height: 44px; padding: 0 18px; font-size: 15px; font-weight: 900; color: #fff; background: rgba(20, 24, 28, 0.86); border: 2px solid #fff; border-radius: 22px; }
-.tnde-res-btns button.primary { background: #e8452c; }
+/* TNDE のリザルト: 右上の記録の板・右下のボタン（canvas と同じ 1920×1080 の箱の中。--u = 1px） */
+.tnde-res-ui { position: fixed; inset: 0; z-index: 91; display: grid; place-items: center; pointer-events: none; --u: calc(min(100vw, 100vh * 16 / 9) / 1920); }
+.tnde-res-ui.hidden { display: none; }
+.tru-box { position: relative; width: calc(1920 * var(--u)); height: calc(1080 * var(--u)); font-family: 'TNDE Kantei', 'TNDE Seurat', sans-serif; }
+.tru-box button { pointer-events: auto; font-family: inherit; cursor: pointer; }
+.tru-btns { position: absolute; right: calc(20 * var(--u)); bottom: calc(18 * var(--u)); display: flex; gap: calc(12 * var(--u)); }
+.tru-btns button, .tru-don {
+  height: calc(84 * var(--u)); min-width: calc(214 * var(--u)); padding: 0 calc(24 * var(--u)); border-radius: calc(42 * var(--u));
+  border: calc(5 * var(--u)) solid #1a1410; background: #2a2d36; color: #fff; font-size: calc(38 * var(--u));
+  -webkit-text-stroke: calc(7 * var(--u)) #000; paint-order: stroke fill;
+  box-shadow: 0 calc(6 * var(--u)) calc(8 * var(--u)) rgba(60, 30, 10, 0.35), inset 0 calc(30 * var(--u)) 0 rgba(255, 255, 255, 0.14);
+}
+.tru-btns button.primary { background: #e8452c; }
+.tru-panel {
+  position: absolute; left: calc(960 * var(--u)); top: calc(190 * var(--u)); width: calc(920 * var(--u)); box-sizing: border-box;
+  padding: calc(22 * var(--u)) calc(28 * var(--u)); display: flex; flex-direction: column; gap: calc(22 * var(--u));
+  background: #fffaf0; border: calc(7 * var(--u)) solid #1a1410; border-radius: calc(30 * var(--u)); box-shadow: 0 calc(6 * var(--u)) calc(8 * var(--u)) rgba(60, 30, 10, 0.35);
+}
+.tru-top { display: flex; gap: calc(20 * var(--u)); align-items: center; }
+.tru-stat { flex: 1; display: flex; height: calc(62 * var(--u)); border: calc(5 * var(--u)) solid #1a1410; border-radius: calc(18 * var(--u)); background: #fff; overflow: hidden; box-sizing: border-box; }
+.tru-stat b { display: grid; place-items: center; width: 42%; background: #f39a1e; color: #fff; font-weight: normal; font-size: calc(32 * var(--u)); -webkit-text-stroke: calc(6 * var(--u)) #000; paint-order: stroke fill; }
+.tru-stat span { flex: 1; display: grid; place-items: center; color: #222; font: calc(36 * var(--u)) 'TNDE Seurat', sans-serif; }
+.tru-don { flex: 1; height: calc(62 * var(--u)); min-width: 0; background: #8a4fd8; font-size: calc(30 * var(--u)); }
+.tru-tim { display: flex; align-items: center; gap: calc(14 * var(--u)); }
+.tru-tim > b { font-weight: normal; font-size: calc(34 * var(--u)); -webkit-text-stroke: calc(6 * var(--u)) #000; paint-order: stroke fill; }
+.tru-tim > b.l { color: #ff6b5a; }
+.tru-tim > b.e { color: #58d0f0; }
+.tru-bar { position: relative; flex: 1; height: calc(50 * var(--u)); border: calc(4 * var(--u)) solid #1a1410; border-radius: calc(25 * var(--u)); background: #2c2a33; box-sizing: border-box; overflow: hidden; }
+.tru-bar i { position: absolute; top: calc(7 * var(--u)); bottom: calc(7 * var(--u)); }
+.tru-bar i.late { background: #ff6b5a; border-radius: calc(8 * var(--u)) 0 0 calc(8 * var(--u)); }
+.tru-bar i.early { background: #58d0f0; border-radius: 0 calc(8 * var(--u)) calc(8 * var(--u)) 0; }
+.tru-bar i.zero { left: 50%; top: calc(3 * var(--u)); bottom: calc(3 * var(--u)); width: calc(4 * var(--u)); margin-left: calc(-2 * var(--u)); background: #fff; }
+.tru-bar i.mean { top: calc(4 * var(--u)); bottom: calc(4 * var(--u)); width: calc(5 * var(--u)); margin-left: calc(-2.5 * var(--u)); background: #ffe14a; }
 
 /* TNDE スキンの選曲画面（canvas で全面に描く） */
 .home .tsel { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 40; touch-action: none; background: #fd8a2e; }
 .home .tsel.hidden { display: none; }
-.home-tsel { display: none !important; }
-.home.tnde .home-tsel { display: grid !important; }
+.home .tsel-q {
+  position: absolute; z-index: 41; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  width: min(560px, 70vw); height: 52px; padding: 0 22px; border-radius: 26px;
+  border: 4px solid #1a1410; background: #fffaf0; color: #222; outline: none;
+  font: 26px 'TNDE Kantei', 'TNDE Seurat', sans-serif; box-shadow: 0 5px 8px rgba(60, 30, 10, 0.35);
+}
+.home .tsel-q.hidden { display: none; }

@@ -26,7 +26,7 @@ export class TndeOverlay {
     this.cv.className = 'tnde-overlay';
     this.ctx = this.cv.getContext('2d')!;
     this.buttons = document.createElement('div');
-    this.buttons.className = 'tnde-res-btns hidden';
+    this.buttons.className = 'tnde-res-ui hidden';
     this.cv.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (this.result?.skip()) this.onSkip();
@@ -115,8 +115,8 @@ export class TndeOverlay {
    * 幕を閉じて曲名を出し、ready が済んで（最低 hold ms 見せて）から戻る。
    * 戻り値の open() で幕を開ける（プレイ画面が後ろに見える）
    */
-  async loading(sk: TndeSkin, title: string, subtitle: string | undefined, ready: Promise<unknown>, hold = 2500) {
-    const L = new TndeLoading(sk, title, subtitle);
+  async loading(sk: TndeSkin, title: string, subtitle: string | undefined, ready: Promise<unknown>, hold = 2500, jacket?: string) {
+    const L = new TndeLoading(sk, title, subtitle, jacket);
     let phase: 'close' | 'wait' | 'open' = 'close';
     let t = 0;
     this.band = 0;
@@ -162,12 +162,17 @@ export class TndeOverlay {
    * リザルト画面。黒から 0.5 秒で出す。動きが終わったらボタンを出す
    * buttons: [ラベル, 押したとき]
    */
-  showResult(sk: TndeSkin, d: TndeResultData, sound: (n: ResultSound) => { stop(): void } | null, buttons: [string, () => void][]) {
+  showResult(sk: TndeSkin, d: TndeResultData, sound: (n: ResultSound) => { stop(): void } | null, buttons: [string, () => void][], extra?: ResultExtra) {
     const R = new TndeResult(sk, d, sound);
     this.result = R;
     let black = 300;
     this.band = 1;
-    this.buttons.replaceChildren(
+    // 1920×1080 の箱（canvas と同じく縦横の比を保ってまん中）の中に、右上の記録の板と右下のボタン
+    const box = document.createElement('div');
+    box.className = 'tru-box';
+    const row = document.createElement('div');
+    row.className = 'tru-btns';
+    row.append(
       ...buttons.map(([label, f], i) => {
         const b = document.createElement('button');
         b.textContent = label;
@@ -179,6 +184,9 @@ export class TndeOverlay {
         return b;
       }),
     );
+    if (extra && (extra.acc || extra.tim || extra.don)) box.append(resultPanel(extra));
+    box.append(row);
+    this.buttons.replaceChildren(box);
     if (!this.buttons.isConnected) document.body.append(this.buttons);
     this.buttons.classList.add('hidden');
     window.addEventListener('keydown', this.onKey, true);
@@ -201,11 +209,64 @@ export class TndeOverlay {
     if (e.key === 'Enter' || e.key === ' ') {
       if (!this.result.done) {
         if (this.result.skip()) this.onSkip();
-      } else (this.buttons.querySelector('button') as HTMLButtonElement | null)?.click();
+      } else (this.buttons.querySelector('.tru-btns button') as HTMLButtonElement | null)?.click();
     } else if (e.key === 'Escape') {
-      (this.buttons.querySelectorAll('button')[1] as HTMLButtonElement | undefined)?.click();
+      (this.buttons.querySelectorAll('.tru-btns button')[1] as HTMLButtonElement | undefined)?.click();
     } else return;
     e.preventDefault();
     e.stopImmediatePropagation();
   }
+}
+
+/** リザルトの右上に出す記録（精度・タイミング・ドンの幅のおすすめ） */
+export interface ResultExtra {
+  /** 精度（「99.82%」など。オートのときは無し） */
+  acc?: string;
+  /** タイミングのバー: 遅れ（左の赤）・早い（右の水色）の所と平均（0〜100%。50 がちょうど） */
+  tim?: { late: [number, number] | null; early: [number, number] | null; mean: number } | null;
+  /** ドンの幅のおすすめ（押すと変える） */
+  don?: { label: string; act: () => void } | null;
+}
+
+function resultPanel(x: ResultExtra) {
+  const el = (tag: string, cls: string, text?: string) => {
+    const e = document.createElement(tag);
+    e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const p = el('div', 'tru-panel');
+  const top = el('div', 'tru-top');
+  if (x.acc) {
+    const st = el('div', 'tru-stat');
+    st.append(el('b', '', '精度'), el('span', '', x.acc));
+    top.append(st);
+  }
+  if (x.don) {
+    const b = el('button', 'tru-don', x.don.label) as HTMLButtonElement;
+    const act = x.don.act;
+    b.addEventListener('click', (e) => { e.stopPropagation(); act(); b.remove(); });
+    top.append(b);
+  }
+  if (top.childElementCount) p.append(top);
+  if (x.tim) {
+    const t = el('div', 'tru-tim');
+    const bar = el('div', 'tru-bar');
+    const seg = (cls: string, r: [number, number] | null) => {
+      if (!r || r[1] <= r[0]) return;
+      const s = el('i', cls);
+      s.style.left = `${r[0]}%`;
+      s.style.width = `${r[1] - r[0]}%`;
+      bar.append(s);
+    };
+    seg('late', x.tim.late);
+    seg('early', x.tim.early);
+    bar.append(el('i', 'zero'));
+    const m = el('i', 'mean');
+    m.style.left = `${x.tim.mean}%`;
+    bar.append(m);
+    t.append(el('b', 'l', '遅'), bar, el('b', 'e', '早'));
+    p.append(t);
+  }
+  return p;
 }

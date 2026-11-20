@@ -84,6 +84,8 @@ export interface TndeInfo {
 export interface TndeFrame {
   /** 自己ベスト（超えたら「ベストスコア更新」を出す。無ければ出さない） */
   best?: number | null;
+  /** 演奏オプションのドロン: 音符を描かない（下の文字は出す） */
+  doron?: boolean;
   /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
   laneOnly?: boolean;
   /** 背景の動画（画像）を出している所: full = 全面（上下の背景を描かない）、bottom = 下だけ（下の背景・踊り子・モブを描かない） */
@@ -1641,7 +1643,7 @@ export class TndeSkin {
         // 叩き始めたら、レーンの風船は消して、どんちゃんと風船のアニメーションだけにする
         if (now >= n.time && s.count > 0) continue;
         if (now >= n.time) x = jx;
-        this.put(c, 'notes', x - HALF, y, 1430, row, 260, 130);
+        if (!F.doron) this.put(c, 'notes', x - HALF, y, 1430, row, 260, 130);
         this.se(c, 'ふうせん', x - HALF - P(2), y);
       } else if (n.type === 'roll' || n.type === 'bigRoll') {
         const big = n.type === 'bigRoll';
@@ -1652,9 +1654,11 @@ export class TndeSkin {
         // 叩いている連打は赤くなっていく（頭・胴・終わりとも）
         const lv = now >= n.time && now <= (n.endTime ?? n.time) ? this.rollLevel(wall) : 0;
         const g = 1 - (0.95 / 100) * lv;
-        if (bodyW > 0) this.tint(c, g, left + P(64), y, col + 131, 0, 128, 130, bodyW, NOTE);
-        this.tint(c, g, tail, y, col + 260, row, 130, 130, NOTE, NOTE);
-        this.tint(c, g, left, y, col, row, 130, 130, NOTE, NOTE);
+        if (!F.doron) {
+          if (bodyW > 0) this.tint(c, g, left + P(64), y, col + 131, 0, 128, 130, bodyW, NOTE);
+          this.tint(c, g, tail, y, col + 260, row, 130, 130, NOTE, NOTE);
+          this.tint(c, g, left, y, col, row, 130, 130, NOTE, NOTE);
+        }
         // 連打の文字: 「連打」と、伸ばす線と、終わりの「っ!!」
         const sy = y + P(131);
         const lx = left + P(big ? 116 : 90);
@@ -1664,7 +1668,7 @@ export class TndeSkin {
         this.put(c, 'senotes', endX - HALF + P(56), sy, 58, 270, 78, 30);
         this.put(c, 'senotes', left - (big ? P(2) : 0), sy, 0, 30 * SE_ROW[big ? '連打(大)' : '連打'], 136, 30);
       } else {
-        this.put(c, 'notes', left, y, NOTE_COL[n.type] * 130, row, 130, 130);
+        if (!F.doron) this.put(c, 'notes', left, y, NOTE_COL[n.type] * 130, row, 130, 130);
         const label = this.label(game, n, F.labels);
         if (label) {
           const big = n.type === 'bigDon' || n.type === 'bigKa';
