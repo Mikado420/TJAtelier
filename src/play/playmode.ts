@@ -727,6 +727,11 @@ export class PlayMode {
   /** スキンの用意ができてから最初のコマを描くまで（ゲーム画面を隠しておく） */
   private firstFrame = false;
   /** 設定のスキンを渡す。まだ読み込んでいなければ読み込み、読み込めたら描き直す */
+  /** TNDE スキン（読み込んでから。スキンが TNDE でなければ null） */
+  async tndeSkin() {
+    await this.applySkin().catch(() => {});
+    return this.settings.skin === 'tnde' ? this.tnde : null;
+  }
   /** アプリを開いたときに、スキンの絵（曲で変わらないもの）を裏で読み込み始める */
   preloadSkin() {
     if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});

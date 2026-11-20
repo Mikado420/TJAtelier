@@ -1904,6 +1904,7 @@ function onSkinClick(b: HTMLButtonElement) {
   saveSettings();
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   play.applySettings();
+  home.skinChanged();
 }
 /** 打音の欄 */
 function hitRow() {
@@ -3063,6 +3064,8 @@ const home = new Home({
   open: openSong,
   playOpts: () => ({ speed: settings.speed, auto: !!settings.auto }),
   tndeSkin: () => settings.skin === 'tnde',
+  tndeObj: () => play.tndeSkin(),
+  plate: () => ({ name: settings.profile.name || 'プレイヤー', title: settings.profile.title, profile: { ...settings.profile } }),
   setPlayOpt: (k, v) => {
     if (k === 'speed') settings.speed = v as number;
     else settings.auto = v as boolean;

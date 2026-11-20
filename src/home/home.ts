@@ -6,6 +6,8 @@ import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import { starSlots } from '../chart/stars';
+import { TndeSelect } from './tndeselect';
+import type { PlateStyle, TndeSkin } from '../render/tnde';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
   listFolderFonts, listFolders, listSongs, loadSongAudio, loadSongJacket, removeFromFolder, renameFolder, type SongEntry,
@@ -18,6 +20,10 @@ export interface HomeHost {
   playOpts(): { speed: number; auto: boolean };
   /** TNDE スキンで遊ぶか（読み込み画面はスキンのものを出す） */
   tndeSkin(): boolean;
+  /** TNDE スキン（選曲画面のネームプレートを描く） */
+  tndeObj(): Promise<TndeSkin | null>;
+  /** ネームプレートの名前・称号 */
+  plate(): { name: string; title: string; profile?: PlateStyle };
   setPlayOpt(key: 'speed' | 'auto', v: number | boolean): void;
   /** ファイルを選んで読み込む（読み込んだ曲は一覧に入る） */
   importFiles(): void;
@@ -78,6 +84,9 @@ export function saveBest(id: string, course: string, score: number, crown: Crown
     localStorage.setItem(BEST, JSON.stringify(m));
     return plays;
   } catch { return 0; /* 保存できない */ }
+}
+function lastCourse(id: string): string | undefined {
+  try { return (JSON.parse(localStorage.getItem(LAST_COURSE) ?? '{}') as Record<string, string>)[id]; } catch { return undefined; }
 }
 function rememberCourse(id: string, c: string) {
   try {
@@ -180,6 +189,10 @@ export class Home {
   private playing = false;
   /** 一時停止した位置（秒） */
   private pausedAt = -1;
+  /** TNDE スキンの選曲画面（スキンが TNDE のとき出す） */
+  private tsel: TndeSelect | null = null;
+  /** TNDE スキンでも、いつもの一覧を見ている */
+  private listMode = false;
 
   constructor(private readonly host: HomeHost) {
     this.el = document.getElementById('home')!;
@@ -236,12 +249,48 @@ export class Home {
       }
     }
     this.render(true);
+    this.el.classList.toggle('tnde', this.host.tndeSkin());
+    if (this.host.tndeSkin() && !this.listMode) { await this.openTsel(select ?? this.sel); return; }
     // 曲を選んでいるときだけ、その曲の試聴を流す（自動で鳴らせないときは、次に触れたときに）
     const s = this.focus === 'song' ? this.songs.find((x) => x.id === this.sel) : undefined;
     if (s) void this.startPreview(s);
   }
 
+  /** スキンを変えたとき（見えていれば、選曲画面を出し直す） */
+  skinChanged() {
+    this.listMode = false;
+    if (!this.visible) return;
+    if (!this.host.tndeSkin()) { this.tsel?.hide(); this.el.classList.remove('tnde'); return; }
+    void this.show(this.sel);
+  }
+
+  /** TNDE スキンの選曲画面を出す */
+  private async openTsel(select?: string | null) {
+    this.stopPreview();
+    this.tsel ??= new TndeSelect({
+      audio: this.host.audio,
+      songs: () => this.songs,
+      folders: () => this.folders,
+      colors: () => this.colors,
+      best: () => bestMap(),
+      skin: () => this.host.tndeObj(),
+      plate: () => this.host.plate(),
+      preview: (s) => { if (s) void this.startPreview(s); else this.stopPreview(); },
+      play: (id, course) => {
+        rememberCourse(id, course);
+        this.stopPreview();
+        this.sel = id;
+        void this.host.open(id, 'play', course);
+      },
+      lastCourse: (id) => lastCourse(id),
+      toList: () => { this.listMode = true; this.tsel?.hide(); this.stopPreview(); this.render(true); },
+      settings: () => this.host.settings(),
+    }, this.el);
+    await this.tsel.show(select);
+  }
+
   hide() {
+    this.tsel?.hide();
     this.el.classList.add('hidden');
     document.getElementById('homeDiff')?.classList.add('hidden');
     this.stopPreview();
@@ -963,6 +1012,7 @@ export class Home {
   }
 
   private async action(a: string) {
+    if (a === 'tsel') { this.listMode = false; await this.openTsel(this.sel); return; }
     if (a === 'import') this.host.importFiles();
     else if (a === 'settings') this.host.settings();
     else if (a === 'online') { this.stopPreview(); this.host.online(); }

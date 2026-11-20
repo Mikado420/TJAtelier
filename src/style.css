@@ -3278,3 +3278,9 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .tnde-res-btns.hidden { display: none; }
 .tnde-res-btns button { height: 44px; padding: 0 18px; font-size: 15px; font-weight: 900; color: #fff; background: rgba(20, 24, 28, 0.86); border: 2px solid #fff; border-radius: 22px; }
 .tnde-res-btns button.primary { background: #e8452c; }
+
+/* TNDE スキンの選曲画面（canvas で全面に描く） */
+.home .tsel { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 40; touch-action: none; background: #fd8a2e; }
+.home .tsel.hidden { display: none; }
+.home-tsel { display: none !important; }
+.home.tnde .home-tsel { display: grid !important; }
