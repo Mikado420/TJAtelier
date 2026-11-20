@@ -188,6 +188,8 @@ export class Renderer {
   speed = 1;
   /** 演奏オプションのドロン: 自分のレーンの音符を描かない（下の文字は出す） */
   doron = false;
+  /** 演奏オプション（TNDE スキンは印を出す） */
+  mods: import('./tnde').PlayMods | null = null;
   /** タッチ用: 中央のドンの帯の幅（画面の幅に対する割合） */
   donWidth = 0.6;
   /** 画面上部（レーンより上）を「指置き」にする（iPhone の取りこぼし対策） */
@@ -1053,6 +1055,7 @@ export class Renderer {
       branch: this.tndeBranch(game, now),
       best: this.prevBest,
       doron: this.doron,
+      mods: this.mods,
     });
     } catch (e) {
       // スキンの絵で失敗しても、遊ぶのは止めない（次のコマでまた描く）

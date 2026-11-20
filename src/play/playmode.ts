@@ -446,6 +446,11 @@ export class PlayMode {
       if (notes !== course.notes) course = { ...course, notes };
     }
     this.renderer.doron = !this.calibrating && !!this.settings.doron;
+    // 演奏オプションの印（左のパネル・リザルトに出す）
+    this.renderer.mods = this.calibrating ? null : {
+      speed: this.settings.speed, doron: !!this.settings.doron, mirror: !!this.settings.mirror,
+      random: this.settings.random ?? 'off', auto: this.auto,
+    };
     this.hidePause();
     // fromTime が 0 以下なら曲の最初から（最初の音符が 1 秒より前なら、その 1 秒前から）
     const first = (course.notes[0]?.time ?? 0) - 1;
@@ -1573,6 +1578,7 @@ export class PlayMode {
         crown: allGood ? 'dfc' : fc ? 'fc' : s.gauge >= CLEAR_LINE ? 'clear' : 'none',
         best: rec?.best ? Math.max(0, rec.diff ?? 0) : null,
         plate: { name: pf?.name || 'プレイヤー', title: pf?.title ?? '', profile: pf ? { ...pf } : undefined },
+        mods: this.renderer.mods,
       },
       (n) => this.audio.playUi(`tnde:${n}`),
       [

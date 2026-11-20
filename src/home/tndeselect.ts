@@ -36,6 +36,10 @@ export interface TselHost {
   info(id: string, course: string): void;
   /** ジャケットの絵の URL（無ければ undefined） */
   jacket(s: SongEntry): Promise<string | undefined>;
+  /** 曲をフォルダに入れる・外す（入っていれば外す）・新しいフォルダを作って入れる・曲を消す（どれも済んだら一覧を読み直してある） */
+  toggleFolder(id: string, folder: string): Promise<void>;
+  newFolder(id: string): Promise<void>;
+  deleteSong(id: string): Promise<void>;
 }
 
 export interface PlayOpts {
@@ -127,7 +131,7 @@ function posAt(p: number) {
 }
 
 // ---------- 下のボタン・難易度えらびのボタン・演奏オプション ----------
-const BLUE = '#2f8fd8', GRN = '#39b54a', ORG = '#f39a1e', GRY = '#6c6f7d', PUR = '#8a4fd8';
+const BLUE = '#2f8fd8', RED = '#e8452c', GRN = '#39b54a', ORG = '#f39a1e', GRY = '#6c6f7d', PUR = '#8a4fd8';
 type MenuAct = 'search' | 'sort' | 'import' | 'new' | 'online' | 'settings';
 const MENU: { t: string; a: MenuAct; c: string }[] = [
   { t: '検索', a: 'search', c: BLUE }, { t: '並べ替え', a: 'sort', c: BLUE }, { t: '読み込み', a: 'import', c: GRN },
@@ -244,6 +248,7 @@ export class TndeSelect {
     await this.loaded;
     this.diffT = -1; this.diffOut = -1; this.startT = -1; this.boxT = -1;
     this.opt.open = false; this.opt.t = 1e9;
+    this.pop = null;
     this.qEl.classList.toggle('hidden', !this.query);
     const s = select ? this.host.songs().find((x) => x.id === select) : undefined;
     if (s) {
@@ -474,6 +479,7 @@ export class TndeSelect {
   private busy() { return this.boxT >= 0 || this.startT >= 0 || (this.diffT >= 0 && this.diffT < 1510) || this.diffOut >= 0 || this.opt.t < OPT_ANIM; }
 
   private move(d: number) {
+    if (this.pop) { this.popMove(d); return; }
     if (this.busy()) return;
     if (this.opt.open) { this.optRow(d); return; }
     if (this.diffT >= 0) { this.moveCursor(d); return; }
@@ -485,6 +491,7 @@ export class TndeSelect {
   }
 
   private decide() {
+    if (this.pop) { void this.popAct(this.pop.sel); return; }
     if (this.busy()) return;
     if (this.opt.open) { this.optChange(1); return; }
     if (this.diffT >= 0) { this.decideDiff(); return; }
@@ -509,6 +516,7 @@ export class TndeSelect {
   }
 
   private back() {
+    if (this.pop) { this.closePop(); return; }
     if (this.busy()) return;
     if (this.opt.open) { this.optClose(); return; }
     if (this.diffT >= 0) { this.se('Cancel'); this.diffOut = 0; return; }
@@ -564,18 +572,42 @@ export class TndeSelect {
       return { x: ((e.clientX - r.left) * this.dpr - this.ox) / this.s, y: ((e.clientY - r.top) * this.dpr - this.oy) / this.s };
     };
     let down: { x: number; y: number; t: number; acc: number; accX: number; moved: boolean } | null = null;
+    let press = 0;
     this.el.addEventListener('pointerdown', (e) => {
       const ctx = this.host.audio.ctx;
       if (ctx.state !== 'running') void ctx.resume();
       const p = toStage(e);
       down = { x: p.x, y: p.y, t: performance.now(), acc: 0, accX: 0, moved: false };
       this.el.setPointerCapture(e.pointerId);
+      // 曲の帯を長押し: 曲のメニュー
+      clearTimeout(press);
+      const d0 = down;
+      if (!this.pop && this.diffT < 0 && !this.opt.open && !this.busy()) {
+        press = window.setTimeout(() => {
+          if (down !== d0 || d0.moved) return;
+          const it = this.songAt(p);
+          if (!it) return;
+          d0.moved = true;
+          this.openPop('song', it);
+        }, 550);
+      }
+    });
+    this.el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (this.pop || this.diffT >= 0 || this.opt.open || this.busy()) return;
+      const it = this.songAt(toStage(e));
+      if (it) this.openPop('song', it);
     });
     this.el.addEventListener('pointermove', (e) => {
       if (!down) return;
       const p = toStage(e);
       const dy = p.y - down.y, dx = p.x - down.x;
       if (Math.abs(dy) > 24 || Math.abs(dx) > 24) down.moved = true;
+      if (this.pop) {
+        // フォルダの一覧: 指で動かす
+        if (this.pop.kind === 'folder') { this.pop.scroll = this.clampScroll(this.pop.scroll - (dy - down.acc)); down.acc = dy; }
+        return;
+      }
       if (this.diffT >= 0) {
         // 難易度えらび: 横に払って動かす
         const steps = Math.trunc((dx - down.accX) / 150);
@@ -596,6 +628,8 @@ export class TndeSelect {
     let wheelAcc = 0;
     this.el.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (this.pop?.kind === 'folder') { this.pop.scroll = this.clampScroll(this.pop.scroll + e.deltaY); return; }
+      if (this.pop) return;
       wheelAcc += e.deltaY;
       while (Math.abs(wheelAcc) >= 60) { const d = Math.sign(wheelAcc); wheelAcc -= d * 60; this.move(d); }
     }, { passive: false });
@@ -615,6 +649,7 @@ export class TndeSelect {
   }
 
   private tap(p: { x: number; y: number }) {
+    if (this.pop) { this.popTap(p); return; }
     if (this.busy()) return;
     if (this.opt.open) { this.optTap(p); return; }
     if (this.diffT >= 0) {
@@ -760,6 +795,7 @@ export class TndeSelect {
       this.sk.plate(g, { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } as never, 60, 476);
     }
     this.optPanel();
+    this.drawPop();
   }
 
   private pat: CanvasPattern | null = null;
@@ -1061,8 +1097,8 @@ export class TndeSelect {
     this.blit('diffBar', 0, 0, 77, 76, 382, 405, 77 * 1.5, 76 * 1.5);
     this.blit('diffBar', 88, 0, 77, 76, 514, 405, 77 * 1.5, 76 * 1.5);
     // もどる・設定の下に、同じ形のボタン（1 列 2 つ）
-    this.sqBtn(382, 537, 'エディタ', [214, 140, 235], [150, 80, 200]);
-    this.sqBtn(514, 537, '譜面\n情報', [140, 200, 250], [60, 140, 220]);
+    this.sqBtn(382, 537, 'edit', [214, 140, 235], [150, 80, 200]);
+    this.sqBtn(514, 537, 'info', [140, 200, 250], [60, 140, 220]);
     this.songInfo(s, 1700, 300, 180, 1650, 500);
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
@@ -1249,7 +1285,7 @@ export class TndeSelect {
 
   /** もどる・設定と同じ形のボタン（黒い縁・白い縁・上から下へ色の変わる面・つや） */
   private btnCache = new Map<string, HTMLCanvasElement>();
-  private sqBtn(x: number, y: number, label: string, top: number[], bot: number[]) {
+  private sqBtn(x: number, y: number, label: 'edit' | 'info', top: number[], bot: number[]) {
     const W = 115.5, H = 114;
     const Z = this.textScale * 2;
     const key = `${label}|${Z}`;
@@ -1280,11 +1316,11 @@ export class TndeSelect {
       g.fillStyle = '#fff';
       g.fill();
       g.restore();
+      if (label === 'edit') drawPencil(g, W / 2, H / 2);
+      else drawBars(g, W / 2, H / 2 - 5);
       this.btnCache.set(key, cv);
     }
     this.g.drawImage(cv, x, y, W, H);
-    const lines = label.split('\n');
-    lines.forEach((l, i) => this.put(this.text(l, lines.length > 1 ? 30 : 27, 7, '#000'), x + W / 2, y + H / 2 + (i - (lines.length - 1) / 2) * 34, W - 14));
   }
 
   // ---------- 演奏オプション（本家の左下の板） ----------
@@ -1399,6 +1435,312 @@ export class TndeSelect {
     });
     g.restore();
   }
+  // ---------- 曲の長押しのメニュー・フォルダに入れる・消す ----------
+
+  private pop: { kind: 'song' | 'folder' | 'del'; id: string; sel: number; scroll: number } | null = null;
+
+  /** その場所の曲の帯（曲でなければ null） */
+  private songAt(p: { x: number; y: number }): SongEntry | null {
+    const hitBar = (it: Item, q: { x: number; y: number }) => p.x >= q.x && p.x <= q.x + BW && p.y >= q.y && p.y <= q.y + BH && it.kind === 'song' ? it.s : null;
+    const c = this.center;
+    if (c.kind === 'song' && p.y >= 383 && p.y <= 697 && p.x >= 470 && p.x <= 1450) return c.s;
+    for (let k = 1; k <= 4; k++) {
+      for (const sgn of [-1, 1]) {
+        const s = hitBar(this.at(this.cur + sgn * k), slotPos(sgn * k));
+        if (s) return s;
+      }
+    }
+    return null;
+  }
+
+  private openPop(kind: 'song' | 'folder' | 'del', s: SongEntry | string) {
+    const id = typeof s === 'string' ? s : s.id;
+    this.pop = { kind, id, sel: kind === 'del' ? 1 : 0, scroll: 0 };
+    this.se(kind === 'song' ? 'Don' : 'Ka');
+  }
+  private closePop() {
+    this.se('Cancel');
+    this.pop = null;
+  }
+
+  private popSong() { return this.host.songs().find((x) => x.id === this.pop?.id) ?? null; }
+  /** 今いるフォルダ（入っていれば「〜から外す」を出す） */
+  private hereFolder() {
+    const k = this.path[this.path.length - 1];
+    return k && k !== UNCAT && !this.query ? k : null;
+  }
+
+  /** メニューの項目（[名前, 色, する事]） */
+  private popItems(): [string, string, string][] {
+    const p = this.pop;
+    if (!p) return [];
+    if (p.kind === 'song') {
+      const s = this.popSong();
+      const here = this.hereFolder();
+      return [
+        ['フォルダに入れる', BLUE, 'folder'],
+        ...(here && s?.folders.includes(here) ? [[`「${here.split('/').pop()}」から外す`, BLUE, 'remove'] as [string, string, string]] : []),
+        ['この曲を消す', RED, 'del'],
+        ['もどる', GRY, 'close'],
+      ];
+    }
+    if (p.kind === 'del') return [['消す', RED, 'delete'], ['やめる', GRY, 'close']];
+    const colors = this.host.colors();
+    const rows: [string, string, string][] = this.folderTree().map((f) => [f, toHex(lookOf(f.split('/').pop()!, colors[f], f).rim), `f:${f}`]);
+    return [...rows, ['新しいフォルダ', '#9aa0a8', 'new'], ['もどる', GRY, 'close']];
+  }
+  /** フォルダを、親の次にその下の階層が来る順に */
+  private folderTree() {
+    const fs = [...this.host.folders()];
+    const parents = new Set<string>();
+    for (const f of fs) { const a = f.split('/'); for (let i = 1; i < a.length; i++) parents.add(a.slice(0, i).join('/')); }
+    for (const p of parents) if (!fs.includes(p)) fs.push(p);
+    return fs.sort((a, b) => {
+      const A = a.split('/'), B = b.split('/');
+      for (let i = 0; i < Math.min(A.length, B.length); i++) { const c = A[i].localeCompare(B[i], 'ja'); if (c) return c; }
+      return A.length - B.length;
+    });
+  }
+
+  private popMove(d: number) {
+    const p = this.pop!;
+    const n = this.popItems().length;
+    p.sel = (p.sel + d + n) % n;
+    if (p.kind === 'folder') this.keepVisible();
+    this.se('Ka');
+  }
+
+  private async popAct(i: number) {
+    const p = this.pop;
+    if (!p) return;
+    const it = this.popItems()[i];
+    if (!it) return;
+    const a = it[2];
+    if (a === 'close') { if (p.kind === 'folder') { this.se('Cancel'); this.pop = { ...p, kind: 'song', sel: 0 }; } else this.closePop(); return; }
+    if (a === 'folder') { this.openPop('folder', p.id); return; }
+    if (a === 'del') { this.openPop('del', p.id); return; }
+    this.se('Don');
+    if (a === 'remove') {
+      const here = this.hereFolder();
+      if (here) await this.host.toggleFolder(p.id, here);
+      this.pop = null;
+      this.rebuild();
+    } else if (a === 'delete') {
+      this.pop = null;
+      await this.host.deleteSong(p.id);
+      this.rebuild();
+    } else if (a === 'new') {
+      await this.host.newFolder(p.id);
+      this.rebuild(this.center.kind === 'song' ? this.center.s.id : undefined);
+    } else if (a.startsWith('f:')) {
+      await this.host.toggleFolder(p.id, a.slice(2));
+      this.rebuild(this.center.kind === 'song' ? this.center.s.id : undefined);
+    }
+  }
+
+  // 場所（1920×1080）
+  /** 長押しのメニュー・消すの確かめ: 開いた曲の帯の右の板 */
+  private sideBox(n: number, title: boolean) {
+    const h = (title ? 74 : 0) + n * 100 + 40;
+    const y = clamp(540 - h / 2, 20, 1060 - h);
+    return { x: 1462, y, w: 438, h };
+  }
+  /** フォルダの板 */
+  private static readonly FB = { x: 360, y: 40, w: 1200, h: 1010 };
+  private static readonly ROW = 94;
+  private listTop() { return TndeSelect.FB.y + 128; }
+  private listH() { return TndeSelect.FB.h - 128 - 116; }
+  private clampScroll(v: number) {
+    const n = this.popItems().length - 2;
+    return clamp(v, 0, Math.max(0, n * TndeSelect.ROW - this.listH()));
+  }
+  private keepVisible() {
+    const p = this.pop!;
+    const n = this.popItems().length - 2;
+    if (p.sel >= n) return;
+    const top = p.sel * TndeSelect.ROW, bot = top + TndeSelect.ROW;
+    if (top < p.scroll) p.scroll = top;
+    if (bot > p.scroll + this.listH()) p.scroll = bot - this.listH();
+    p.scroll = this.clampScroll(p.scroll);
+  }
+
+  /** 押せる所の [x, y, w, h, 項目の番号] */
+  private popRects(): [number, number, number, number, number][] {
+    const p = this.pop;
+    if (!p) return [];
+    const items = this.popItems();
+    if (p.kind !== 'folder') {
+      const title = p.kind === 'del';
+      const b = this.sideBox(items.length, title);
+      return items.map((_, i) => [b.x + 28, b.y + 30 + (title ? 74 : 0) + i * 100, b.w - 56, 86, i]);
+    }
+    const B = TndeSelect.FB, n = items.length - 2;
+    const out: [number, number, number, number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      const dep = items[i][0].split('/').length - 1;
+      const y = this.listTop() + i * TndeSelect.ROW - p.scroll;
+      if (y + TndeSelect.ROW < this.listTop() || y > this.listTop() + this.listH()) continue;
+      out.push([B.x + 40 + dep * 70, y, B.w - 80 - dep * 70, TndeSelect.ROW - 12, i]);
+    }
+    out.push([B.x + 40, B.y + B.h - 96, 400, 72, n]);
+    out.push([B.x + B.w - 260, B.y + B.h - 96, 220, 72, n + 1]);
+    return out;
+  }
+
+  private popTap(q: { x: number; y: number }) {
+    const p = this.pop!;
+    const hit = this.popRects().find(([x, y, w, h]) => q.x >= x && q.x <= x + w && q.y >= y && q.y <= y + h);
+    if (p.kind === 'folder' && hit && hit[4] < this.popItems().length - 2 && (q.y < this.listTop() || q.y > this.listTop() + this.listH())) return;
+    if (!hit) {
+      // 板の外: 閉じる
+      const B = p.kind === 'folder' ? TndeSelect.FB : this.sideBox(this.popItems().length, p.kind === 'del');
+      if (q.x < B.x || q.x > B.x + B.w || q.y < B.y || q.y > B.y + B.h) this.closePop();
+      return;
+    }
+    p.sel = hit[4];
+    void this.popAct(hit[4]);
+  }
+
+  /** 白い板（黒い縁・影） */
+  private boardAt(x: number, y: number, w: number, h: number, r: number, fill: string) {
+    const g = this.g;
+    g.save();
+    g.shadowColor = 'rgba(60,30,10,0.45)';
+    g.shadowBlur = 10 * this.s;
+    g.shadowOffsetY = 8 * this.s;
+    rrect(g, x, y, w, h, r);
+    g.fillStyle = fill;
+    g.fill();
+    g.restore();
+    rrect(g, x, y, w, h, r);
+    g.lineWidth = 7;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+  }
+  /** 選んでいる所の黄色い枠 */
+  private selRing(x: number, y: number, w: number, h: number, r: number) {
+    const g = this.g;
+    rrect(g, x - 7, y - 7, w + 14, h + 14, r + 7);
+    g.lineWidth = 10;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    g.lineWidth = 6;
+    g.strokeStyle = '#ffe600';
+    g.stroke();
+  }
+  private check(cx: number, cy: number, on: boolean) {
+    const g = this.g;
+    g.beginPath();
+    g.arc(cx, cy, 22, 0, Math.PI * 2);
+    g.fillStyle = on ? '#ffe600' : '#fff';
+    g.fill();
+    g.lineWidth = 6;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    if (on) {
+      g.beginPath();
+      g.moveTo(cx - 11, cy);
+      g.lineTo(cx - 3, cy + 10);
+      g.lineTo(cx + 12, cy - 10);
+      g.lineWidth = 7;
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.stroke();
+    }
+  }
+
+  private drawPop() {
+    const p = this.pop;
+    if (!p) return;
+    const g = this.g;
+    const items = this.popItems();
+    const rects = this.popRects();
+    if (p.kind !== 'folder') {
+      const title = p.kind === 'del';
+      const b = this.sideBox(items.length, title);
+      this.boardAt(b.x, b.y, b.w, b.h, 30, '#fff6e0');
+      if (p.kind === 'song') {
+        // 開いた曲の帯につながる三角
+        g.beginPath();
+        g.moveTo(1440, 540);
+        g.lineTo(b.x + 4, 512);
+        g.lineTo(b.x + 4, 568);
+        g.closePath();
+        g.fillStyle = '#fff6e0';
+        g.fill();
+        g.lineWidth = 5;
+        g.strokeStyle = '#1a1410';
+        g.beginPath();
+        g.moveTo(b.x + 1, 512);
+        g.lineTo(1440, 540);
+        g.lineTo(b.x + 1, 568);
+        g.stroke();
+      } else this.put(this.text('この曲を消す？', 38, 9, '#000'), b.x + b.w / 2, b.y + 64, b.w - 40);
+      for (const [x, y, w, h, i] of rects) {
+        if (i === p.sel) this.selRing(x, y, w, h, h / 2);
+        this.tag(x, y, w, h, items[i][1], items[i][0], items[i][0].length > 7 ? 32 : 36);
+      }
+      return;
+    }
+    // フォルダに入れる: 画面を暗くして大きな板
+    g.fillStyle = 'rgba(0,0,0,0.45)';
+    g.fillRect(-2000, -2000, 6000, 6000);
+    const B = TndeSelect.FB;
+    this.boardAt(B.x, B.y, B.w, B.h, 36, '#fffaf0');
+    rrect(g, B.x + 20, B.y + 20, B.w - 40, 88, 24);
+    g.fillStyle = BLUE;
+    g.fill();
+    g.lineWidth = 6;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    this.put(this.text('フォルダに入れる', 48, 11, '#000'), B.x + B.w / 2, B.y + 64, B.w - 80);
+    const s = this.popSong();
+    const n = items.length - 2;
+    g.save();
+    g.beginPath();
+    g.rect(B.x + 10, this.listTop() - 10, B.w - 20, this.listH() + 20);
+    g.clip();
+    for (const [x, y, w, h, i] of rects) {
+      if (i >= n) continue;
+      const [f, col] = items[i];
+      const dep = f.split('/').length - 1;
+      // 親とつなぐ線
+      if (dep) {
+        const px = x - 70 + 34;
+        g.beginPath();
+        g.moveTo(px, y - 14);
+        g.lineTo(px, y + h / 2);
+        g.lineTo(x, y + h / 2);
+        g.lineWidth = 7;
+        g.strokeStyle = '#1a1410';
+        g.stroke();
+      }
+      if (i === p.sel) this.selRing(x, y, w, h, 22);
+      g.save();
+      g.shadowColor = 'rgba(60,30,10,0.35)';
+      g.shadowBlur = 6 * this.s;
+      g.shadowOffsetY = 5 * this.s;
+      rrect(g, x, y, w, h, 22);
+      g.fillStyle = col;
+      g.fill();
+      g.restore();
+      rrect(g, x, y, w, h, 22);
+      g.lineWidth = 7;
+      g.strokeStyle = '#1a1410';
+      g.stroke();
+      rrect(g, x + 44, y + 13, w - 140, h - 26, 12);
+      g.fillStyle = 'rgba(255,255,255,0.47)';
+      g.fill();
+      this.put(this.text(f.split('/').pop()!, dep ? 38 : 42, 12, col), x + 44 + (w - 140) / 2, y + h / 2 + 1, w - 170);
+      this.check(x + w - 52, y + h / 2, !!s?.folders.includes(f));
+    }
+    g.restore();
+    for (const [x, y, w, h, i] of rects) {
+      if (i < n) continue;
+      if (i === p.sel) this.selRing(x, y, w, h, h / 2);
+      this.tag(x, y, w, h, items[i][1], items[i][0], 34);
+    }
+  }
 }
 
 /** 角の丸い四角の道 */
@@ -1406,4 +1748,92 @@ function rrect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: 
   const q = Math.min(r, w / 2, h / 2);
   g.beginPath();
   g.roundRect(x, y, w, h, q);
+}
+
+// ---------- 難易度えらびのボタンの絵（もどる・設定の絵と同じくらいの黒い縁） ----------
+const EDGE = '#1a1410';
+/** 縁の太さ（外へ見える幅は半分） */
+const EDGE_W = 6.5;
+const vgrad = (g: CanvasRenderingContext2D, y0: number, y1: number, a: string, b: string) => {
+  const q = g.createLinearGradient(0, y0, 0, y1);
+  q.addColorStop(0, a);
+  q.addColorStop(1, b);
+  return q;
+};
+/** エディタ: 黄色い鉛筆（ピンクの消しゴム） */
+function drawPencil(g: CanvasRenderingContext2D, cx: number, cy: number) {
+  g.save();
+  g.translate(cx, cy);
+  g.rotate(-Math.PI / 4);
+  const L = 26, Hh = 11;
+  const body = new Path2D();
+  body.roundRect(-L, -Hh, 2 * L - 8, 2 * Hh, 3);
+  const tip = new Path2D();
+  tip.moveTo(L - 8, -Hh);
+  tip.lineTo(L + 14, 0);
+  tip.lineTo(L - 8, Hh);
+  tip.closePath();
+  const er = new Path2D();
+  er.roundRect(-L - 12, -Hh, 14, 2 * Hh, 6);
+  const all = new Path2D();
+  all.addPath(body);
+  all.addPath(tip);
+  all.addPath(er);
+  g.lineJoin = 'round';
+  g.lineWidth = EDGE_W;
+  g.strokeStyle = EDGE;
+  g.stroke(all);
+  g.fillStyle = vgrad(g, -Hh, Hh, '#ffe86a', '#f2a51a');
+  g.fill(body);
+  g.fillStyle = '#f6d3a6';
+  g.fill(tip);
+  g.fillStyle = EDGE;
+  g.beginPath();
+  g.moveTo(L + 5, -4);
+  g.lineTo(L + 14, 0);
+  g.lineTo(L + 5, 4);
+  g.fill();
+  g.fillStyle = vgrad(g, -Hh, Hh, '#ff9fc0', '#e2507e');
+  g.fill(er);
+  g.lineWidth = 2;
+  g.stroke(body);
+  g.stroke(tip);
+  g.stroke(er);
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.fillRect(-L + 3, -Hh + 3, 2 * L - 16, 4);
+  g.restore();
+}
+/** 譜面情報: 赤・黄・緑の棒グラフ */
+function drawBars(g: CanvasRenderingContext2D, cx: number, cy: number) {
+  g.save();
+  g.translate(cx, cy);
+  const hs = [22, 40, 30];
+  const cols = [['#ff8a7a', '#e8452c'], ['#ffe36a', '#f2b21a'], ['#8ef07a', '#2fb54a']];
+  const W = 14, gap = 6, base = 24;
+  const bl = new Path2D();
+  bl.roundRect(-34, base - 3, 68, 8, 4);
+  const ps = hs.map((h, i) => {
+    const p = new Path2D();
+    p.roundRect(-W * 1.5 - gap + i * (W + gap), base - h, W, h, 3);
+    return p;
+  });
+  const all = new Path2D();
+  ps.forEach((p) => all.addPath(p));
+  all.addPath(bl);
+  g.lineJoin = 'round';
+  g.lineWidth = EDGE_W;
+  g.strokeStyle = EDGE;
+  g.stroke(all);
+  ps.forEach((p, i) => {
+    g.fillStyle = vgrad(g, base - hs[i], base, cols[i][0], cols[i][1]);
+    g.fill(p);
+  });
+  g.fillStyle = '#f4f0e6';
+  g.fill(bl);
+  g.lineWidth = 2;
+  ps.forEach((p) => g.stroke(p));
+  g.stroke(bl);
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  ps.forEach((_, i) => g.fillRect(-W * 1.5 - gap + i * (W + gap) + 3, base - hs[i] + 3, 4, hs[i] - 8));
+  g.restore();
 }

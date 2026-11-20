@@ -86,6 +86,8 @@ export interface TndeFrame {
   best?: number | null;
   /** 演奏オプションのドロン: 音符を描かない（下の文字は出す） */
   doron?: boolean;
+  /** 演奏オプション（印を出す） */
+  mods?: PlayMods | null;
   /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
   laneOnly?: boolean;
   /** 背景の動画（画像）を出している所: full = 全面（上下の背景を描かない）、bottom = 下だけ（下の背景・踊り子・モブを描かない） */
@@ -159,6 +161,11 @@ const hash = (s: string) => {
 
 /** 時刻 t0 から何コマ目か（1 コマ ms ミリ秒） */
 const step = (wall: number, t0: number, ms: number) => Math.floor((wall - t0) / ms);
+
+/** 演奏オプション */
+export interface PlayMods { speed: number; doron: boolean; mirror: boolean; random: 'off' | 'kimagure' | 'detarame'; auto: boolean }
+/** はやさの印がある値（mode/speed の並び。1.0 は印なし） */
+const MOD_SPEEDS = [0.5, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4, 2.5, 3, 3.5, 4];
 
 export class TndeSkin {
   /** 読み込んだ絵（ImageBitmap にして、描くたびに読み直されないようにする。作れなかったときだけ img） */
@@ -1790,10 +1797,32 @@ export class TndeSkin {
       this.put(g, course, P(28), P(232));
       this.drawNameplate(g, F, false);
     });
+    // 演奏オプションの印: むずかしさの印の右に、横 3 つずつ 2 段（点数の下・ネームプレートの上）
+    this.drawMods(c, F.mods, 145, 352, 43, 3, 3);
     // 金・紫の称号のキラキラ（帯の上、字の下）
     const ts = (F.profile ?? DEFAULT_PROFILE).titleStyle;
     if (ts !== 'wood') this.drawTitleShine(c, F.wall);
     this.cached(c, 'plateTop', key, -10, 340, 350, 190, (g) => this.drawNameplate(g, F, true));
+  }
+
+  /**
+   * 演奏オプションの印（スキンの ModeSymbol と Auto）。(x, y) から size の大きさで、per 個ずつ折り返して並べる。
+   * 順は はやさ・ドロン・あべこべ・ランダム・オート（使っているものだけ）
+   */
+  drawMods(c: CanvasRenderingContext2D, m: PlayMods | null | undefined, x: number, y: number, size: number, gap: number, per: number) {
+    if (!m) return;
+    const list: [string, number][] = [];
+    const si = MOD_SPEEDS.findIndex((v) => Math.abs(v - m.speed) < 0.001);
+    if (si >= 0) list.push(['mode/speed', si]);
+    if (m.doron) list.push(['mode/sym', 0]);
+    if (m.mirror) list.push(['mode/sym', 1]);
+    if (m.random === 'kimagure') list.push(['mode/sym', 2]);
+    if (m.random === 'detarame') list.push(['mode/sym', 3]);
+    if (m.auto) list.push(['mode/sym', 4]);
+    list.forEach(([name, i], k) => {
+      const im = this.img(name);
+      if (im) this.di(c, im, i * 30, 0, 30, 30, x + (k % per) * (size + gap), y + Math.floor(k / per) * (size + gap), size, size);
+    });
   }
 
   /**

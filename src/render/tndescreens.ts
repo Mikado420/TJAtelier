@@ -3,7 +3,7 @@
  * 座標は 1280×720 の単位（スキンの絵の大きさ）で書き、描くときに 1.5 倍して 1920×1080 に置く。
  * 動きの時間・位置は TJAPlayer3 系（OpenTaiko）の作りと、本家の参考動画で測った値
  */
-import { midText, type TndeSkin, type PlateStyle } from './tnde';
+import { midText, type TndeSkin, type PlateStyle, type PlayMods } from './tnde';
 
 const S = 1.5;
 /** 曲名の字（大江戸勘亭流） */
@@ -228,6 +228,8 @@ export interface TndeResultData {
   /** 自己ベストを更新した（差） */
   best: number | null;
   plate: { name: string; title: string; profile?: PlateStyle };
+  /** 演奏オプション（印を出す） */
+  mods?: PlayMods | null;
 }
 
 /** 雲（11 個）: 中心の位置と、ゆっくり左へ流れる幅 */
@@ -413,6 +415,8 @@ export class TndeResult {
     const db = sk.pic('res/DifficultyBar');
     // 本家の参考動画に合わせた位置・大きさ（前より少し右・少し大きい）
     if (db) sk.blit(c, db, 0, clamp(d.course, 0, 4) * 50, 153, 50, 38, 160, 153 * 1.55, 50 * 1.55);
+    // 演奏オプションの印（むずかしさの札の右に 1 列）
+    sk.drawMods(c, d.mods, 290, 186, 42, 4, 9);
     this.drawGauge(c);
     this.drawCounts(c);
     if (t >= this.S) {

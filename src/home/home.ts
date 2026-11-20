@@ -285,6 +285,24 @@ export class Home {
       edit: (id, course) => { this.stopPreview(); void this.host.open(id, 'edit', course); },
       info: (id, course) => this.host.analyze(id, course),
       jacket: (s) => this.jacketUrl(s),
+      toggleFolder: async (id, f) => {
+        const s = this.songs.find((x) => x.id === id);
+        if (s?.folders.includes(f)) await removeFromFolder([id], f);
+        else await addToFolder([id], f);
+        await this.reload();
+      },
+      newFolder: async (id) => {
+        const name = await this.askName('新しいフォルダ', '', '作って入れる');
+        if (!name) return;
+        await addToFolder([id], name);
+        await this.reload();
+      },
+      deleteSong: async (id) => {
+        this.stopPreview();
+        await deleteSong(id);
+        if (this.sel === id) this.sel = null;
+        await this.reload();
+      },
     }, this.el);
     await this.tsel.show(select);
   }
