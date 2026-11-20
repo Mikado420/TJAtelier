@@ -162,6 +162,15 @@ const hash = (s: string) => {
 /** 時刻 t0 から何コマ目か（1 コマ ms ミリ秒） */
 const step = (wall: number, t0: number, ms: number) => Math.floor((wall - t0) / ms);
 
+/** 大きな動きの絵（選曲画面にいる間・リザルトの間は持たない）: どんちゃんのふだん以外の動き・踊り子の出てくる動き・ゴーゴーの光 */
+const HEAVY = /^(chara\/(?!Normal$)|dancer\/In|fx\/GoGoSplash$)/;
+/** 読む順（小さいほど先） */
+function prio(n: string) {
+  if (/^(bg\/|lane\/|notes$|senotes$|taiko\/|gauge\/|course\/|nameplate|chara\/Normal$|dancer\/Normal|judge|chip$|game|footer|load\/|res\/)/.test(n)) return 0;
+  if (HEAVY.test(n)) return 2;
+  return 1;
+}
+
 /** 演奏オプション */
 export interface PlayMods { speed: number; doron: boolean; mirror: boolean; random: 'off' | 'kimagure' | 'detarame'; auto: boolean }
 /** はやさの印がある値（mode/speed の並び。1.0 は印なし） */
@@ -198,10 +207,14 @@ export class TndeSkin {
         } catch { /* 字が無くても描ける */ }
       }),
     );
-    // 曲が決まるまでは（選曲画面のネームプレート用に）小さな絵だけ読む
-    if (title !== undefined) s.choose(title);
-    else s.dormant = true;
-    await s.sync();
+    // 曲が決まるまでは、どの曲でも使う絵だけを裏で読む（大きな動き・曲ごとの背景は曲を始めるときに）。
+    // 待つのはネームプレートだけ（選曲画面をすぐに出す）
+    if (title !== undefined) { s.choose(title); await s.sync(); }
+    else {
+      s.dormant = true;
+      void s.sync();
+      await Promise.all(['nameplate', 'nameplate_frames'].map((n) => s.fetchImg(n)));
+    }
     s.ready = true;
     return s;
   }
@@ -217,6 +230,7 @@ export class TndeSkin {
     this.pick = { ...this.pick, key: '' };
     this.maxWant = false;
     this.endWant.clear();
+    // （どの曲でも使う絵は持ったまま。次の曲がすぐ始まるように）
     if (!keepScreens) {
       this.dropScreen('load');
       this.dropScreen('res');
@@ -224,7 +238,7 @@ export class TndeSkin {
     void this.sync();
   }
 
-  /** プレイ画面を離れている（選曲画面で使う絵だけ持っておく） */
+  /** プレイ画面を離れている（どの曲でも使う絵だけ持っておく。大きな動き・曲ごとの背景は手放す） */
   private dormant = false;
 
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
@@ -237,10 +251,7 @@ export class TndeSkin {
   /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
   private wants(name: string) {
     const p = this.pick;
-    if (this.dormant) {
-      if (/^(load|res)\//.test(name)) return this.screenWant.has(name.slice(0, name.indexOf('/')));
-      return /^(nameplate|mode\/|fx\/TitleShine$)/.test(name);
-    }
+    if (this.dormant && HEAVY.test(name)) return false;
     // 曲が決まるまでは、曲ごとに変わる絵（背景・踊り子・モブ）は読み込まない
     if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;
     let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
@@ -349,7 +360,11 @@ export class TndeSkin {
       }
       this.dropCaches();
     }
-    return Promise.all(names.filter((n) => this.wants(n)).map((n) => this.fetchImg(n))).then(() => {});
+    // 読む順: 背景・レーン・音符などの画面の土台 → 演出 → 大きな動き（どんちゃんの GoGo など）
+    const want = names.filter((n) => this.wants(n)).sort((a, b) => prio(a) - prio(b));
+    const all = want.map((n) => [n, this.fetchImg(n)] as const);
+    // 待つのは大きな動き以外（大きな動きは裏で読み続ける。始まってすぐには使わない）
+    return Promise.all(all.filter(([n]) => prio(n) < 2).map(([, p]) => p)).then(() => {});
   }
 
   /** 絵を置いておく名前（分けてある連番は、2 枚目から name#1, name#2, …） */
@@ -358,6 +373,7 @@ export class TndeSkin {
     return pages && pages.length > 1 ? pages.map((_, i) => (i ? `${name}#${i}` : name)) : [name];
   }
 
+  private retries = new Map<string, number>();
   private fetchImg(name: string) {
     const info = this.man.img[name] ?? this.man.anim[name];
     if (!info) return Promise.resolve(null);
@@ -372,10 +388,17 @@ export class TndeSkin {
     const url = this.base + file + (this.man.v ? `?v=${this.man.v}` : '');
     p = this.queue(() => loadBitmap(url)).then((v) => {
       if (!v) {
-        // 読み込めなかった絵は、次にまた読み込み直せるようにしておく
-        if (this.loading.get(key) === p) this.loading.delete(key);
+        // 読み込めなかった絵は、少し待って読み直す（混んでいて時間切れになったときに、背景などが消えたままにならないように）
+        if (this.loading.get(key) === p) {
+          this.loading.delete(key);
+          const name = key.replace(/#\d+$/, '');
+          const tries = (this.retries.get(key) ?? 0) + 1;
+          this.retries.set(key, tries);
+          if (tries <= 5) setTimeout(() => { if (this.wants(name)) void this.fetchOne(key, file, k); }, 1000 * tries);
+        }
         return null;
       }
+      this.retries.delete(key);
       if (this.loading.get(key) !== p) { if ('close' in v) v.close(); return null; }
       if (k && k !== 1) this.hq.set(v, k);
       this.imgs.set(key, v);
@@ -469,6 +492,12 @@ export class TndeSkin {
   private frame(c: CanvasRenderingContext2D, name: string, n: number, x: number, y: number, k = S) {
     // 魂ゲージが満タンのどんちゃんの絵は、満タンが近づいてから読み込む（読み込み中はふだんの絵で）
     if (!this.animReady(name) && name.startsWith('chara/') && name.endsWith('_Max')) name = name.slice(0, -4);
+    // どんちゃんのふだん以外の動きがまだ読めていないときは、ふだんの動きで（消えないように）
+    if (name.startsWith('chara/') && name !== 'chara/Normal' && !this.animReady(name) && this.animReady('chara/Normal')) {
+      const nm = this.man.anim['chara/Normal'];
+      if (nm) n = ((Math.floor(n) % nm.n) + nm.n) % nm.n;
+      name = 'chara/Normal';
+    }
     const a = this.man.anim[name];
     if (!a) return;
     const i = Math.max(0, Math.min(a.n - 1, Math.floor(n)));
@@ -2421,7 +2450,7 @@ async function loadBitmap(url: string): Promise<ImageBitmap | HTMLImageElement |
     try {
       const bm = await Promise.race([
         fetch(url).then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status))))).then((b) => createImageBitmap(b)),
-        wait(12000),
+        wait(25000),
       ]);
       if (bm) return bm;
     } catch { /* もう 1 回 */ }

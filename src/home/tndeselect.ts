@@ -267,30 +267,20 @@ export class TndeSelect {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
-    this.release();
+    // プレイ中は大きな絵（フォルダのキャラ・難易度えらびの背景・跳ぶどんちゃん）と描いた字を手放す。
+    // ほかの絵（65MB ほど）は持ったまま（戻ったときにすぐ出せるように）
+    this.releaseLazy();
   }
 
-  /**
-   * 絵と描いておいた字・色を変えた絵を手放す（プレイ中にメモリを空けておく。iPhone は足りないと落ちる）。次に出すときに読み直す。
-   * canvas は大きさを 0 にしてから手放す（iPhone は canvas の分のメモリをすぐには返さず、たまると落ちる）
-   */
-  private release() {
-    this.gen++;
-    for (const m of this.imgs.values()) freeImg(m.im);
-    for (const a of this.anims.values()) for (const pg of a.pages) pg.close();
-    this.imgs.clear();
-    this.anims.clear();
-    this.pending.clear();
-    for (const m of [...this.tints.values(), ...this.sils.values()]) freeImg(m.im);
+  private releaseLazy() {
+    for (const [k, m] of [...this.imgs]) if (LAZY.test(k)) { freeImg(m.im); this.imgs.delete(k); }
+    for (const [k, a] of [...this.anims]) if (LAZY.test(k)) { for (const pg of a.pages) pg.close(); this.anims.delete(k); }
+    for (const [k, m] of [...this.tints]) if (LAZY.test(k)) { freeImg(m.im); this.tints.delete(k); }
+    for (const k of [...this.pending]) if (LAZY.test(k)) this.pending.delete(k);
     for (const c of this.btnCache.values()) freeImg(c);
     for (const t of this.texts.values()) freeImg(t.cv);
-    this.tints.clear();
-    this.sils.clear();
     this.btnCache.clear();
     this.texts.clear();
-    this.pat = null;
-    this.loaded = null;
-    this.man = null;
     this.jackets.clear();
   }
 
@@ -342,11 +332,11 @@ export class TndeSelect {
       const a = man.anim[name];
       if (m) {
         const im = await bmp(m.f);
-        if (gen !== this.gen) { im.close(); return; }
+        if (gen !== this.gen || (!this.on && LAZY.test(name))) { im.close(); return; }
         this.imgs.set(name, { ...m, im });
       } else if (a) {
         const pages = await Promise.all(a.pages.map(bmp));
-        if (gen !== this.gen) { for (const pg of pages) pg.close(); return; }
+        if (gen !== this.gen || (!this.on && LAZY.test(name))) { for (const pg of pages) pg.close(); return; }
         this.anims.set(name, { ...a, pages });
       }
       this.used.set(name, this.wall);
@@ -825,6 +815,12 @@ export class TndeSelect {
         const c = this.courseAt(this.dsel);
         if (it.kind === 'song' && c) this.host.play(it.s.id, c);
       }
+    }
+    // 後から読む絵は、まんなかに来たときに読み始めておく（開いたとき・決めたときに間に合うように）
+    {
+      const c = this.center;
+      if (c.kind === 'folder' && c.look.chara >= -1) this.im(`boxChara${c.look.chara}`);
+      else if (c.kind === 'song') { this.im(`diffBack${c.look.bar < 0 ? 0 : c.look.bar}`); if (this.still > 300) this.an('donStart'); }
     }
     // 試聴: まんなかの曲が開いたら流す（フォルダの上・フォルダを開く間は止める。流している間は前の曲のまま）
     const it = this.center;
@@ -1835,7 +1831,7 @@ export class TndeSelect {
  */
 const BOX_K = 2.6, BOX_FROM = 950, BOX_END = ((1940 - BOX_FROM) * 1.3) / BOX_K, OPEN_AT = 60, OPEN_MS = 140;
 /** 後から読む絵 */
-const LAZY = /^(boxChara|diffBack|bar\d|donStart|donSelect)/;
+const LAZY = /^(boxChara|diffBack|donStart|donSelect)/;
 /** 絵を手放す（canvas は大きさを 0 に） */
 function freeImg(im: ImageBitmap | HTMLCanvasElement) {
   if ('close' in im) im.close();
