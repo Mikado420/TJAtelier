@@ -267,48 +267,119 @@ export class TndeSelect {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
-    // 絵を手放す（プレイ中にメモリを空けておく。iPhone は足りないと落ちる）。次に出すときに読み直す
-    for (const m of this.imgs.values()) if ('close' in m.im) m.im.close();
+    this.release();
+  }
+
+  /**
+   * 絵と描いておいた字・色を変えた絵を手放す（プレイ中にメモリを空けておく。iPhone は足りないと落ちる）。次に出すときに読み直す。
+   * canvas は大きさを 0 にしてから手放す（iPhone は canvas の分のメモリをすぐには返さず、たまると落ちる）
+   */
+  private release() {
+    this.gen++;
+    for (const m of this.imgs.values()) freeImg(m.im);
     for (const a of this.anims.values()) for (const pg of a.pages) pg.close();
     this.imgs.clear();
     this.anims.clear();
+    this.pending.clear();
+    for (const m of [...this.tints.values(), ...this.sils.values()]) freeImg(m.im);
+    for (const c of this.btnCache.values()) freeImg(c);
+    for (const t of this.texts.values()) freeImg(t.cv);
     this.tints.clear();
     this.sils.clear();
     this.btnCache.clear();
     this.texts.clear();
     this.pat = null;
     this.loaded = null;
+    this.man = null;
+    this.jackets.clear();
   }
 
   // ---------- 絵 ----------
 
+  private man: { img: Record<string, { f: string; k: number; x: number; y: number; w: number; h: number }>; anim: Record<string, Omit<Anim, 'pages'> & { pages: string[] }> } | null = null;
+  /** 読み込み中の絵 */
+  private pending = new Set<string>();
+  /** 読み直しの世代（手放したあとに届いた絵は捨てる） */
+  private gen = 0;
+  /** 最後に使った時（後から読む絵を手放す順） */
+  private used = new Map<string, number>();
+
   private async load() {
+    const gen = this.gen;
     const r = await fetch(`${BASE}sel.json`, { cache: 'no-cache' });
-    const man = (await r.json()) as { img: Record<string, { f: string; k: number; x: number; y: number; w: number; h: number }>; anim: Record<string, Omit<Anim, 'pages'> & { pages: string[] }> };
-    const bmp = async (f: string) => createImageBitmap(await (await fetch(`${BASE}${f}`)).blob());
-    await Promise.all([
-      ...Object.entries(man.img).map(async ([n, m]) => { try { this.imgs.set(n, { ...m, im: await bmp(m.f) }); } catch { /* 無くても描ける */ } }),
-      ...Object.entries(man.anim).map(async ([n, m]) => { try { this.anims.set(n, { ...m, pages: await Promise.all(m.pages.map(bmp)) }); } catch { /* 無くても描ける */ } }),
-    ]);
+    const man = (await r.json()) as NonNullable<TndeSelect['man']>;
+    if (gen !== this.gen) return;
+    this.man = man;
+    // 大きな絵（フォルダのキャラ・難易度えらびの背景・どんちゃんの跳ぶ動き・帯の色）は、使うときに読む
+    await Promise.all([...Object.keys(man.img), ...Object.keys(man.anim)].filter((n) => !LAZY.test(n)).map((n) => this.fetchImg(n)));
     for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
     await Promise.all([document.fonts.load(`40px ${KANTEI}`, '選曲自己ベスト'), document.fonts.load(`36px ${SEURAT}`, '1曲目∞')]);
   }
 
   private se(n: string) { this.host.audio.playUi(`tsel:${n}`); }
 
+  /** 絵（まだ読んでいなければ読み始めて undefined） */
+  private im(name: string) {
+    const m = this.imgs.get(name);
+    if (m) { this.used.set(name, this.wall); return m; }
+    void this.fetchImg(name);
+    return undefined;
+  }
+  private an(name: string) {
+    const a = this.anims.get(name);
+    if (a) { this.used.set(name, this.wall); return a; }
+    void this.fetchImg(name);
+    return undefined;
+  }
+  private async fetchImg(name: string) {
+    const man = this.man;
+    if (!man || this.pending.has(name) || this.imgs.has(name) || this.anims.has(name)) return;
+    const gen = this.gen;
+    this.pending.add(name);
+    const bmp = async (f: string) => createImageBitmap(await (await fetch(`${BASE}${f}`)).blob());
+    try {
+      const m = man.img[name];
+      const a = man.anim[name];
+      if (m) {
+        const im = await bmp(m.f);
+        if (gen !== this.gen) { im.close(); return; }
+        this.imgs.set(name, { ...m, im });
+      } else if (a) {
+        const pages = await Promise.all(a.pages.map(bmp));
+        if (gen !== this.gen) { for (const pg of pages) pg.close(); return; }
+        this.anims.set(name, { ...a, pages });
+      }
+      this.used.set(name, this.wall);
+      this.evict(name);
+    } catch { /* 無くても描ける */ } finally {
+      if (gen === this.gen) this.pending.delete(name);
+    }
+  }
+  /** 後から読む大きな絵は、種類ごとに最近使った 2 つだけ残す */
+  private evict(name: string) {
+    const grp = /^(boxChara|diffBack)/.exec(name)?.[1];
+    if (!grp) return;
+    const keys = [...this.imgs.keys()].filter((k) => k.startsWith(grp)).sort((a, b) => (this.used.get(b) ?? 0) - (this.used.get(a) ?? 0));
+    for (const k of keys.slice(2)) {
+      freeImg(this.imgs.get(k)!.im);
+      this.imgs.delete(k);
+      for (const t of [...this.tints.keys()]) if (t.startsWith(`${k}|`)) { freeImg(this.tints.get(t)!.im); this.tints.delete(t); }
+    }
+  }
+
   /** 元の絵の座標 (sx, sy, sw, sh) を (dx, dy, dw, dh) に描く。切り出し・細かさを足し引きする */
   private blit(name: string, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) {
-    const m = this.imgs.get(name);
+    const m = this.im(name);
     if (!m) return;
     this.g.drawImage(m.im, (sx - m.x) * m.k, (sy - m.y) * m.k, sw * m.k, sh * m.k, dx, dy, dw, dh);
   }
   /** 1280×720 いっぱいの絵を、1920×1080 の (ox, oy) ずらした所に */
   private full(name: string, ox = 0, oy = 0) {
-    const m = this.imgs.get(name);
+    const m = this.im(name);
     if (m) this.g.drawImage(m.im, m.x * 1.5 + ox, m.y * 1.5 + oy, m.w * 1.5, m.h * 1.5);
   }
   private whole(name: string, dx: number, dy: number, k = 1.5) {
-    const m = this.imgs.get(name);
+    const m = this.im(name);
     if (m) this.g.drawImage(m.im, dx, dy, m.w * k, m.h * k);
   }
   /** 9 分割で引きのばす（角はそのまま 1.5 倍） */
@@ -329,7 +400,7 @@ export class TndeSelect {
   private silhouette(name: string): Img | undefined {
     const have = this.sils.get(name);
     if (have) return have;
-    const m = this.imgs.get(name);
+    const m = this.im(name);
     if (!m) return undefined;
     const o = document.createElement('canvas');
     o.width = m.im.width; o.height = m.im.height;
@@ -352,7 +423,7 @@ export class TndeSelect {
     const key = `${name}|${to.join(',')}`;
     const have = this.tints.get(key);
     if (have) return have;
-    const m = this.imgs.get(name);
+    const m = this.im(name);
     if (!m) return undefined;
     const o = document.createElement('canvas');
     o.width = m.im.width; o.height = m.im.height;
@@ -373,7 +444,7 @@ export class TndeSelect {
     return t;
   }
   private barImg(l: Look) {
-    if (l.bar < 0) return this.imgs.get('barBack');
+    if (l.bar < 0) return this.im('barBack');
     return this.tinted(`bar${l.bar}`, BAR_BASE[l.bar], l.rim);
   }
 
@@ -411,7 +482,12 @@ export class TndeSelect {
       chars.forEach((ch, i) => { if (pass === 0) { if (lw > 0) g.strokeText(ch, x, 0); } else g.fillText(ch, x, 0); x += adv[i]; });
     }
     const r = { cv, w: w + pad * 2, h: asc + des + pad * 2, ax: (w + pad * 2) / 2, ay: (asc + des + pad * 2) / 2 };
-    if (this.texts.size > 400) this.texts.clear();
+    // 描いた字は 160 まで（古いものから手放す）
+    while (this.texts.size >= 160) {
+      const [k0, old] = this.texts.entries().next().value!;
+      freeImg(old.cv);
+      this.texts.delete(k0);
+    }
     this.texts.set(key, r);
     return r;
   }
@@ -495,7 +571,9 @@ export class TndeSelect {
     if (this.busy()) return;
     if (this.opt.open) { this.optChange(1); return; }
     if (this.diffT >= 0) { this.decideDiff(); return; }
-    if (this.scroll !== 0 || this.still < 520) return;
+    if (this.scroll !== 0) return;
+    // 開ききる前に決めたときは、開いた所から
+    this.still = Math.max(this.still, OPEN_AT + OPEN_MS);
     const it = this.center;
     if (it.kind === 'song') {
       this.se('Don');
@@ -687,7 +765,13 @@ export class TndeSelect {
     this.ox = (w - 1920 * this.s) / 2;
     this.oy = (h - 1080 * this.s) / 2;
     const z = Math.max(1, Math.round(this.s * 2) / 2);
-    if (z !== this.textScale) { this.textScale = z; this.texts.clear(); }
+    if (z !== this.textScale) {
+      this.textScale = z;
+      for (const t of this.texts.values()) freeImg(t.cv);
+      this.texts.clear();
+      for (const c of this.btnCache.values()) freeImg(c);
+      this.btnCache.clear();
+    }
   }
 
   private frame(now: number) {
@@ -713,7 +797,7 @@ export class TndeSelect {
     if (this.boxT >= 0) {
       this.boxT += dt;
       // ctBoxOpen: 200 から 1.3ms ごと。1940 で中を入れ替える
-      if (this.boxT >= (1940 - 200) * 1.3 && this.boxTo) {
+      if (this.boxT >= BOX_END && this.boxTo) {
         const from = this.path[this.path.length - 1];
         const up = this.boxTo.length < this.path.length;
         this.path = this.boxTo;
@@ -732,7 +816,7 @@ export class TndeSelect {
     if (this.diffT >= 0) this.diffT += dt;
     if (this.diffOut >= 0) {
       this.diffOut += dt;
-      if (this.diffOut >= 400) { this.diffOut = -1; this.diffT = -1; this.still = 520; }
+      if (this.diffOut >= 400) { this.diffOut = -1; this.diffT = -1; this.still = OPEN_AT + OPEN_MS; }
     }
     if (this.startT >= 0) {
       this.startT += dt;
@@ -746,18 +830,18 @@ export class TndeSelect {
     const it = this.center;
     let want = this.previewed;
     if (this.boxT >= 0 || (it.kind !== 'song' && this.still > 0)) want = null;
-    else if (it.kind === 'song' && this.still >= 520) want = it.s;
+    else if (it.kind === 'song' && this.still >= 450) want = it.s;
     if (want !== this.previewed) {
       this.previewed = want;
       this.host.preview(want);
     }
   }
 
-  /** 帯が開いた量（TJAPlayer3 の BarAnimeCount: 止まって 400ms から、120ms で 0→62） */
+  /** 帯が開いた量（0〜62。本家は止まって 400ms から 120ms で開くが、待たずに使えるよう 60ms から 140ms で開く） */
   private bac() {
     if (this.scroll !== 0 || this.boxT >= 0) return this.boxT >= 0 ? 62 : 0;
-    const v = this.still / 2;
-    return v <= 200 ? 0 : v >= 260 ? 62 : Math.sin(rad((v - 200) * 1.5)) * 62;
+    const t = clamp((this.still - OPEN_AT) / OPEN_MS, 0, 1);
+    return Math.sin(rad(t * 90)) * 62;
   }
 
   private draw() {
@@ -808,7 +892,7 @@ export class TndeSelect {
     g.fillStyle = gr;
     g.fillRect(0, 0, W, H);
     // 模様（白・不透明度つきの 1 枚を繰り返す）。本家の画面に重ねて測った: 720p の 1.5 倍で、左へ 1 秒に 93 px 流れる
-    const m = this.imgs.get('pattern');
+    const m = this.im('pattern');
     if (m) {
       if (!this.pat) this.pat = g.createPattern(m.im, 'repeat');
       if (this.pat) {
@@ -831,8 +915,8 @@ export class TndeSelect {
 
   /** どんちゃん（1 秒に 45 コマ。決めたときは跳ぶ） */
   private don() {
-    const jump = this.startT >= 0 ? this.anims.get('donStart') : undefined;
-    const a = jump ?? this.anims.get('donLoop');
+    const jump = this.startT >= 0 ? this.an('donStart') : undefined;
+    const a = jump ?? this.an('donLoop');
     if (!a) return;
     const n = jump ? Math.min(a.n - 1, Math.floor(this.startT / (1000 / 45))) : Math.floor(this.wall / (1000 / 45)) % a.n;
     const pg = a.pages[Math.floor(n / a.per)];
@@ -867,7 +951,7 @@ export class TndeSelect {
     (['clear', 'fc', 'allgood'] as const).forEach((cr, k) => num(cnt.crown[cr], (42 + 62 * k + 38) * 1.5, 309 * 1.5));
     this.full('point');
     // 自己ベスト: 本家と重ねて測った 1.6 倍・左上 (29, 581)
-    const sc = this.imgs.get(`score${Math.min(ci, 4)}`);
+    const sc = this.im(`score${Math.min(ci, 4)}`);
     if (sc) this.g.drawImage(sc.im, 29, 581, sc.w * 1.6, sc.h * 1.6);
     this.put(this.text('自己ベスト', 19.5, 6.5, '#0c0806', { kx: 0.96 }), 186, 603);
     const it = this.center;
@@ -891,7 +975,7 @@ export class TndeSelect {
 
   /** 右上の時間（TJAtelier は時間を区切らないので ∞。本家の数字と同じ灰色・太さの線で） */
   private timer() {
-    const m = this.imgs.get('headerTimer');
+    const m = this.im('headerTimer');
     if (!m) return;
     const k = 1.49, x = 1687, y = 31;
     this.g.drawImage(m.im, x, y, m.w * k, m.h * k);
@@ -937,8 +1021,8 @@ export class TndeSelect {
     const p0 = this.scroll;
     const ga = g.globalAlpha;
     // フォルダを開くとき、ほかの帯は 1200〜1620 で消え、入れ替えたあと 300ms で出てくる
-    const boxV = this.boxT >= 0 ? 200 + this.boxT / 1.3 : -1;
-    const others = boxV >= 0 ? clamp(1 - (boxV - 1200) / 420, 0, 1) : clamp(this.fadeIn / 300, 0, 1);
+    const boxV = this.boxT >= 0 ? BOX_FROM + (this.boxT * BOX_K) / 1.3 : -1;
+    const others = boxV >= 0 ? clamp(1 - (boxV - 1200) / 420, 0, 1) : clamp(this.fadeIn / 150, 0, 1);
     g.globalAlpha = ga * others;
     for (let k = 5; k >= 1; k--) {
       for (const sgn of [-1, 1]) {
@@ -997,9 +1081,9 @@ export class TndeSelect {
     if (sx < 1) { const c = x + w / 2; w *= sx; x = c - w / 2; }
     if (w < 2) return;
     // 光る枠（フォルダは黄色、曲はうすい黄色）。決めたときは点滅
-    const sel = kind === 'song' ? this.tinted('barSelect', [255, 255, 0], [254, 252, 191]) : this.imgs.get('barSelect');
+    const sel = kind === 'song' ? this.tinted('barSelect', [255, 255, 0], [254, 252, 191]) : this.im('barSelect');
     let glowA = t;
-    const flash = this.boxT >= 0 ? this.boxT : this.diffT >= 0 ? this.diffT : -1;
+    const flash = this.boxT >= 0 ? this.boxT * BOX_K : this.diffT >= 0 ? this.diffT : -1;
     if (flash >= 0 && flash < 800) { const v = flash % 200; glowA = v < 100 ? v / 100 : 1 - (v - 100) / 100; glowA = 0.5 + glowA * 0.5; }
     if (sel && glowA > 0) {
       g.save();
@@ -1009,7 +1093,7 @@ export class TndeSelect {
     }
     const bar = this.barImg(it.look);
     if (bar) this.nine(bar, [0, 0, 632, 92], [x, y, w, h], 21, 21);
-    const ov = this.imgs.get('barOverlay');
+    const ov = this.im('barOverlay');
     // 中の明るい所: 閉じた (562.5,498,796.5,84) → 開いた 曲 (563,392,794,283) / フォルダ (564,498,792,177)
     const iy = lerp(471 + 27, kind === 'song' ? 392 : 498, t);
     const ih = lerp(84, kind === 'song' ? 283 : 177, t);
@@ -1040,7 +1124,7 @@ export class TndeSelect {
   }
 
   private boxChara(i: number, bac: number) {
-    const m = this.imgs.get(`boxChara${i}`);
+    const m = this.im(`boxChara${i}`);
     if (!m) return;
     // TJAPlayer3: 45 までは外へ、そのあと戻る
     const anime = (bac <= 45 ? bac * 3.333 : 150 - (bac - 45) * 2.1176) * 1.5;
@@ -1073,7 +1157,7 @@ export class TndeSelect {
 
   /** 左の大きなむずかしさの印（うすく） */
   private mark(ci: number, a: number) {
-    const m = this.imgs.get(`mark${ci}`);
+    const m = this.im(`mark${ci}`);
     if (!m) return;
     const g = this.g;
     g.save();
@@ -1090,7 +1174,7 @@ export class TndeSelect {
     const s = it.s;
     const g = this.g;
     const backName = `diffBack${it.look.bar < 0 ? 0 : it.look.bar}`;
-    const bk = this.imgs.get(backName);
+    const bk = this.im(backName);
     if (bk) g.drawImage(bk.im, 960 - 858 * 0.75, 435 - 528 * 0.75, 858 * 1.5, 528 * 1.5);
     this.put(this.text(s.title, 52, 16, '#100b0b', { kx: 0.98, punct: 0.4 }), 961.5, 195, 1100);
     if (s.subtitle) this.put(this.text(s.subtitle, 30, 10, '#100b0b', { kx: 0.9 }), 962, 256.5, 1100);
@@ -1273,11 +1357,13 @@ export class TndeSelect {
     if (!s.jacket) return null;
     const key = `${s.id}:${s.jacket}`;
     if (this.jackets.has(key)) return this.jackets.get(key) ?? null;
+    // ジャケットは最近の 6 枚だけ持つ（大きな絵を次々に読むとメモリが足りなくなる）
+    while (this.jackets.size >= 6) this.jackets.delete(this.jackets.keys().next().value!);
     this.jackets.set(key, null);
     void this.host.jacket(s).then((url) => {
       if (!url) return;
       const im = new Image();
-      im.onload = () => this.jackets.set(key, im);
+      im.onload = () => { if (this.jackets.has(key)) this.jackets.set(key, im); };
       im.src = url;
     });
     return null;
@@ -1741,6 +1827,19 @@ export class TndeSelect {
       this.tag(x, y, w, h, items[i][1], items[i][0], 34);
     }
   }
+}
+
+/**
+ * フォルダを開け閉めする速さ（本家の ctBoxOpen の何倍か。本家は 2.3 秒かかって待たされるので、点滅を短くして 2.6 倍で約 0.5 秒に）と、
+ * 止まってから曲の帯が開き始めるまで・開く時間（ms）
+ */
+const BOX_K = 2.6, BOX_FROM = 950, BOX_END = ((1940 - BOX_FROM) * 1.3) / BOX_K, OPEN_AT = 60, OPEN_MS = 140;
+/** 後から読む絵 */
+const LAZY = /^(boxChara|diffBack|bar\d|donStart|donSelect)/;
+/** 絵を手放す（canvas は大きさを 0 に） */
+function freeImg(im: ImageBitmap | HTMLCanvasElement) {
+  if ('close' in im) im.close();
+  else { im.width = 0; im.height = 0; }
 }
 
 /** 角の丸い四角の道 */

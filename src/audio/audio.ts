@@ -412,10 +412,22 @@ export class AudioEngine {
   private pv: { src: AudioBufferSourceNode; g: GainNode; at: number; from: number; dur: number } | null = null;
 
   /** 試聴の音源を読み込む（同じ key なら前に読んだものを使う） */
+  /** 試聴の音を読み解いている途中（同時に 1 曲だけ。続けて曲を動かしたときにメモリが足りなくならないように） */
+  private pvBusy: Promise<unknown> = Promise.resolve();
+  private pvWant = '';
   async previewLoad(key: string, data: ArrayBuffer): Promise<AudioBuffer> {
     if (this.pvCache?.key === key) return this.pvCache.buf;
     this.pvCache = null; // 前の曲の音（大きい）は持たない
-    const buf = await this.ctx.decodeAudioData(data.slice(0));
+    this.pvWant = key;
+    await this.pvBusy.catch(() => {});
+    // 待っている間に別の曲になったら読まない
+    if (this.pvWant !== key) throw new Error('skip');
+    const have = this.pvCache as { key: string; buf: AudioBuffer } | null;
+    if (have?.key === key) return have.buf;
+    const job = this.ctx.decodeAudioData(data);
+    this.pvBusy = job;
+    const buf = await job;
+    if (this.pvWant !== key) throw new Error('skip');
     const lv = AudioEngine.level(buf, false);
     this.pvCache = { key, buf, gain: lv > 0 ? Math.min(6, AudioEngine.TARGET / lv) : 0.8 };
     return buf;

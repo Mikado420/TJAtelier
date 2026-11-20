@@ -198,7 +198,9 @@ export class TndeSkin {
         } catch { /* 字が無くても描ける */ }
       }),
     );
+    // 曲が決まるまでは（選曲画面のネームプレート用に）小さな絵だけ読む
     if (title !== undefined) s.choose(title);
+    else s.dormant = true;
     await s.sync();
     s.ready = true;
     return s;
@@ -208,18 +210,26 @@ export class TndeSkin {
    * プレイ画面を離れるとき（選曲画面などへ戻るとき）: 曲ごとの絵（背景・踊り子・モブ）・終わりの演出・
    * 満タンのどんちゃん・読み込み画面・リザルト画面の絵を手放す（iPhone でメモリが足りずに落ちないように）
    */
-  release() {
+  release(keepScreens = false) {
     if (this.force) return;
+    // 選曲画面で使う絵（ネームプレート・称号のキラキラ）と、読み込み画面の絵だけ残す
+    this.dormant = true;
     this.pick = { ...this.pick, key: '' };
     this.maxWant = false;
     this.endWant.clear();
-    this.dropScreen('load');
-    this.dropScreen('res');
+    if (!keepScreens) {
+      this.dropScreen('load');
+      this.dropScreen('res');
+    }
     void this.sync();
   }
 
+  /** プレイ画面を離れている（選曲画面で使う絵だけ持っておく） */
+  private dormant = false;
+
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
   async prepare(title: string) {
+    this.dormant = false;
     this.choose(title);
     await this.sync();
   }
@@ -227,6 +237,10 @@ export class TndeSkin {
   /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
   private wants(name: string) {
     const p = this.pick;
+    if (this.dormant) {
+      if (/^(load|res)\//.test(name)) return this.screenWant.has(name.slice(0, name.indexOf('/')));
+      return /^(nameplate|mode\/|fx\/TitleShine$)/.test(name);
+    }
     // 曲が決まるまでは、曲ごとに変わる絵（背景・踊り子・モブ）は読み込まない
     if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;
     let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
@@ -320,7 +334,7 @@ export class TndeSkin {
 
   /** 使う絵を読み込み、使わない絵を手放す */
   private sync() {
-    const set = `${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
+    const set = `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
     const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)];
     if (set !== this.loadedSet) {
       this.loadedSet = set;
@@ -517,6 +531,7 @@ export class TndeSkin {
       e.cv.height = 0;
     }
     this.caches.clear();
+    for (const cv of this.tinted.values()) cv.width = cv.height = 0;
     this.tinted.clear();
   }
 
@@ -1732,7 +1747,7 @@ export class TndeSkin {
       t.fillRect(0, 0, sw, sh);
       t.globalCompositeOperation = 'destination-in';
       this.di(t, im, sx, sy, sw, sh, 0, 0, sw, sh);
-      if (this.tinted.size > 200) this.tinted.clear();
+      if (this.tinted.size > 200) { for (const o of this.tinted.values()) o.width = o.height = 0; this.tinted.clear(); }
       this.tinted.set(key, cv);
     }
     c.drawImage(cv, 0, 0, sw, sh, x, y, dw, dh);

@@ -646,8 +646,6 @@ export class PlayMode {
         const fc = st.bad === 0 && game.totalHitNotes > 0;
         const kind = fc && st.ok === 0 ? 'allgood' : fc ? 'fc' : st.gauge >= CLEAR_LINE ? 'clear' : 'fail';
         this.endHold = this.renderer.showEnd(kind, (this.cur?.tailEnd ?? 0) > 0);
-        // リザルト画面の絵を読み込み始める
-        if (this.tndeResult()) void this.tnde!.needScreen('res');
         // TNDE スキン: 「クリア成功！」「フルコンボだドン！」などの声
         if (this.renderer.skinEnd(kind)) this.audio.playUi(`tnde:${kind}`);
       }
@@ -659,8 +657,19 @@ export class PlayMode {
           if (!this.fadeAt) {
             this.fadeAt = performance.now();
             this.overlay.fadeOut(1500);
+            this.resReady = false;
+            this.resLoad = false;
           }
-          if (performance.now() - this.fadeAt < 1500) {
+          const el = performance.now() - this.fadeAt;
+          // ほぼ暗くなったら、プレイの絵を手放してからリザルトの絵を読む（両方を一度に持つと iPhone はメモリが足りずに落ちる）
+          if (el >= 1400 && !this.resLoad) {
+            this.resLoad = true;
+            const sk = this.tnde!;
+            sk.release(true);
+            void sk.needScreen('res').then(() => { this.resReady = true; });
+          }
+          // 読み込めるまで暗いまま待つ（8 秒まで）
+          if (el < 1500 || (!this.resReady && el < 8000)) {
             this.raf = requestAnimationFrame(loop);
             return;
           }
@@ -733,6 +742,9 @@ export class PlayMode {
   private resBgmTimer = 0;
   /** 終わりの暗転を始めた時刻（performance.now()。0 = まだ） */
   private fadeAt = 0;
+  /** リザルトの絵を読み始めたか・読み終えたか */
+  private resLoad = false;
+  private resReady = false;
   /** 選曲画面で決めてすぐに閉じ始めた読み込み画面の幕（start で受け取る） */
   private early: { curtain: Promise<{ open(): Promise<void> }>; ready(p: Promise<unknown>): void } | null = null;
   /**
@@ -1595,6 +1607,9 @@ export class PlayMode {
         },
       },
     );
+    // リザルトの間は、プレイの絵（どんちゃん・背景など）を手放す（リザルトの絵と合わせるとメモリが足りなくなる）。
+    // もう一度遊ぶときは、読み込み画面の間に読み直す
+    sk.release(true);
     return true;
   }
 

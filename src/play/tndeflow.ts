@@ -101,6 +101,8 @@ export class TndeOverlay {
     this.paint = null;
     this.result = null;
     this.cv.remove();
+    // 画面いっぱいの canvas のメモリを返す（出すときに大きさを戻す）
+    this.cv.width = this.cv.height = 0;
     this.buttons.classList.add('hidden');
     window.removeEventListener('keydown', this.onKey, true);
   }
