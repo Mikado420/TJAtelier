@@ -5,6 +5,7 @@
 import type { AudioEngine } from '../audio/audio';
 import type { SongEntry } from '../io/library';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
+import { songPill } from '../render/tndescreens';
 
 export type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
 type Best = Record<string, { score: number; crown: Crown }>;
@@ -179,7 +180,7 @@ export class TndeSelect {
       ...Object.entries(man.anim).map(async ([n, m]) => { try { this.anims.set(n, { ...m, pages: await Promise.all(m.pages.map(bmp)) }); } catch { /* 無くても描ける */ } }),
     ]);
     for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
-    await document.fonts.load(`40px ${KANTEI}`, '選曲');
+    await Promise.all([document.fonts.load(`40px ${KANTEI}`, '選曲自己ベスト'), document.fonts.load(`36px ${SEURAT}`, '1曲目∞')]);
   }
 
   private se(n: string) { this.host.audio.playUi(`tsel:${n}`); }
@@ -596,8 +597,6 @@ export class TndeSelect {
     }
     this.don();
     this.side(ci);
-    this.full('header', 0, 1.5);
-    this.recolorHeader();
     this.stageNums();
     this.timer();
     this.full('credit', 3.5, 3);
@@ -607,18 +606,7 @@ export class TndeSelect {
     }
   }
 
-  private headerFixed = false;
-  /** 右上の曲目の帯の青を、本家の灰色がかった青に（一度だけ） */
-  private recolorHeader() {
-    if (this.headerFixed) return;
-    this.headerFixed = true;
-    const m = this.imgs.get('header');
-    if (!m) return;
-    const t = this.tinted('header', [160, 194, 216], [185, 203, 219], (r, _g, b) => b < r + 25);
-    if (t) this.imgs.set('header', t);
-  }
-
-  private patCv: HTMLCanvasElement | null = null;
+  private pat: CanvasPattern | null = null;
   private background() {
     const g = this.g, W = this.el.width, H = this.el.height;
     const y = (v: number) => (this.oy + v * this.s) / H;
@@ -627,46 +615,19 @@ export class TndeSelect {
     for (const [v, c] of stops) gr.addColorStop(clamp(y(v), 0, 1), `rgb(${c})`);
     g.fillStyle = gr;
     g.fillRect(0, 0, W, H);
-    // 模様: 灰色の模様の明るい所だけを白く重ねる
-    if (!this.patCv) {
-      const m = this.imgs.get('bg');
-      if (m) {
-        const o = document.createElement('canvas'); o.width = m.im.width; o.height = m.im.height;
-        const c = o.getContext('2d')!; c.drawImage(m.im, 0, 0);
-        const px = c.getImageData(0, 0, o.width, o.height), p = px.data;
-        // 本家の模様は、この絵の明るさを反転したもの（濃い所が白く、小さな白い点も白く）。
-        // 絵は下ほど暗いので、周り 37px の平均からの差で見る（下まで同じ濃さに）
-        const W = o.width, H = o.height;
-        const L = new Float32Array(W * H);
-        for (let i = 0; i < W * H; i++) L[i] = (p[i * 4] + p[i * 4 + 1] + p[i * 4 + 2]) / 3;
-        const I = new Float64Array((W + 1) * (H + 1));
-        for (let y = 0; y < H; y++) {
-          let row = 0;
-          for (let x = 0; x < W; x++) { row += L[y * W + x]; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; }
-        }
-        const R = 18;
-        for (let y = 0; y < H; y++) {
-          const y0 = Math.max(0, y - R), y1 = Math.min(H, y + R + 1);
-          for (let x = 0; x < W; x++) {
-            const x0 = Math.max(0, x - R), x1 = Math.min(W, x + R + 1);
-            const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0));
-            const d = m - L[y * W + x];
-            const i = (y * W + x) * 4;
-            p[i] = p[i + 1] = p[i + 2] = 255;
-            p[i + 3] = clamp(clamp(d * 0.05, 0, 1) * 0.5 + clamp((-d - 3.5) * 0.25, 0, 1) * 0.4, 0, 1) * 255;
-          }
-        }
-        c.putImageData(px, 0, 0);
-        this.patCv = o;
+    // 模様（白・不透明度つきの 1 枚を繰り返す）。本家の画面に重ねて測った: 720p の 1.5 倍で、左へ 1 秒に 93 px 流れる
+    const m = this.imgs.get('pattern');
+    if (m) {
+      if (!this.pat) this.pat = g.createPattern(m.im, 'repeat');
+      if (this.pat) {
+        const k = 1.5 / m.k * this.s, tw = m.w * 1.5, th = m.h * 1.5;
+        const x = (((769.5 - (performance.now() / 1000) * 93) % tw) + tw) % tw - tw, y = 173 - th;
+        this.pat.setTransform(new DOMMatrix([k, 0, 0, k, this.ox + x * this.s, this.oy + y * this.s]));
+        g.fillStyle = this.pat;
+        g.fillRect(0, 0, W, H);
       }
     }
-    if (this.patCv) {
-      // 本家の画面に重ねて測った: 720p の絵の 1.86 倍・左上 (-868, -53) から並べる
-      const k = 1.86 * this.s, w = 1280 * k, h = 720 * k;
-      const x0 = this.ox - 868 * this.s, y0 = this.oy - 53 * this.s;
-      for (let y = y0 - Math.ceil(y0 / h) * h; y < H; y += h) for (let x = x0 - Math.ceil(x0 / w) * w; x < W; x += w) g.drawImage(this.patCv, x, y, w, h);
-    }
-}
+  }
 
   private focusCourse() {
     const it = this.center;
@@ -716,7 +677,7 @@ export class TndeSelect {
     // 自己ベスト: 本家と重ねて測った 1.6 倍・左上 (29, 581)
     const sc = this.imgs.get(`score${Math.min(ci, 4)}`);
     if (sc) this.g.drawImage(sc.im, 29, 581, sc.w * 1.6, sc.h * 1.6);
-    this.put(this.text('自己ベスト', 18.5, 6, '#0c0806', { font: SEURAT }), 182, 605);
+    this.put(this.text('自己ベスト', 19.5, 6.5, '#0c0806', { kx: 0.96 }), 186, 603);
     const it = this.center;
     const b = it.kind === 'song' ? this.best[`${it.s.id}:${c}`] : undefined;
     if (b) this.bestNum(b.score, 220, 632);
@@ -729,9 +690,11 @@ export class TndeSelect {
     ds.forEach((d, i) => this.blit('levelNum', Number(d) * W, 0, W, 25, x0 + i * adv, cy - (25 * k) / 2, W * k, 25 * k));
   }
 
+  /** 時計の下の何曲目（リザルトと同じ帯。本家と重ねて測った: 少し左・230 下・6 広い） */
+  private pill: ReturnType<typeof songPill> = null;
   private stageNums() {
-    this.put(this.text('1', 32, 8, '#000', { font: SEURAT }), 1688, 273.5, Infinity, 'right');
-    this.put(this.text('∞', 26, 6, '#000', { font: SEURAT }), 1812.5, 276);
+    if (!this.pill) this.pill = songPill('1', { dx: -21, dy: 230, grow: 6 });
+    if (this.pill) this.g.drawImage(this.pill.cv, this.pill.x, this.pill.y, this.pill.w, this.pill.h);
   }
 
   /** 右上の時間（TJAtelier は時間を区切らないので ∞。本家の数字と同じ灰色・太さの線で） */
@@ -962,9 +925,10 @@ export class TndeSelect {
       for (let k = 0; k < Math.min(10, cs.level); k++) this.blit('diffStar', 0, 0, 14, 14, x + 20.5 + k * 15, 687.5, 20, 20);
       const b = this.best[`${s.id}:${c}`];
       const cr = b && b.crown !== 'fail' ? CROWN_CELL[b.crown] : 0;
-      this.blit('diffCrown', cr * 24.5, 0, 24.5, 26, x + 21, 405 + 22.5, 24.5 * 1.5, 26 * 1.5);
+      // 王冠・ランクは本家の画面に絵を重ねて測った位置・大きさ
+      this.blit('diffCrown', cr * 24.5, 0, 24.5, 26, x + 21, 405 + 23, 24.5 * 1.47, 26 * 1.47);
       const r = b ? rankOf(b.score) : 0;
-      if (r > 0) this.blit('diffRank', 0, (r - 1) * 42.71, 50, 42.71, x + 57, 405 + 17, 50 * 0.85, 42.71 * 0.85);
+      if (r > 0) this.blit('diffRank', 0, (r - 1) * 42.71, 50, 42.71, x + 56, 405 + 20, 50 * 0.89, 42.71 * 0.89);
     });
     // 1P の吹き出し（出てくるとき下りてくる。動かすと少し跳ねる）
     const inT = (this.diffT - 1255) / 4;

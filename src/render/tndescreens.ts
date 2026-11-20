@@ -259,7 +259,7 @@ export class TndeResult {
   /** 切り替わってからの時間（どんちゃんの動き） */
   private charaT = 0;
   private bandCv: HTMLCanvasElement | null = null;
-  private songsCv: HTMLCanvasElement | null = null;
+  private songsCv: ReturnType<typeof songPill> = null;
 
   constructor(private readonly sk: TndeSkin, private readonly d: TndeResultData, private readonly sound: (n: ResultSound) => { stop(): void } | null) {
     this.cleared = d.gauge >= d.clearLine;
@@ -398,72 +398,10 @@ export class TndeResult {
     this.drawCoin(c);
   }
 
-  /**
-   * 右上の何曲目: 帯は白と本家の灰色がかった青（右を斜めに切る）、字はプレイ画面と同じ丸ゴシック。
-   * 一度だけ 2 倍の細かさで描いておく
-   */
+  /** 右上の何曲目（一度だけ描いておく） */
   private drawSongCount(c: CanvasRenderingContext2D) {
-    const X = 1630, Y = 0, W = 290, H = 76, Z = 2;
-    if (!this.songsCv) {
-      const cv = document.createElement('canvas');
-      cv.width = W * Z;
-      cv.height = H * Z;
-      const g = cv.getContext('2d');
-      if (!g) return;
-      g.setTransform(Z, 0, 0, Z, -X * Z, -Y * Z);
-      const x0 = 1650, y0 = 15, x1 = 1906, y1 = 65, r = (y1 - y0) / 2;
-      const path = () => {
-        g.beginPath();
-        g.moveTo(x0 + r, y0);
-        g.lineTo(x1 - r, y0);
-        g.arc(x1 - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
-        g.lineTo(x0 + r, y1);
-        g.arc(x0 + r, y0 + r, r, Math.PI / 2, Math.PI * 1.5);
-        g.closePath();
-      };
-      // 下の影
-      g.save();
-      g.shadowColor = 'rgba(120,115,105,0.5)';
-      g.shadowBlur = 4 * Z;
-      g.shadowOffsetY = 4 * Z;
-      g.fillStyle = '#fff';
-      path();
-      g.fill();
-      g.restore();
-      g.save();
-      path();
-      g.clip();
-      g.fillStyle = '#fff';
-      g.fillRect(x0, y0, x1 - x0, y1 - y0);
-      g.fillStyle = '#b9cbdb';
-      g.beginPath();
-      g.moveTo(1805, y0);
-      g.lineTo(x1, y0);
-      g.lineTo(x1, y1);
-      g.lineTo(1788, y1);
-      g.closePath();
-      g.fill();
-      g.restore();
-      // 字はプレイ画面と同じ丸ゴシック。何曲目の数字は「曲目」と、∞ は「曲」と上下の真ん中をそろえる
-      const CY = 42, CYS = 43.5;
-      g.lineJoin = 'round';
-      g.strokeStyle = '#000';
-      g.fillStyle = '#fff';
-      g.font = `36px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 8;
-      midText(g, String(Math.max(1, this.d.stage)), 1702, CY, 'right');
-      g.font = `34px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 7.5;
-      midText(g, '曲目', 1745, CY, 'center');
-      g.font = `32px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 7.5;
-      midText(g, '∞', 1842, CYS, 'right');
-      g.font = `28px 'TNDE Seurat', sans-serif`;
-      g.lineWidth = 6.5;
-      midText(g, '曲', 1863, CYS, 'center');
-      this.songsCv = cv;
-    }
-    c.drawImage(this.songsCv, X, Y, W, H);
+    if (!this.songsCv) this.songsCv = songPill(String(Math.max(1, this.d.stage)));
+    if (this.songsCv) c.drawImage(this.songsCv.cv, this.songsCv.x, this.songsCv.y, this.songsCv.w, this.songsCv.h);
   }
 
   /** 下のまん中の「0コイン」（黒い間も出しておく） */
@@ -737,4 +675,74 @@ export class TndeResult {
     const h = 644 / 3;
     cell(sk, c, 'res/Speech_Bubble', mood * w, this.textRow * h, w, h, 443.5, 529.5, pop);
   }
+}
+
+/** 何曲目の帯の置き場所（1920×1080）。リザルトの右上がもと。選曲画面は時計の下に少し左・少し広く */
+export interface PillAt { dx: number; dy: number; grow: number }
+export const PILL_RESULT: PillAt = { dx: 0, dy: 0, grow: 0 };
+
+/**
+ * 何曲目: 帯は白と本家の灰色がかった青（右を斜めに切る）、字はプレイ画面と同じ丸ゴシック。
+ * 2 倍の細かさの絵にして返す（x, y, w, h に描く）
+ */
+export function songPill(stage: string, at: PillAt = PILL_RESULT) {
+  const { dx, dy, grow } = at;
+  const X = 1630 + dx - grow, Y = dy, W = 290 + grow, H = 76, Z = 2;
+  const cv = document.createElement('canvas');
+  cv.width = W * Z;
+  cv.height = H * Z;
+  const g = cv.getContext('2d');
+  if (!g) return null;
+  g.setTransform(Z, 0, 0, Z, -X * Z, -Y * Z);
+  const x0 = 1650 + dx - grow, y0 = 15 + dy, x1 = 1906 + dx, y1 = 65 + dy, r = (y1 - y0) / 2;
+  const path = () => {
+    g.beginPath();
+    g.moveTo(x0 + r, y0);
+    g.lineTo(x1 - r, y0);
+    g.arc(x1 - r, y0 + r, r, -Math.PI / 2, Math.PI / 2);
+    g.lineTo(x0 + r, y1);
+    g.arc(x0 + r, y0 + r, r, Math.PI / 2, Math.PI * 1.5);
+    g.closePath();
+  };
+  // 下の影
+  g.save();
+  g.shadowColor = 'rgba(120,115,105,0.5)';
+  g.shadowBlur = 4 * Z;
+  g.shadowOffsetY = 4 * Z;
+  g.fillStyle = '#fff';
+  path();
+  g.fill();
+  g.restore();
+  g.save();
+  path();
+  g.clip();
+  g.fillStyle = '#fff';
+  g.fillRect(x0, y0, x1 - x0, y1 - y0);
+  g.fillStyle = '#b9cbdb';
+  g.beginPath();
+  g.moveTo(1805 + dx, y0);
+  g.lineTo(x1, y0);
+  g.lineTo(x1, y1);
+  g.lineTo(1788 + dx, y1);
+  g.closePath();
+  g.fill();
+  g.restore();
+  // 字はプレイ画面と同じ丸ゴシック。何曲目の数字は「曲目」と、∞ は「曲」と上下の真ん中をそろえる
+  const CY = 42 + dy, CYS = 43.5 + dy;
+  g.lineJoin = 'round';
+  g.strokeStyle = '#000';
+  g.fillStyle = '#fff';
+  g.font = `36px 'TNDE Seurat', sans-serif`;
+  g.lineWidth = 8;
+  midText(g, stage, 1702 + dx, CY, 'right');
+  g.font = `34px 'TNDE Seurat', sans-serif`;
+  g.lineWidth = 7.5;
+  midText(g, '曲目', 1745 + dx, CY, 'center');
+  g.font = `32px 'TNDE Seurat', sans-serif`;
+  g.lineWidth = 7.5;
+  midText(g, '∞', 1842 + dx, CYS, 'right');
+  g.font = `28px 'TNDE Seurat', sans-serif`;
+  g.lineWidth = 6.5;
+  midText(g, '曲', 1863 + dx, CYS, 'center');
+  return { cv, x: X, y: Y, w: W, h: H };
 }
