@@ -2277,8 +2277,19 @@ const fileOpen = $<HTMLInputElement>('fileOpen');
 
 /** 読み込みの使い方: any = 何でも（譜面は新しい曲に）、audio = 開いている曲の音源を差し替える */
 let importMode: 'any' | 'audio' = 'any';
-function pickFiles(mode: 'any' | 'audio') {
+/**
+ * ファイルを選ぶ。at（画面の位置）を渡すと、そこにファイルの欄を置いてから開く
+ * （iPhone は選ぶ方法のメニューをファイルの欄の所に出す。隠したままだと変な所に大きな影が出る）
+ */
+function pickFiles(mode: 'any' | 'audio', at?: { x: number; y: number; w: number; h: number }) {
   importMode = mode;
+  if (at) {
+    fileOpen.hidden = false;
+    fileOpen.style.cssText = `position:fixed;left:${at.x}px;top:${at.y}px;width:${at.w}px;height:${at.h}px;opacity:0;z-index:9999;pointer-events:none`;
+    const done = () => { fileOpen.hidden = true; fileOpen.style.cssText = ''; };
+    window.addEventListener('focus', () => setTimeout(done, 500), { once: true });
+    fileOpen.addEventListener('change', done, { once: true });
+  }
   fileOpen.click();
 }
 
@@ -2977,6 +2988,21 @@ async function folderOf(id: string): Promise<PlayInfo['folder']> {
 async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   const data = await loadSongData(id);
   if (!data?.chart?.courses) { toast('この曲を開けませんでした'); return; }
+  // TNDE スキンで遊ぶとき: 読み込み画面の幕を先に閉じる（読み込む間、エディタが見えないように）
+  if (mode === 'play' && settings.skin === 'tnde') {
+    const j = await loadSongJacket(id).catch(() => undefined);
+    const ju = j ? URL.createObjectURL(new Blob([j.data])) : undefined;
+    await play.beginLoading({ title: data.chart.title, sub: data.chart.subtitle, jacket: ju });
+  }
+  try {
+    await openSongInner(id, mode, data, course);
+  } finally {
+    // 始められなかったとき（譜面が空など）は幕を消す
+    play.cancelLoading();
+  }
+}
+
+async function openSongInner(id: string, mode: 'edit' | 'play', data: NonNullable<Awaited<ReturnType<typeof loadSongData>>>, course?: string) {
   if (course) {
     const ci = data.chart.courses.findIndex((c) => c.name === course);
     if (ci >= 0) data.courseIndex = ci;
@@ -3010,7 +3036,7 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   if (audio.buffer) void persist();
   home.hide();
   updateHeader();
-  if (mode === 'play') void startTest(true);
+  if (mode === 'play') await startTest(true);
 }
 
 /** 開いている曲のジャケット（曲の情報・動画用の画面に出す） */
@@ -3074,7 +3100,7 @@ const home = new Home({
     saveSettings();
     if (k === 'speed') applyPlayZoom();
   },
-  importFiles: () => pickFiles('any'),
+  importFiles: (at) => pickFiles('any', at),
   create: (folder) => createSong(newChart(), folder),
   settings: () => openSheet('settings'),
   online: () => online.open(),

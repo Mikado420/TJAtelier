@@ -26,7 +26,7 @@ export interface HomeHost {
   plate(): { name: string; title: string; profile?: PlateStyle };
   setPlayOpt<K extends keyof PlayOpts>(key: K, v: PlayOpts[K]): void;
   /** ファイルを選んで読み込む（読み込んだ曲は一覧に入る） */
-  importFiles(): void;
+  importFiles(at?: { x: number; y: number; w: number; h: number }): void;
   /** 新しい譜面を作って開く */
   create(folder: string): Promise<void>;
   settings(): void;
@@ -283,7 +283,7 @@ export class Home {
       lastCourse: (id) => lastCourse(id),
       opts: () => this.host.playOpts(),
       setOpt: (k, v) => this.host.setPlayOpt(k, v),
-      action: (a) => { this.stopPreview(); void this.action(a); },
+      action: (a, at) => { this.stopPreview(); void this.action(a, at); },
       edit: (id, course) => { this.stopPreview(); void this.host.open(id, 'edit', course); },
       info: (id, course) => this.host.analyze(id, course),
       jacket: (s) => this.jacketUrl(s),
@@ -1013,8 +1013,8 @@ export class Home {
     }
   }
 
-  private async action(a: string) {
-    if (a === 'import') this.host.importFiles();
+  private async action(a: string, at?: { x: number; y: number; w: number; h: number }) {
+    if (a === 'import') this.host.importFiles(at);
     else if (a === 'settings') this.host.settings();
     else if (a === 'online') { this.stopPreview(); this.host.online(); }
     else if (a === 'new') {

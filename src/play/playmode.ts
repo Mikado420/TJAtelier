@@ -480,13 +480,19 @@ export class PlayMode {
     resetTouchStats();
     this.game = game;
 
-    this.closeTnde();
+    // 選曲画面で先に閉じ始めた幕（beginLoading）があれば、それをそのまま使う
+    const early = this.early;
+    this.early = null;
+    if (!early) this.closeTnde();
     this.renderer.prevBest = this.auto || clicks || fromTime > 0 ? null : this.bestScore();
     // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
     const prep = Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
     // TNDE スキンで曲の最初から遊ぶとき: 本家と同じ読み込み画面（幕が閉じて曲名 → 用意ができたら幕が開く）
     let curtain: { open(): Promise<void> } | null = null;
-    if (this.settings.skin === 'tnde' && this.tnde && !clicks && fromTime <= 0 && !cmp) {
+    if (early) {
+      early.ready(prep);
+      curtain = await early.curtain;
+    } else if (this.settings.skin === 'tnde' && this.tnde && !clicks && fromTime <= 0 && !cmp) {
       const sk = this.tnde;
       const ok = await Promise.race([sk.needScreen('load').then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 1500))]);
       if (ok) {
@@ -722,6 +728,31 @@ export class PlayMode {
   private resBgmTimer = 0;
   /** 終わりの暗転を始めた時刻（performance.now()。0 = まだ） */
   private fadeAt = 0;
+  /** 選曲画面で決めてすぐに閉じ始めた読み込み画面の幕（start で受け取る） */
+  private early: { curtain: Promise<{ open(): Promise<void> }>; ready(p: Promise<unknown>): void } | null = null;
+  /**
+   * TNDE スキン: 選曲画面で曲を決めたらすぐに読み込み画面の幕を閉じ始める（音源などを読み込む間、
+   * 後ろのエディタや前の画面が見えないように）。続けて start を呼ぶ。呼ばなかったときは cancelLoading で消す
+   */
+  async beginLoading(info: { title: string; sub?: string; jacket?: string }) {
+    if (this.settings.skin !== 'tnde') return false;
+    const sk = await this.tndeSkin();
+    if (!sk) return false;
+    const ok = await Promise.race([sk.needScreen('load').then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 6000))]);
+    if (!ok) return false;
+    this.closeTnde();
+    this.audio.playUi('tnde:decide');
+    let done!: (p: Promise<unknown>) => void;
+    const ready = new Promise<unknown>((r) => { done = (p) => r(p); });
+    this.early = { curtain: this.overlay.loading(sk, info.title, info.sub, ready, undefined, info.jacket), ready: done };
+    return true;
+  }
+  cancelLoading() {
+    if (!this.early) return;
+    this.early.ready(Promise.resolve());
+    this.early = null;
+    this.closeTnde();
+  }
   /** 読み込み画面・リザルト画面を消す（曲も止める） */
   closeTnde() {
     this.overlay.hide();
@@ -1738,6 +1769,9 @@ export class PlayMode {
     this.root.classList.add('hidden');
     document.body.classList.remove('playing');
     this.result.classList.add('hidden');
+    this.closeTnde();
+    // プレイの絵（曲ごとの背景など）を手放す。選曲画面の絵と合わせてメモリが足りなくならないように
+    this.tnde?.release();
     this.onExit();
   }
 }

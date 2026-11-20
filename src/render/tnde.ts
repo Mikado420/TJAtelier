@@ -197,6 +197,20 @@ export class TndeSkin {
     return s;
   }
 
+  /**
+   * プレイ画面を離れるとき（選曲画面などへ戻るとき）: 曲ごとの絵（背景・踊り子・モブ）・終わりの演出・
+   * 満タンのどんちゃん・読み込み画面・リザルト画面の絵を手放す（iPhone でメモリが足りずに落ちないように）
+   */
+  release() {
+    if (this.force) return;
+    this.pick = { ...this.pick, key: '' };
+    this.maxWant = false;
+    this.endWant.clear();
+    this.dropScreen('load');
+    this.dropScreen('res');
+    void this.sync();
+  }
+
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
   async prepare(title: string) {
     this.choose(title);

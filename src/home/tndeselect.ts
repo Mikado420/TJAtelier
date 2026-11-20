@@ -29,7 +29,7 @@ export interface TselHost {
   opts(): PlayOpts;
   setOpt<K extends keyof PlayOpts>(k: K, v: PlayOpts[K]): void;
   /** 下のボタン: 読み込み・新規・対戦・設定 */
-  action(a: 'import' | 'new' | 'online' | 'settings'): void;
+  action(a: 'import' | 'new' | 'online' | 'settings', at?: { x: number; y: number; w: number; h: number }): void;
   /** 難易度えらびのボタン: エディタ・譜面情報 */
   edit(id: string, course: string): void;
   info(id: string, course: string): void;
@@ -245,6 +245,17 @@ export class TndeSelect {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
+    // 絵を手放す（プレイ中にメモリを空けておく。iPhone は足りないと落ちる）。次に出すときに読み直す
+    for (const m of this.imgs.values()) if ('close' in m.im) m.im.close();
+    for (const a of this.anims.values()) for (const pg of a.pages) pg.close();
+    this.imgs.clear();
+    this.anims.clear();
+    this.tints.clear();
+    this.sils.clear();
+    this.btnCache.clear();
+    this.texts.clear();
+    this.pat = null;
+    this.loaded = null;
   }
 
   // ---------- 絵 ----------
@@ -1109,7 +1120,13 @@ export class TndeSelect {
       try { localStorage.setItem('tsel-sort', this.sort); } catch { /* 無くてよい */ }
       this.rebuild();
       this.still = 0;
-    } else this.host.action(a);
+    } else {
+      // ボタンの画面の位置（読み込みは、iPhone の選ぶメニューをそこから出す）
+      const [x, y, w, h] = menuRect(MENU.findIndex((m) => m.a === a));
+      const r = this.el.getBoundingClientRect();
+      const k = this.s / this.dpr;
+      this.host.action(a, { x: r.left + this.ox / this.dpr + x * k, y: r.top + this.oy / this.dpr + y * k, w: w * k, h: h * k });
+    }
   }
 
   private closeSearch() {
