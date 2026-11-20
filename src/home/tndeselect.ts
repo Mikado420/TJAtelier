@@ -213,6 +213,28 @@ export class TndeSelect {
     }
   }
 
+  private sils = new Map<string, Img>();
+  /** 絵の形だけを黒くしたもの（縁を太くするのに使う） */
+  private silhouette(name: string): Img | undefined {
+    const have = this.sils.get(name);
+    if (have) return have;
+    const m = this.imgs.get(name);
+    if (!m) return undefined;
+    const o = document.createElement('canvas');
+    o.width = m.im.width; o.height = m.im.height;
+    const g = o.getContext('2d')!;
+    g.drawImage(m.im, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = '#120c10';
+    g.fillRect(0, 0, o.width, o.height);
+    const r = { ...m, im: o };
+    this.sils.set(name, r);
+    return r;
+  }
+  private blitImg(m: Img | undefined, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) {
+    if (m) this.g.drawImage(m.im, (sx - m.x) * m.k, (sy - m.y) * m.k, sw * m.k, sh * m.k, dx, dy, dw, dh);
+  }
+
   private tints = new Map<string, Img>();
   /** 絵の色を塗り替える（もとの色 base からの明るさの比で。黒い縁はそのまま） */
   private tinted(name: string, base: number[], to: number[], skip?: (r: number, g: number, b: number) => boolean): Img | undefined {
@@ -928,7 +950,16 @@ export class TndeSelect {
       // 王冠・ランクは本家の画面に絵を重ねて測った位置・大きさ
       this.blit('diffCrown', cr * 24.5, 0, 24.5, 26, x + 21, 405 + 23, 24.5 * 1.47, 26 * 1.47);
       const r = b ? rankOf(b.score) : 0;
-      if (r > 0) this.blit('diffRank', 0, (r - 1) * 42.71, 50, 42.71, x + 56, 405 + 20, 50 * 0.89, 42.71 * 0.89);
+      if (r > 0) {
+        // 本家はランクの黒い縁が少し太い: 黒い影を周りに少しずらして重ねてから描く
+        // （影は上の 2 px を切る。1 つ上のランクの端が少しかかっているため）
+        const sy = (r - 1) * 42.71, k = 0.89, R = 1.2;
+        for (let a = 0; a < 16; a++) {
+          const ox = Math.cos((a / 16) * Math.PI * 2) * R, oy = Math.sin((a / 16) * Math.PI * 2) * R;
+          this.blitImg(this.silhouette('diffRank'), 0, sy + 2, 50, 40.71, x + 56 + ox, 405 + 20 + 2 * k + oy, 50 * k, 40.71 * k);
+        }
+        this.blit('diffRank', 0, sy, 50, 42.71, x + 56, 405 + 20, 50 * k, 42.71 * k);
+      }
     });
     // 1P の吹き出し（出てくるとき下りてくる。動かすと少し跳ねる）
     const inT = (this.diffT - 1255) / 4;
