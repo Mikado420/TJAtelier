@@ -72,9 +72,37 @@ put('levelNum', rd('Level_Number.png'))
 put('bg', rd('Background.png'), q=1, lossy=True)
 for n in ['Header', 'Credit', 'Point']:
     put(n.lower(), rd('%s.png' % n), trim=True)
+
+
+def delabel(im):
+    """自己ベストの枠の「ベストスコア」の字を消す（本家は「自己ベスト」。字は描くときに書く）"""
+    p = im[384:434, 26:221].astype(np.float32)
+    x0, x1 = 40, 168
+    # 上の縁と、字の下の白い所は横に同じなので、字の無い列から写す
+    p[0:4, x0:x1] = p[0:4, 20:21]
+    p[22:25, x0:x1] = p[22:25, 20:21]
+    # 金の帯: 左右の列の間を横にならし、本家と同じ所に斜めの明るい筋を 2 本
+    L, R = p[4:22, x0 - 1:x0], p[4:22, x1:x1 + 1]
+    t = (np.arange(x0, x1) - (x0 - 1)) / (x1 - x0 + 1)
+    p[4:22, x0:x1] = L * (1 - t[None, :, None]) + R * t[None, :, None]
+    for cx in (47, 143):
+        for y in range(4, 22):
+            for x in range(cx - 14, cx + 15):
+                a = max(0.0, 1 - abs((x - cx) + (y - 13) * 0.9) / 6.0) * 0.55
+                if a > 0:
+                    p[y, x, :3] = p[y, x, :3] * (1 - a) + np.array([215, 250, 255]) * a
+    # 金の帯を本家の濃い金に（本家の画面からスポイトで取った色に合わせる。BGR）
+    band = p[4:22, 3:192, :3]
+    p[4:22, 3:192, :3] = 255 - (255 - band) * np.array([1.3, 1.45, 0.7])
+    im = im.copy()
+    im[384:434, 26:221] = np.clip(p, 0, 255).astype(np.uint8)
+    return im
+
+
 for i in range(5):
     put('table%d' % i, rd('Table/%d.png' % i), trim=True)
-    put('score%d' % i, rd('Score/%d.png' % i), trim=True)
+    put('score%d' % i, delabel(rd('Score/%d.png' % i)), trim=True)
+put('headerTimer', rd('Header_Timer.png'), trim=True)
 for i in range(-1, 12):
     put('boxChara%d' % i, rd('Box_Chara/Box_Chara_%d.png' % i), lossy=True, qual=94)
 for n in ['Base', 'Taiko', 'Bachi', 'Arrow_Down', 'Arrow_Up', 'Don', 'Ka']:

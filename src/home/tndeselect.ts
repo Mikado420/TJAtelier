@@ -581,13 +581,8 @@ export class TndeSelect {
     const diffA = !inDiff ? 0 : this.diffOut >= 0 ? clamp(1 - this.diffOut / 300, 0, 1) : clamp((this.diffT - 1255) / 255, 0, 1);
     const course = inDiff ? this.courseAt(this.dsel) ?? 'Oni' : this.focusCourse();
     const ci = Math.max(0, COURSES.indexOf(course));
+    // 重なり順は本家と同じ: 印 → 一覧・難易度えらび → どんちゃん → 記録 → 右上 → 2人プレイの雲 → ネームプレート
     if (diffA > 0) this.mark(ci, diffA);
-    this.don();
-    this.side(ci);
-    this.full('header', 0, 1.5);
-    this.recolorHeader();
-    this.stageNums();
-    this.full('credit', 3.5, 3);
     if (listA > 0) {
       g.globalAlpha = listA;
       this.guideTop();
@@ -599,6 +594,13 @@ export class TndeSelect {
       this.diffScreen();
       g.globalAlpha = 1;
     }
+    this.don();
+    this.side(ci);
+    this.full('header', 0, 1.5);
+    this.recolorHeader();
+    this.stageNums();
+    this.timer();
+    this.full('credit', 3.5, 3);
     if (this.sk) {
       const pl = this.host.plate();
       this.sk.plate(g, { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } as never, 60, 476);
@@ -632,21 +634,39 @@ export class TndeSelect {
         const o = document.createElement('canvas'); o.width = m.im.width; o.height = m.im.height;
         const c = o.getContext('2d')!; c.drawImage(m.im, 0, 0);
         const px = c.getImageData(0, 0, o.width, o.height), p = px.data;
-        for (let i = 0; i < p.length; i += 4) {
-          const L = (p[i] + p[i + 1] + p[i + 2]) / 3;
-          p[i] = p[i + 1] = p[i + 2] = 255;
-          p[i + 3] = clamp((L - 188) / 14, 0, 1) * 0.22 * 255;
+        // 本家の模様は、この絵の明るさを反転したもの（濃い所が白く、小さな白い点も白く）。
+        // 絵は下ほど暗いので、周り 37px の平均からの差で見る（下まで同じ濃さに）
+        const W = o.width, H = o.height;
+        const L = new Float32Array(W * H);
+        for (let i = 0; i < W * H; i++) L[i] = (p[i * 4] + p[i * 4 + 1] + p[i * 4 + 2]) / 3;
+        const I = new Float64Array((W + 1) * (H + 1));
+        for (let y = 0; y < H; y++) {
+          let row = 0;
+          for (let x = 0; x < W; x++) { row += L[y * W + x]; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; }
+        }
+        const R = 18;
+        for (let y = 0; y < H; y++) {
+          const y0 = Math.max(0, y - R), y1 = Math.min(H, y + R + 1);
+          for (let x = 0; x < W; x++) {
+            const x0 = Math.max(0, x - R), x1 = Math.min(W, x + R + 1);
+            const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((x1 - x0) * (y1 - y0));
+            const d = m - L[y * W + x];
+            const i = (y * W + x) * 4;
+            p[i] = p[i + 1] = p[i + 2] = 255;
+            p[i + 3] = clamp(clamp(d * 0.05, 0, 1) * 0.5 + clamp((-d - 3.5) * 0.25, 0, 1) * 0.4, 0, 1) * 255;
+          }
         }
         c.putImageData(px, 0, 0);
         this.patCv = o;
       }
     }
     if (this.patCv) {
-      // 横に広い画面は、模様を横に並べる
-      const w = 1920 * this.s, h = 1080 * this.s;
-      for (let x = this.ox - Math.ceil(this.ox / w) * w; x < W; x += w) g.drawImage(this.patCv, x, this.oy, w, h);
+      // 本家の画面に重ねて測った: 720p の絵の 1.86 倍・左上 (-868, -53) から並べる
+      const k = 1.86 * this.s, w = 1280 * k, h = 720 * k;
+      const x0 = this.ox - 868 * this.s, y0 = this.oy - 53 * this.s;
+      for (let y = y0 - Math.ceil(y0 / h) * h; y < H; y += h) for (let x = x0 - Math.ceil(x0 / w) * w; x < W; x += w) g.drawImage(this.patCv, x, y, w, h);
     }
-  }
+}
 
   private focusCourse() {
     const it = this.center;
@@ -680,22 +700,31 @@ export class TndeSelect {
       if (b.crown !== 'fail') cnt.crown[b.crown]++;
     }
     this.full(`table${Math.min(ci, 4)}`, 1.5, -2.5);
-    const num = (v: number, x: number, y: number) => this.put(this.text(String(v), 24, 5, '#fff', { font: SEURAT, fill: '#000' }), x, y, Infinity, 'right');
+    // 数は自己ベストと同じ数字の絵（灰色の字に白い縁）。右をそろえる
+    const num = (v: number, x: number, y: number) => {
+      const ds = String(v).split('');
+      const W = 21, k = 0.83, adv = 16;
+      const x0 = x - (adv * (ds.length - 1) + W * k);
+      ds.forEach((d, i) => this.blit('levelNum', Number(d) * W, 0, W, 25, x0 + i * adv, y - (25 * k) / 2, W * k, 25 * k));
+    };
     // 上の右: 極、1 段目: 雅（3 つ）、2 段目: 粋（3 つ）、3 段目: 王冠
     num(cnt.rank[7], 306, 354);
     const rows = [[4, 5, 6], [1, 2, 3]];
     rows.forEach((r, ri) => r.forEach((rk, k) => num(cnt.rank[rk], (42 + 62 * k + 38) * 1.5, (261 + 24 * ri) * 1.5)));
     (['clear', 'fc', 'allgood'] as const).forEach((cr, k) => num(cnt.crown[cr], (42 + 62 * k + 38) * 1.5, 309 * 1.5));
     this.full('point');
-    this.full(`score${Math.min(ci, 4)}`, -6, 10);
+    // 自己ベスト: 本家と重ねて測った 1.6 倍・左上 (29, 581)
+    const sc = this.imgs.get(`score${Math.min(ci, 4)}`);
+    if (sc) this.g.drawImage(sc.im, 29, 581, sc.w * 1.6, sc.h * 1.6);
+    this.put(this.text('自己ベスト', 18.5, 6, '#0c0806', { font: SEURAT }), 182, 605);
     const it = this.center;
     const b = it.kind === 'song' ? this.best[`${it.s.id}:${c}`] : undefined;
-    if (b) this.bestNum(b.score, 220, 633);
+    if (b) this.bestNum(b.score, 220, 632);
   }
 
   private bestNum(n: number, cx: number, cy: number) {
     const ds = String(n).split('');
-    const W = 21, k = 1.2, adv = 20;
+    const W = 21, k = 1.15, adv = 20.5;
     const x0 = cx - (adv * (ds.length - 1) + W * k) / 2;
     ds.forEach((d, i) => this.blit('levelNum', Number(d) * W, 0, W, 25, x0 + i * adv, cy - (25 * k) / 2, W * k, 25 * k));
   }
@@ -703,6 +732,30 @@ export class TndeSelect {
   private stageNums() {
     this.put(this.text('1', 32, 8, '#000', { font: SEURAT }), 1688, 273.5, Infinity, 'right');
     this.put(this.text('∞', 26, 6, '#000', { font: SEURAT }), 1812.5, 276);
+  }
+
+  /** 右上の時間（TJAtelier は時間を区切らないので ∞。本家の数字と同じ灰色・太さの線で） */
+  private timer() {
+    const m = this.imgs.get('headerTimer');
+    if (!m) return;
+    const k = 1.49, x = 1687, y = 31;
+    this.g.drawImage(m.im, x, y, m.w * k, m.h * k);
+    const cx = x + (m.w * k) / 2, cy = y + (m.h * k) / 2;
+    const g = this.g;
+    g.save();
+    g.strokeStyle = '#474747';
+    g.lineWidth = 11.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    const a = 50, b = 52;
+    for (let i = 0; i <= 120; i++) {
+      const t = (i / 120) * Math.PI * 2;
+      const d = 1 + Math.sin(t) ** 2;
+      const px = cx + (a * Math.cos(t)) / d, py = cy + (b * Math.sin(t) * Math.cos(t)) / d;
+      if (i) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+    g.restore();
   }
 
   /** 左上の太鼓の案内（ばちで叩く・矢印が上下に） */
@@ -868,9 +921,10 @@ export class TndeSelect {
     if (!m) return;
     const g = this.g;
     g.save();
-    g.globalAlpha = 0.45 * a;
-    const k = 1.13;
-    g.drawImage(m.im, 177 - (m.w * k) / 2, 363 - (m.h * k) / 2, m.w * k, m.h * k);
+    // 本家の画面に輪の縁を重ねて測った: 1.5 倍・真ん中 (201, 408)・不透明度 0.65
+    g.globalAlpha = 0.65 * a;
+    const k = 1.5;
+    g.drawImage(m.im, 201 - (m.w * k) / 2, 408 - (m.h * k) / 2, m.w * k, m.h * k);
     g.restore();
   }
 
