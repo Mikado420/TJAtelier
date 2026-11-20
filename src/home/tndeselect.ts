@@ -267,6 +267,7 @@ export class TndeSelect {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
+    this.host.audio.bgmStop();
     // 画面の canvas のメモリを返す（出すときに resize で戻す）
     this.el.width = this.el.height = 0;
     // プレイ中は大きな絵（フォルダのキャラ・難易度えらびの背景・跳ぶどんちゃん）と描いた字を手放す。
@@ -305,7 +306,7 @@ export class TndeSelect {
     this.man = man;
     // 大きな絵（フォルダのキャラ・難易度えらびの背景・どんちゃんの跳ぶ動き・帯の色）は、使うときに読む
     await Promise.all([...Object.keys(man.img), ...Object.keys(man.anim)].filter((n) => !LAZY.test(n)).map((n) => this.fetchImg(n)));
-    for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
+    for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura', 'BgmIn', 'Bgm']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
     await Promise.all([document.fonts.load(`40px ${KANTEI}`, '選曲自己ベスト'), document.fonts.load(`36px ${SEURAT}`, '1曲目∞')]);
   }
 
@@ -838,6 +839,9 @@ export class TndeSelect {
       this.previewed = want;
       this.host.preview(want);
     }
+    // 選曲の BGM: 試聴が鳴っている間と、曲を決めたあとは消す
+    const A = this.host.audio;
+    if (A.bgmStart('tsel:BgmIn', 'tsel:Bgm')) A.bgmLevel(A.previewing || this.startT >= 0 ? 0 : 1);
   }
 
   /** 帯が開いた量（0〜62。本家は止まって 400ms から 120ms で開くが、待たずに使えるよう 60ms から 140ms で開く） */

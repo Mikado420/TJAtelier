@@ -92,6 +92,54 @@ export class AudioEngine {
     };
   }
 
+  // ---------- 画面の BGM（選曲画面） ----------
+  private bgmNow: { srcs: AudioBufferSourceNode[]; g: GainNode; v: number } | null = null;
+  /** 頭の音（intro）のあとに loop をくり返す。もう鳴っていれば何もしない。音が読めていなければ false */
+  bgmStart(intro: string, loop: string): boolean {
+    if (this.bgmNow) return true;
+    const lb = this.uiBufs.get(loop);
+    if (!lb) return false;
+    const ib = this.uiBufs.get(intro);
+    const g = this.ctx.createGain();
+    g.gain.value = 0;
+    g.connect(this.uiGain);
+    const at = this.ctx.currentTime + 0.05;
+    const srcs: AudioBufferSourceNode[] = [];
+    if (ib) {
+      const s = this.ctx.createBufferSource();
+      s.buffer = ib;
+      s.connect(g);
+      s.start(at);
+      srcs.push(s);
+    }
+    const s = this.ctx.createBufferSource();
+    s.buffer = lb;
+    s.loop = true;
+    s.connect(g);
+    s.start(at + (ib?.duration ?? 0));
+    srcs.push(s);
+    this.bgmNow = { srcs, g, v: 0 };
+    return true;
+  }
+  /** BGM の大きさ（0〜1。試聴を鳴らしている間は 0 にする）。少しずつ変える */
+  bgmLevel(v: number) {
+    const b = this.bgmNow;
+    if (!b || b.v === v) return;
+    b.v = v;
+    b.g.gain.setTargetAtTime(v, this.ctx.currentTime, v > 0 ? 0.25 : 0.06);
+  }
+  /** BGM を止める */
+  bgmStop() {
+    const b = this.bgmNow;
+    if (!b) return;
+    this.bgmNow = null;
+    const t = this.ctx.currentTime;
+    b.g.gain.cancelScheduledValues(t);
+    b.g.gain.setTargetAtTime(0, t, 0.05);
+    for (const s of b.srcs) { try { s.stop(t + 0.3); } catch { /* 止まっている */ } }
+    setTimeout(() => { for (const s of b.srcs) s.disconnect(); b.g.disconnect(); }, 500);
+  }
+
   /** 音量の比率（音源・打音・メトロノーム）を変える */
   setMix(m: { music: number; hit: number; metro: number; ui?: number }) {
     if (m.hit !== this.mix.hit) this.hitVersion++;

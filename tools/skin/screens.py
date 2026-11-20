@@ -133,7 +133,8 @@ os.makedirs(os.path.join(OUT, 'se'), exist_ok=True)
 for n, f in [('decide', 'SongDecide.ogg'), ('gameEnd', 'Game end.ogg'), ('resGauge', 'Result_Gauge.ogg'), ('resPom', 'Result_Pom.ogg'),
              ('rankIn', 'RankIn.ogg'), ('crownClear', 'CrownIn_Clear.ogg'), ('crownFc', 'CrownIn_FullCombo.ogg'),
              ('crownDfc', 'CrownIn_DondaFullCombo.ogg'), ('best', 'BestScore.ogg'), ('resClear', 'Result_Clear.ogg'),
-             ('resFailed', 'Result_Failed.ogg'), ('skip', 'Skip.ogg'), ('resIn', 'BGM/Result_In.ogg'), ('resBgm', 'BGM/Result.ogg')]:
+             ('resFailed', 'Result_Failed.ogg'), ('skip', 'Skip.ogg'), ('resIn', 'BGM/Result_In.ogg'), ('resBgm', 'BGM/Result.ogg'),
+             ('selBgmIn', 'BGM/SongSelect_Start.ogg'), ('selBgm', 'BGM/SongSelect.ogg')]:
     shutil.copy(os.path.join(_S, f), os.path.join(OUT, 'se', n + '.ogg'))
 
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
