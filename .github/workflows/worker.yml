@@ -79,7 +79,9 @@ jobs:
                   if (n.t === "roster" && n.players.length === 2 && !reserved) {
                     reserved = true;
                     a.send("ping");
-                    b.send(JSON.stringify({ t: "reserve", meta }));
+                    // 部屋主（A）が「全員が予約できる」にしてから、B が予約する
+                    a.send(JSON.stringify({ t: "settings", s: { pick: "all" } }));
+                    setTimeout(() => b.send(JSON.stringify({ t: "reserve", meta })), 500);
                   }
                   if (n.t === "next") setTimeout(() => b.send(JSON.stringify({ t: "chat", x: "after-sleep" })), 30000);
                 };
