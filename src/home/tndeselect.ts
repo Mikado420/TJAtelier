@@ -6,6 +6,7 @@ import type { AudioEngine } from '../audio/audio';
 import type { SongEntry } from '../io/library';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import { songPill } from '../render/tndescreens';
+import { nameColor } from './folderColor';
 
 export type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
 type Best = Record<string, { score: number; crown: Crown }>;
@@ -78,17 +79,33 @@ const GENRES: [RegExp, Look][] = [
 ];
 const hex = (h: string) => { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
 const toHex = (c: number[]) => `#${c.map((v) => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('')}`;
-/** フォルダの見た目: 名前が本家のジャンルならその色、ほかはフォルダの色 */
-function lookOf(name: string, color?: string): Look {
-  for (const [re, l] of GENRES) if (re.test(name)) return l;
-  if (color && /^#[0-9a-f]{6}$/i.test(color)) {
-    const c = hex(color);
-    // いちばん近い色の帯の絵を塗り替える
-    let bi = 1, bd = 1e9;
-    BAR_BASE.forEach((b, i) => { const d = (b[0] - c[0]) ** 2 + (b[1] - c[1]) ** 2 + (b[2] - c[2]) ** 2; if (d < bd) { bd = d; bi = i; } });
-    return { bar: bi, rim: c, edge: toHex(c.map((v) => v * 0.3)), chara: -1 };
-  }
-  return { bar: 1, rim: [58, 184, 205], edge: '#13363b', chara: -1 };
+/** CSS の色（#abc・#aabbcc・rgb() など）を [r, g, b] に。読めなければ null */
+let colorCtx: CanvasRenderingContext2D | null = null;
+function parseColor(css: string): number[] | null {
+  if (/^#[0-9a-f]{6}$/i.test(css)) return hex(css);
+  colorCtx ??= document.createElement('canvas').getContext('2d');
+  if (!colorCtx) return null;
+  colorCtx.fillStyle = '#000001';
+  colorCtx.fillStyle = css;
+  const v = String(colorCtx.fillStyle);
+  if (v === '#000001') return null;
+  if (/^#[0-9a-f]{6}$/i.test(v)) return hex(v);
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(v);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+/**
+ * フォルダの見た目。色を決めたフォルダはその色（名前が本家のジャンルなら箱のキャラはそのジャンルの）。
+ * 決めていないフォルダは、名前が本家のジャンルならその色、ほかは いつもの一覧と同じ名前から決まる色
+ */
+function lookOf(name: string, color?: string, key = name): Look {
+  const genre = GENRES.find(([re]) => re.test(name))?.[1];
+  const c = color ? parseColor(color) : null;
+  if (!c && genre) return genre;
+  const cc = c ?? hex(key === UNCAT ? '#5a6670' : nameColor(key));
+  // いちばん近い色の帯の絵を塗り替える
+  let bi = 1, bd = 1e9;
+  BAR_BASE.forEach((b, i) => { const d = (b[0] - cc[0]) ** 2 + (b[1] - cc[1]) ** 2 + (b[2] - cc[2]) ** 2; if (d < bd) { bd = d; bi = i; } });
+  return { bar: bi, rim: cc, edge: toHex(cc.map((v) => v * 0.3)), chara: genre?.chara ?? -1 };
 }
 const BACK_LOOK: Look = { bar: -1, rim: [0, 0, 0], edge: '#2e2e36', chara: -1 };
 
@@ -416,7 +433,7 @@ export class TndeSelect {
     const folderItem = (key: string): Item => {
       const name = key === UNCAT ? '未分類' : key.split('/').pop()!;
       const count = key === UNCAT ? songs.filter((s) => !s.folders.length).length : songs.filter((s) => s.folders.some((f) => f === key || f.startsWith(`${key}/`))).length;
-      return { kind: 'folder', key, name, look: lookOf(name, colors[key]), count };
+      return { kind: 'folder', key, name, look: lookOf(name, colors[key], key), count };
     };
     const byTitle = this.sort === 'updated' ? (a: SongEntry, b: SongEntry) => b.updatedAt - a.updatedAt
       : this.sort === 'bpm' ? (a: SongEntry, b: SongEntry) => a.bpm - b.bpm || a.title.localeCompare(b.title, 'ja')
@@ -427,7 +444,7 @@ export class TndeSelect {
       // 検索中: 合う曲だけを、フォルダに分けずに並べる
       const q = this.query.toLowerCase();
       items = songs.filter((s) => `${s.title} ${s.subtitle}`.toLowerCase().includes(q)).sort(byTitle)
-        .map((s) => ({ kind: 'song' as const, s, look: lookOf(s.folders[0]?.split('/')[0] ?? '', colors[s.folders[0]?.split('/')[0] ?? '']) }));
+        .map((s) => ({ kind: 'song' as const, s, look: lookOf(s.folders[0]?.split('/').pop() ?? '', colors[s.folders[0] ?? ''], s.folders[0] ?? UNCAT) }));
     } else if (!this.path.length) {
       items = top.length ? top.map(folderItem) : [...songs].sort(byTitle).map((s) => ({ kind: 'song' as const, s, look: lookOf('') }));
     } else {

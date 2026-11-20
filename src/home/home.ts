@@ -7,6 +7,7 @@ import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import { starSlots } from '../chart/stars';
 import { TndeSelect, type PlayOpts } from './tndeselect';
+import { nameColor } from './folderColor';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import {
   addFolder, addToFolder, deleteFolder, deleteSong, folderParents, inFolderTree, listFolderColors,
@@ -100,7 +101,6 @@ function rememberCourse(id: string, c: string) {
 const UNCAT = '\uE000uncat'; // HTML の属性に入れても変わらない文字（\u0000 は属性に入れると別の文字に置き換わる）
 /** 「すべて」の帯を表す値 */
 const ALL = '\uE000all';
-const FOLDER_COLORS = ['#3a7ca5', '#7b4bd0', '#c8337e', '#1fa59a', '#e8603c', '#c9a227', '#5a8f3c', '#b3477a'];
 /** フォルダごとの色（すべては青、未分類は灰色、ほかは名前から決まる） */
 /** ポップアップのフォルダの行（色・階層の深さ・入っているか） */
 type PopFolder = { color: string; depth: number; on: boolean };
@@ -110,9 +110,7 @@ export function folderColor(key: string, custom?: Record<string, string>) {
   if (key === UNCAT) return '#5a6670';
   // genre.ini の GenreColor で決まった色
   if (custom?.[key]) return custom[key];
-  let h = 0;
-  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return FOLDER_COLORS[h % FOLDER_COLORS.length];
+  return nameColor(key);
 }
 /** 明るい色か（その上の文字を黒にする） */
 function isLight(hex: string) {
