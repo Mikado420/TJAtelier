@@ -491,7 +491,9 @@ export class PlayMode {
     if (!early) this.closeTnde();
     this.renderer.prevBest = this.auto || clicks || fromTime > 0 ? null : this.bestScore();
     // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
-    const prep = Promise.race([this.applySkin(info.title).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
+    // 譜面に風船・ゴーゴーが無ければ、その動きの絵は読まない（メモリを抑える）
+    const need = { balloon: course.notes.some((n) => n.type === 'balloon'), gogo: course.notes.some((n) => n.gogo) };
+    const prep = Promise.race([this.applySkin(info.title, need).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
     // TNDE スキンで曲の最初から遊ぶとき: 本家と同じ読み込み画面（幕が閉じて曲名 → 用意ができたら幕が開く）
     let curtain: { open(): Promise<void> } | null = null;
     if (early) {
@@ -796,7 +798,7 @@ export class PlayMode {
     if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});
   }
 
-  private applySkin(title?: string) {
+  private applySkin(title?: string, need?: { balloon: boolean; gogo: boolean }) {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
     if (!want) {
@@ -807,7 +809,7 @@ export class PlayMode {
     // 曲ごとに使う背景・踊り子の絵だけを読み込んでおく（ほかは手放す。iPhone は絵のメモリが足りないと描くたびに読み直して重くなる）
     if (this.tnde) {
       R.tnde = this.tnde;
-      return title === undefined ? Promise.resolve() : this.tnde.prepare(title);
+      return title === undefined ? Promise.resolve() : this.tnde.prepare(title, need);
     }
     this.tndeLoad ??= TndeSkin.load('skins/tnde/', title).then(
       (s) => {
@@ -823,7 +825,7 @@ export class PlayMode {
       },
       () => { this.tndeLoad = null; },
     );
-    return this.tndeLoad.then(() => (title !== undefined ? this.tnde?.prepare(title) : undefined));
+    return this.tndeLoad.then(() => (title !== undefined ? this.tnde?.prepare(title, need) : undefined));
   }
 
   /** プロフィールをネームプレートに */

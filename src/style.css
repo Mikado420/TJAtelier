@@ -454,8 +454,9 @@ body.desk #root { transform-origin: 0 0; transform: scale(var(--rs, 1)); }
 
 button.small { padding: 8px; font-size: 13px; background: var(--btn); color: var(--sub); }
 
-/* プレイ画面を出している間は、後ろに隠れているエディタを表示しない（重ねて描く手間を省く） */
-body.playing #app { visibility: hidden; }
+/* プレイ画面を出している間は、後ろに隠れているエディタを表示しない（重ねて描く手間を省く）。
+   display: none にして、エディタの画面いっぱいの canvas のメモリも返す（大きさが 0 になる。戻ると元に戻る） */
+body.playing #app { display: none; }
 
 /* TJA のテキスト: 入力欄（文字は透明）の後ろに、同じ位置で色付きの文字（pre）を重ねる */
 .tja-wrap {

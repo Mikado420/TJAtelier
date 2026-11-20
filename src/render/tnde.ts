@@ -229,6 +229,7 @@ export class TndeSkin {
     this.dormant = true;
     this.pick = { ...this.pick, key: '' };
     this.maxWant = false;
+    this.clearWant = false;
     this.endWant.clear();
     // （どの曲でも使う絵は持ったまま。次の曲がすぐ始まるように）
     if (!keepScreens) {
@@ -242,8 +243,11 @@ export class TndeSkin {
   private dormant = false;
 
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
-  async prepare(title: string) {
+  async prepare(title: string, need?: { balloon: boolean; gogo: boolean }) {
     this.dormant = false;
+    this.clearWant = false;
+    this.maxWant = false;
+    if (need) this.need = need;
     this.choose(title);
     await this.sync();
   }
@@ -252,6 +256,10 @@ export class TndeSkin {
   private wants(name: string) {
     const p = this.pick;
     if (this.dormant && HEAVY.test(name)) return false;
+    const v = this.view;
+    if ((v === 'full' || v === 'lane') && /^bg\/Bg_up\//.test(name)) return false;
+    if (v && /^(bg\/(Bg_down|clear)\/|dancer\/|mob$|footer)/.test(name)) return false;
+    if (v === 'lane' && /^(chara\/|fx\/GoGoSplash$)/.test(name)) return false;
     // 曲が決まるまでは、曲ごとに変わる絵（背景・踊り子・モブ）は読み込まない
     if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;
     let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
@@ -265,8 +273,29 @@ export class TndeSkin {
     if (name === 'mob') return p.down !== 5;
     if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
     if (/^(load|res)\//.test(name)) return this.screenWant.has(name.slice(0, name.indexOf('/')));
+    // 譜面に無い動き（風船・ゴーゴー）の絵は読まない。クリアの動きは魂ゲージが半分を超えてから
+    if (/^chara\/Balloon_/.test(name)) return this.need.balloon;
+    if (/^(chara\/GoGo|fx\/GoGoSplash$)/.test(name) && !this.need.gogo) return false;
+    if (/^chara\/(Clear|Clearin|Soulin)$/.test(name)) return this.clearWant;
     if (name.startsWith('chara/') && name.endsWith('_Max')) return this.maxWant;
     return true;
+  }
+
+  /** 読む絵の組の名前（変わったら読み直す） */
+  private setKey() {
+    return `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}|${+this.need.balloon}${+this.need.gogo}${+this.clearWant}${+this.maxWant}|${this.view}`;
+  }
+  /** 隠れていて描かない所（full: 上下の背景・踊り子、bottom: 下の背景・踊り子、lane: レーンと左のパネルだけ） */
+  private view: '' | 'full' | 'bottom' | 'lane' = '';
+
+  /** 譜面に風船・ゴーゴーがあるか（無ければその動きの絵を読まない） */
+  private need = { balloon: true, gogo: true };
+  /** クリアの動きの絵（魂ゲージが半分を超えてから読み込む） */
+  private clearWant = false;
+  private wantClear() {
+    if (this.clearWant) return;
+    this.clearWant = true;
+    for (const n of ['chara/Clear', 'chara/Clearin', 'chara/Soulin']) void this.fetchImg(n);
   }
 
   /** 魂ゲージが満タンのどんちゃんの絵（大きいので、ゲージが 8 割を超えてから読み込む） */
@@ -274,7 +303,7 @@ export class TndeSkin {
   private wantMax() {
     if (this.maxWant) return;
     this.maxWant = true;
-    for (const n of Object.keys(this.man.anim)) if (n.startsWith('chara/') && n.endsWith('_Max')) void this.fetchImg(n);
+    for (const n of Object.keys(this.man.anim)) if (n.startsWith('chara/') && n.endsWith('_Max') && this.wants(n)) void this.fetchImg(n);
   }
 
   /** 曲の終わりの演出の絵は、要りそうになってから読み込む（clear・fc・dfc） */
@@ -345,7 +374,7 @@ export class TndeSkin {
 
   /** 使う絵を読み込み、使わない絵を手放す */
   private sync() {
-    const set = `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}`;
+    const set = this.setKey();
     const names = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)];
     if (set !== this.loadedSet) {
       this.loadedSet = set;
@@ -883,7 +912,10 @@ export class TndeSkin {
   draw(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { game, course, now, wall } = F;
     this.choose(F.info.title);
-    if (`${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}` !== this.loadedSet) void this.sync();
+    // 動画を全面・下に出すとき、動画用の画面のときは、隠れる背景・踊り子・どんちゃんの絵を読まない（手放す）
+    const view = F.laneOnly ? 'lane' : F.bgMode === 'full' ? 'full' : F.bgMode ? 'bottom' : '';
+    if (view !== this.view) this.view = view;
+    if (this.setKey() !== this.loadedSet) void this.sync();
     // 曲の半分を過ぎたら、終わりの演出の絵を読み込み始める（フルコンボの連番はフルコンボできそうなときだけ）
     {
       const half = this.lastNote(course) * 0.5;
@@ -1522,6 +1554,7 @@ export class TndeSkin {
     const st = F.game.stats;
     const { wall } = F;
     if (st.gauge >= 80) this.wantMax();
+    if (st.gauge >= 50) this.wantClear();
     const once = this.charaOnce;
     if (once?.name === 'chara/Balloon_Breaking' || wall < this.balloonUntil) return; // 風船のどんちゃんは手前に描く
     if (once && !once.name.startsWith('chara/Balloon')) {

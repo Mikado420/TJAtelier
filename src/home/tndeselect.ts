@@ -267,6 +267,8 @@ export class TndeSelect {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.previewed = null;
+    // 画面の canvas のメモリを返す（出すときに resize で戻す）
+    this.el.width = this.el.height = 0;
     // プレイ中は大きな絵（フォルダのキャラ・難易度えらびの背景・跳ぶどんちゃん）と描いた字を手放す。
     // ほかの絵（65MB ほど）は持ったまま（戻ったときにすぐ出せるように）
     this.releaseLazy();
@@ -274,7 +276,8 @@ export class TndeSelect {
 
   private releaseLazy() {
     for (const [k, m] of [...this.imgs]) if (LAZY.test(k)) { freeImg(m.im); this.imgs.delete(k); }
-    for (const [k, a] of [...this.anims]) if (LAZY.test(k)) { for (const pg of a.pages) pg.close(); this.anims.delete(k); }
+    // どんちゃん（ふだんの動き。21MB）も手放す（戻ったときに読み直す）
+    for (const [k, a] of [...this.anims]) if (LAZY.test(k) || k === 'donLoop') { for (const pg of a.pages) pg.close(); this.anims.delete(k); }
     for (const [k, m] of [...this.tints]) if (LAZY.test(k)) { freeImg(m.im); this.tints.delete(k); }
     for (const k of [...this.pending]) if (LAZY.test(k)) this.pending.delete(k);
     for (const c of this.btnCache.values()) freeImg(c);
@@ -336,7 +339,7 @@ export class TndeSelect {
         this.imgs.set(name, { ...m, im });
       } else if (a) {
         const pages = await Promise.all(a.pages.map(bmp));
-        if (gen !== this.gen || (!this.on && LAZY.test(name))) { for (const pg of pages) pg.close(); return; }
+        if (gen !== this.gen || (!this.on && (LAZY.test(name) || name === 'donLoop'))) { for (const pg of pages) pg.close(); return; }
         this.anims.set(name, { ...a, pages });
       }
       this.used.set(name, this.wall);
@@ -636,8 +639,10 @@ export class TndeSelect {
 
   private bindInput() {
     const toStage = (e: { clientX: number; clientY: number }) => {
+      // 画面全体が拡大・縮小されていても合うよう、見えている大きさと canvas の px の比で
       const r = this.el.getBoundingClientRect();
-      return { x: ((e.clientX - r.left) * this.dpr - this.ox) / this.s, y: ((e.clientY - r.top) * this.dpr - this.oy) / this.s };
+      const kx = this.el.width / Math.max(1, r.width), ky = this.el.height / Math.max(1, r.height);
+      return { x: ((e.clientX - r.left) * kx - this.ox) / this.s, y: ((e.clientY - r.top) * ky - this.oy) / this.s };
     };
     let down: { x: number; y: number; t: number; acc: number; accX: number; moved: boolean } | null = null;
     let press = 0;
@@ -749,7 +754,9 @@ export class TndeSelect {
   private oy = 0;
   private resize() {
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.round(this.el.clientWidth * this.dpr), h = Math.round(this.el.clientHeight * this.dpr);
+    // 見えている大きさ（画面全体が拡大・縮小されていてもそのまま）で、細かさを合わせる
+    const rb = this.el.getBoundingClientRect();
+    const w = Math.round(rb.width * this.dpr), h = Math.round(rb.height * this.dpr);
     if (this.el.width !== w || this.el.height !== h) { this.el.width = w; this.el.height = h; }
     this.s = Math.min(w / 1920, h / 1080);
     this.ox = (w - 1920 * this.s) / 2;
@@ -1257,8 +1264,9 @@ export class TndeSelect {
       // ボタンの画面の位置（読み込みは、iPhone の選ぶメニューをそこから出す）
       const [x, y, w, h] = menuRect(MENU.findIndex((m) => m.a === a));
       const r = this.el.getBoundingClientRect();
-      const k = this.s / this.dpr;
-      this.host.action(a, { x: r.left + this.ox / this.dpr + x * k, y: r.top + this.oy / this.dpr + y * k, w: w * k, h: h * k });
+      const q = r.width / Math.max(1, this.el.width);
+      const k = this.s * q;
+      this.host.action(a, { x: r.left + this.ox * q + x * k, y: r.top + this.oy * q + y * k, w: w * k, h: h * k });
     }
   }
 

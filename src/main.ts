@@ -552,6 +552,15 @@ function pvFrame(force: boolean) {
 ed.onChange(() => { pvDirty = true; });
 
 function loop() {
+  // 1 コマで失敗しても止めない（次のコマを必ず予約する）
+  requestAnimationFrame(loop);
+  try {
+    loopBody();
+  } catch (e) {
+    console.error(e);
+  }
+}
+function loopBody() {
   if (playing && !play.isActive) tickPlayback();
   if (collab.active && !play.isActive) collab.frame(playing);
   if (tempoPreview.on) tickTempoPreview();
@@ -563,7 +572,6 @@ function loop() {
     pvFrame(redraw);
     updateHud();
   }
-  requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
 

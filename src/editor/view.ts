@@ -886,6 +886,8 @@ export class EditorView {
 
   frame() {
     if (!this.dirty) return;
+    // 隠れていて大きさが 0 のとき（プレイ中など）は描かない（見えるようになって大きさが戻ってから描く）
+    if (!this.canvas.width || !this.canvas.height) return;
     this.dirty = false;
     this.draw();
   }
