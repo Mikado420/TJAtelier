@@ -22,6 +22,8 @@ describe('部屋（予約・音源を配る・準備OK・入り直し）', () =>
     const B = room.join(cb, { name: 'B', create: false, title: '', pass: '', cid: 'b' });
     if (typeof A === 'string' || typeof B === 'string') throw new Error('join');
     const send = (p: typeof A, m: Msg) => room.message(p, JSON.stringify(m));
+    // 予約の決まりを確かめる部屋（選曲担当ではなく、全員が予約できる）
+    send(A, { t: 'settings', s: { pick: 'all', limit: 2 } });
     return { room, ca, cb, A, B, send };
   };
 
@@ -158,5 +160,64 @@ describe('部屋（予約・音源を配る・準備OK・入り直し）', () =>
     expect(n).toBe(before + 1);
     room.heartbeat();
     expect(n).toBe(before + 2);
+  });
+});
+
+describe('選曲担当', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const setup = () => {
+    const room = new RoomCore('R', () => {});
+    const ca = conn();
+    const cb = conn();
+    const A = room.join(ca, { name: 'A', create: true, title: '', pass: '', cid: 'a' });
+    const B = room.join(cb, { name: 'B', create: false, title: '', pass: '', cid: 'b' });
+    if (typeof A === 'string' || typeof B === 'string') throw new Error('join');
+    const send = (p: typeof A, m: Msg) => room.message(p, JSON.stringify(m));
+    return { room, ca, cb, A, B, send };
+  };
+
+  it('はじめは部屋主が選曲担当。選曲担当だけが曲を決められ、決めている間は次を決められない', () => {
+    const { ca, cb, A, B, send } = setup();
+    expect(last(cb, 'roster')!.picker).toBe(A.id);
+    send(B, { t: 'reserve', meta: meta('曲B') });
+    expect(last(cb, 'err')).toBeDefined();
+    expect(last(cb, 'next')).toBeUndefined();
+    send(A, { t: 'reserve', meta: meta('曲A') });
+    expect((last(cb, 'next')!.meta as Msg).title).toBe('曲A');
+    send(A, { t: 'reserve', meta: meta('曲A2') });
+    expect((last(ca, 'roster')!.queue as Msg[]).length).toBe(0);
+  });
+
+  it('選曲担当は決めた曲を取り消せる（ほかの人はできない）', () => {
+    const { cb, A, B, send } = setup();
+    send(A, { t: 'reserve', meta: meta('曲A') });
+    send(B, { t: 'cancel' });
+    expect(last(cb, 'roster')!.song).not.toBeNull();
+    send(A, { t: 'cancel' });
+    expect(last(cb, 'roster')!.song).toBeNull();
+  });
+
+  it('ランダムで決める・1 曲ごとに交代', () => {
+    const { ca, cb, A, B, send } = setup();
+    send(A, { t: 'settings', s: { rotate: true } });
+    expect((last(cb, 'roster')!.settings as Msg).rotate).toBe(true);
+    send(A, { t: 'randPick' });
+    expect([A.id, B.id]).toContain(last(cb, 'roster')!.picker);
+    // 1 曲遊んだら、今の人以外に交代する
+    const p0 = last(cb, 'roster')!.picker as string;
+    const P = p0 === A.id ? A : B;
+    send(P, { t: 'reserve', meta: meta('曲') });
+    const key = (last(ca, 'next')!.meta as Msg).key;
+    for (const x of [A, B]) { send(x, { t: 'have', key }); send(x, { t: 'ok', on: true }); }
+    vi.advanceTimersByTime(3100);
+    for (const x of [A, B]) send(x, { t: 'fin', r: { score: 1 } });
+    expect(last(cb, 'roster')!.picker).not.toBe(p0);
+  });
+
+  it('8 人まで入れる', () => {
+    const room = new RoomCore('R', () => {});
+    for (let i = 0; i < 8; i++) expect(typeof room.join(conn(), { name: `P${i}`, create: i === 0, title: '', pass: '', cid: `c${i}` })).not.toBe('string');
+    expect(room.join(conn(), { name: 'X', create: false, title: '', pass: '', cid: 'x' })).toBe('満員です');
   });
 });

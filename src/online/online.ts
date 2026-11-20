@@ -16,6 +16,8 @@ import { saveBest, type Crown } from '../home/home';
 import { listFolderColors, listFolders, listSongs, loadSongAudio, loadSongData, loadSongVideo, type SongEntry } from '../io/library';
 import type { PlayMode } from '../play/playmode';
 import type { Opponent } from '../render/renderer';
+import type { PlateStyle } from '../render/tnde';
+import type { OnlineDiff } from '../home/tndeselect';
 import { getCachedAudio, getCachedVideo, putCachedAudio, putCachedVideo } from './cache';
 import {
   audioHash, listRooms, newRoomId, OnlineClient,
@@ -30,6 +32,13 @@ export interface OnlineHost {
   videoOn(): boolean;
   /** オンラインの画面を閉じた（曲選択へ戻る） */
   closed(): void;
+  /** TNDE スキンか */
+  tnde(): boolean;
+  /** 自分のネームプレート */
+  plate(): { name: string; title: string; profile?: PlateStyle };
+  /** TNDE スキンの難易度えらびを、オンラインの曲で出す（出せなければ false）・閉じる */
+  diffOpen(od: OnlineDiff): boolean;
+  diffClose(): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -45,7 +54,7 @@ const courseChip = (name: string, level?: number) => {
   const [label, color] = COURSE[name] ?? [name, 'var(--btn)'];
   return `<span class="ol-course" style="--cc:${color}">${esc(label)}${level !== undefined ? `<b>★${level}</b>` : ''}</span>`;
 };
-const PICK_LABEL: Record<RoomSettings['pick'], string> = { host: '部屋主だけ', all: '全員', turn: '全員（順番に）', random: '全員（ランダム）' };
+const PICK_LABEL: Record<RoomSettings['pick'], string> = { picker: '選曲担当', host: '部屋主だけ', all: '全員', turn: '全員（順番に）', random: '全員（ランダム）' };
 const NAME_KEY = 'malody-web:onlineName';
 
 /** 曲を選ぶときのフォルダ（「すべて」「未分類」はフォルダ名に使えない値） */
@@ -64,7 +73,7 @@ function folderColor(key: string) {
 }
 
 type View = 'lobby' | 'room';
-type Modal = '' | 'create' | { join: RoomInfo } | 'settings' | 'standings' | 'pick' | 'results';
+type Modal = '' | 'create' | { join: RoomInfo } | { who: string } | 'settings' | 'standings' | 'pick' | 'results';
 
 export class OnlineScreen {
   private root: HTMLElement;
@@ -103,6 +112,10 @@ export class OnlineScreen {
   /** 通信が切れて入り直しているところ */
   private reconnecting = false;
   private cdTimer = 0;
+  /** ルーム ID を見せているか */
+  private showId = false;
+  /** ネームプレートの絵（名前・称号ごと） */
+  private plates = new Map<string, string>();
 
   constructor(private readonly host: OnlineHost) {
     const root = document.createElement('div');
@@ -187,6 +200,7 @@ export class OnlineScreen {
 
   private render() {
     const sub = this.root.querySelector('.ol-sub')!;
+    this.root.classList.toggle('in-room', this.view === 'room');
     if (this.view === 'lobby') {
       this.root.querySelector('.ol-title')!.textContent = 'オンライン';
       sub.textContent = '';
@@ -212,13 +226,13 @@ export class OnlineScreen {
     // 入力中のメッセージは書き直しても残す
     const draft = this.body.querySelector<HTMLInputElement>('#olMsg')?.value ?? '';
     this.body.innerHTML = `
-      <div class="ol-room">
-        <section class="ol-card ol-players"><h3>参加者 <small id="olCount"></small></h3><div id="olPlayers"></div>
-          <div class="ol-chat"><div class="ol-log" id="olLog" aria-live="polite"></div>
-            <form class="ol-say" id="olSay"><input id="olMsg" maxlength="80" placeholder="メッセージを送る" autocomplete="off" enterkeyhint="send"><button class="ol-btn primary" type="submit" aria-label="送る"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-5 16-3-7z"/></svg></button></form>
-          </div>
+      <div class="olr">
+        <section class="olr-box olr-pl"><h3>プレイヤー<b id="olCount"></b></h3><div class="olr-grid" id="olPlayers"></div></section>
+        <section class="olr-box olr-chat"><div class="ol-log" id="olLog" aria-live="polite"></div>
+          <form class="olr-say" id="olSay"><input id="olMsg" maxlength="80" autocomplete="off" enterkeyhint="send"><button class="olr-b red" type="submit">送信</button></form>
         </section>
-        <section class="ol-card ol-songbox" id="olSong"></section>
+        <section class="olr-box olr-side" id="olSong"></section>
+        <section class="olr-box olr-exit"><button class="olr-b" data-ol="back">退出</button></section>
       </div>
       <div id="olModal">${this.modalHtml()}</div>`;
     this.body.querySelector<HTMLInputElement>('#olMsg')!.value = draft;
@@ -240,7 +254,7 @@ export class OnlineScreen {
     const c = this.client;
     if (!c) return;
     const sub = this.root.querySelector('.ol-sub')!;
-    sub.innerHTML = `${c.room.locked ? '🔒 ' : ''}部屋 ${esc(c.room.id)}${this.reconnecting ? ' <em class="ol-recon">つなぎ直しています…</em>' : ''}`;
+    sub.innerHTML = `${this.reconnecting ? '<em class="ol-recon">つなぎ直しています…</em>' : ''}<button class="olr-b" data-ol="showid">${this.showId ? `${c.room.locked ? '🔒 ' : ''}${esc(c.room.id)}` : 'ルーム ID'}</button><button class="olr-b" data-ol="copyid">ID をコピー</button>`;
   }
 
   /** モーダルだけ描き直す */
@@ -256,7 +270,7 @@ export class OnlineScreen {
     if (!el) return;
     el.innerHTML = this.chatLog.length
       ? this.chatLog.map((c) => `<p class="${c.p === this.me ? 'me' : ''}"><b>${esc(c.name)}</b><span>${esc(c.x)}</span></p>`).join('')
-      : '<p class="ol-log-empty">まだメッセージはありません</p>';
+      : '';
     el.scrollTop = el.scrollHeight;
   }
 
@@ -285,6 +299,16 @@ export class OnlineScreen {
 
   private modalHtml() {
     const m = this.modal;
+    if (m && typeof m === 'object' && 'who' in m) {
+      const o = this.roster?.players.find((p) => p.p === m.who);
+      if (!o) return '';
+      return `<div class="ol-modal"><div class="ol-mbox olr-pmenu">
+        <h3>${esc(o.name)}</h3>
+        <button class="olr-b" data-host="${esc(o.p)}">ホストにする</button>
+        <button class="olr-b red" data-kick="${esc(o.p)}">退出させる</button>
+        <button class="olr-b" data-ol="close">閉じる</button>
+      </div></div>`;
+    }
     if (m === 'create') {
       return `<div class="ol-modal"><div class="ol-mbox">
         <h3>部屋を作る</h3>
@@ -327,33 +351,117 @@ export class OnlineScreen {
     const el = this.body.querySelector('#olPlayers');
     const R = this.roster;
     if (!el || !R) return;
+    const max = R.max ?? 4;
     const cnt = this.body.querySelector('#olCount');
-    if (cnt) cnt.textContent = `${R.players.length} / 4`;
+    if (cnt) cnt.textContent = `${R.players.length}/${max}`;
     const me = this.me;
     const amHost = this.amHost;
     const songOn = !!R.song;
-    el.innerHTML = R.players
-      .map((p) => {
-        const st = p.away ? '<em class="away">接続待ち</em>'
-          : p.inGame ? '<em class="play">プレイ中</em>'
-          : !songOn ? '<em>待機</em>'
-          : !p.ready ? '<em>受け取り中</em>'
-          : p.ok ? '<em class="ok">準備OK</em>' : '<em>準備中</em>';
-        return `<div class="ol-player${p.p === me ? ' me' : ''}">
-          <span class="ol-crown">${p.p === R.host ? '👑' : ''}</span>
-          <span class="ol-pn">${esc(p.name)}${p.p === me ? '<small>あなた</small>' : ''}</span>
-          ${songOn && p.course ? courseChip(p.course) : ''}${st}
-          ${amHost && p.p !== me ? `<button class="ol-kick" data-host="${esc(p.p)}" aria-label="部屋主にする" title="部屋主にする">👑</button><button class="ol-kick" data-kick="${esc(p.p)}" aria-label="退出させる">×</button>` : ''}
-        </div>`;
-      })
-      .join('');
+    const slots: string[] = R.players.map((p) => {
+      const st = p.away ? '接続待ち'
+        : p.inGame ? 'プレイ中'
+        : !songOn ? '待機中'
+        : !p.ready ? '受け取り中'
+        : p.ok ? '準備OK' : '準備中';
+      const pl = this.plateImg(p.p === me ? null : p.name);
+      return `<div class="olr-slot${p.p === me ? ' me' : ''}"${amHost && p.p !== me ? ` data-ol="pmenu" data-who="${esc(p.p)}"` : ''}>
+        ${pl ? `<img class="olr-plate" src="${pl}" alt="">` : `<span class="olr-name">${esc(p.name)}</span>`}
+        <div class="olr-info"><div class="olr-tags">${p.p === R.host ? '<span class="olr-tag red">ホスト</span>' : ''}${p.p === R.picker ? '<span class="olr-tag grn">選曲担当</span>' : ''}</div>
+          <span class="olr-st${p.ok && songOn ? ' ok' : ''}">${st}</span></div>
+      </div>`;
+    });
+    while (slots.length < max) slots.push('<div class="olr-slot empty"><span>空き</span></div>');
+    el.innerHTML = slots.join('');
   }
 
-  /** 右: 今の曲・予約の一覧 */
+  /** 選曲担当が決めた曲を、全員の TNDE の難易度えらびに出す（出せないとき・曲が無いときは閉じる） */
+  private diffShown = '';
+  private syncDiff() {
+    const R = this.roster;
+    const n = this.nextSong;
+    const want = !!R && !!this.client && this.view === 'room' && !this.playingNow && R.settings.pick === 'picker' && R.phase === 'wait'
+      && !!R.song && !!n && n.meta.key === R.song.key && this.host.tnde();
+    if (!want) {
+      if (this.diffShown) {
+        this.diffShown = '';
+        this.host.diffClose();
+        if (this.client && !this.playingNow) this.root.classList.remove('hidden');
+      }
+      return;
+    }
+    const key = n!.meta.key;
+    if (this.diffShown === key) return;
+    const ch = n!.chart;
+    const song: SongEntry = {
+      id: `online:${key}`, title: n!.meta.title, subtitle: n!.meta.subtitle.replace(/^(--|\+\+)/, ''), bpm: ch.bpm, length: 0, bpmMin: ch.bpm, bpmMax: ch.bpm,
+      courses: ch.courses.map((x) => ({ name: x.name, level: x.level })), folders: [], audioName: '', demoStart: 0, updatedAt: 0,
+    } as SongEntry;
+    const ok = this.host.diffOpen({
+      key,
+      song,
+      canBack: () => !!this.roster?.song && (this.roster.song.by === this.me || this.amHost),
+      players: () => (this.roster?.players ?? []).map((p) => ({ name: p.name, mine: p.p === this.me, course: p.course, ok: p.ok && p.ready, ready: p.ready })),
+      course: () => this.myCourse,
+      back: () => this.client?.send({ t: 'cancel' }),
+      pick: (c, okNow) => {
+        const cl = this.client;
+        if (!cl) return;
+        if (c !== this.myCourse) { this.myCourse = c; cl.send({ t: 'course', c }); }
+        const mine = this.roster?.players.find((p) => p.p === this.me);
+        if (!!mine?.ok !== okNow) cl.send({ t: 'ok', on: okNow });
+      },
+    });
+    if (!ok) return;
+    this.diffShown = key;
+    this.root.classList.add('hidden');
+  }
+
+  /** ネームプレートの絵（TNDE スキンのとき。null = 自分のプロフィールで） */
+  private plateImg(name: string | null) {
+    if (!this.host.tnde()) return '';
+    const mine = name === null ? this.host.plate() : null;
+    const key = mine ? `me|${mine.name}|${mine.title}|${JSON.stringify(mine.profile ?? null)}` : `o|${name}`;
+    const hit = this.plates.get(key);
+    if (hit !== undefined) return hit;
+    this.plates.set(key, '');
+    void this.host.play.tndeSkin().then((sk) => {
+      if (!sk) return;
+      const cv = document.createElement('canvas');
+      cv.width = 680;
+      cv.height = 180;
+      const g = cv.getContext('2d')!;
+      g.setTransform(2, 0, 0, 2, 0, 0);
+      g.translate(11, -439.5);
+      sk.plate(g, mine ? { name: mine.name, title: mine.title, profile: mine.profile, wall: 0 } : { name: name!, title: '', profile: undefined, wall: 0 }, 0, 0);
+      this.plates.set(key, cv.toDataURL());
+      cv.width = cv.height = 0;
+      if (this.view === 'room' && !this.playingNow) this.renderPlayers();
+    });
+    return '';
+  }
+
+  /** 右: 選曲担当（選曲担当の部屋）。ほかの決まりの部屋は、今の曲・予約の一覧 */
   private renderSong() {
     const el = this.body.querySelector('#olSong');
     const R = this.roster;
     if (!el || !R) return;
+    this.syncDiff();
+    if (R.settings.pick === 'picker' && !(R.song && R.phase === 'wait')) {
+      const me = this.me;
+      const isPicker = R.picker === me;
+      const can = isPicker || this.amHost;
+      const pickerName = R.players.find((p) => p.p === R.picker)?.name ?? '';
+      const tr = this.transfer;
+      el.innerHTML = R.phase === 'play'
+        ? `<h3 class="olr-h">プレイ中</h3>${this.song ? '<button class="olr-b red big" data-ol="watch">観戦する</button>' : ''}`
+        : `<h3 class="olr-h">選曲担当</h3><p class="olr-who">${esc(pickerName)}</p>
+          <button class="olr-b red big" data-ol="pick" ${isPicker ? '' : 'disabled'}>曲をえらぶ</button>
+          <button class="olr-b" data-ol="randpick" ${can ? '' : 'disabled'}>ランダムで決める</button>
+          <label class="olr-check"><input type="checkbox" data-ol="rotate" ${R.settings.rotate ? 'checked' : ''} ${can ? '' : 'disabled'}><span>1曲ごとに交代</span></label>
+          ${tr ? `<div class="ol-prog"><span>${esc(tr.label)} ${Math.round(tr.ratio * 100)}%</span><i style="width:${(tr.ratio * 100).toFixed(1)}%"></i></div>` : ''}
+          `;
+      return;
+    }
     const me = this.me;
     const amHost = this.amHost;
     const s = R.song;
@@ -377,6 +485,7 @@ export class OnlineScreen {
               : R.phase === 'play' ? (this.song ? '<button class="ol-btn primary big" data-ol="watch">観戦する</button>' : '<p class="ol-wait">プレイ中です</p>')
               : cd ? `<p class="ol-cd">あと <b>${cd}</b></p><button class="ol-btn" data-ol="ok">準備OKを取り消す</button>`
               : `<button class="ol-btn ${myP?.ok ? '' : 'primary'} big" data-ol="ok" ${this.song ? '' : 'disabled'}>${myP?.ok ? '準備OKを取り消す' : '準備OK'}</button>`}
+            ${R.settings.pick === 'picker' && s.by === me && R.phase === 'wait' ? '<button class="ol-mini ghost" data-ol="cancelsong">取り消す</button>' : ''}
             ${amHost && R.phase === 'wait' && !cd ? `<span class="ol-hostbtn"><button class="ol-mini" data-ol="start" ${R.players.every((p) => p.ready || p.away) ? '' : 'disabled'}>すぐ始める</button><button class="ol-mini ghost" data-ol="skip">この曲を飛ばす</button></span>` : ''}
           </div>
         </div>`
@@ -492,14 +601,27 @@ export class OnlineScreen {
       return;
     }
     if (!c || !this.roster) return;
+    if (a === 'showid') { this.showId = !this.showId; this.renderSub(); return; }
+    if (a === 'copyid') {
+      try { await navigator.clipboard.writeText(c.room.id); this.host.toast('コピーしました'); } catch { this.host.toast(c.room.id); }
+      return;
+    }
+    if (a === 'pmenu') { this.modal = { who: b.dataset.who! }; this.renderModal(); return; }
+    if (a === 'randpick') { c.send({ t: 'randPick' }); return; }
+    if (a === 'rotate') { c.send({ t: 'settings', s: { rotate: (b as HTMLInputElement).checked } }); return; }
+    if (a === 'cancelsong') { c.send({ t: 'cancel' }); return; }
     if (b.dataset.kick) {
       const name = this.roster.players.find((p) => p.p === b.dataset.kick)?.name ?? '';
       if (confirm(`${name} を部屋から退出させますか？`)) c.send({ t: 'kick', p: b.dataset.kick });
+      this.modal = '';
+      this.renderModal();
       return;
     }
     if (b.dataset.host) {
       const name = this.roster.players.find((p) => p.p === b.dataset.host)?.name ?? '';
       if (confirm(`${name} を部屋主にしますか？`)) c.send({ t: 'host', p: b.dataset.host });
+      this.modal = '';
+      this.renderModal();
       return;
     }
     if (b.dataset.course) {
@@ -568,6 +690,7 @@ export class OnlineScreen {
   }
 
   private leaveRoom(msg?: string) {
+    if (this.diffShown) { this.diffShown = ''; this.host.diffClose(); }
     this.client?.close();
     this.client = null;
     this.roster = null;
@@ -741,7 +864,7 @@ export class OnlineScreen {
     });
     this.modal = '';
     this.renderModal();
-    this.host.toast(`「${chart.title || '（無題）'}」を予約しました`);
+    if (this.roster?.settings.pick !== 'picker') this.host.toast(`「${chart.title || '（無題）'}」を予約しました`);
   }
 
   /** 予約する曲の背景の動画の情報（動画が無ければ空） */
@@ -831,6 +954,8 @@ export class OnlineScreen {
     this.nextSong = { meta, chart, by };
     // プレイ中は、終わってから準備する（遊んでいる曲の音源を差し替えないように）
     if (this.playingNow) return;
+    if (!chart.courses.some((x) => x.name === this.myCourse)) this.myCourse = meta.course;
+    this.syncDiff();
     this.song = null;
     this.transfer = null;
     this.vtransfer = null;
@@ -959,6 +1084,7 @@ export class OnlineScreen {
     if (spectate && !opps.length) { this.host.toast('観戦できる人がいません'); return; }
     this.playingNow = true;
     clearInterval(this.cdTimer);
+    if (this.diffShown) { this.diffShown = ''; this.host.diffClose(); }
     this.hide();
     try {
       await this.host.play.startOnline(course, { title: meta.title, course: ec.name, level: ec.level }, c.toPerf(zero), {

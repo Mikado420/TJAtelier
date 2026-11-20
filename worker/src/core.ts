@@ -1,7 +1,8 @@
 /**
  * オンライン対戦の部屋（Cloudflare の Durable Object とローカルの確認用サーバーの両方で使う中身）。
  *
- * 部屋に入った人（最大 4 人）のつながりを持ち、
+ * 部屋に入った人（最大 8 人）のつながりを持ち、
+ * - 選曲担当（pick: 'picker'）: 選曲担当の 1 人だけが曲を決める。決めた曲は全員の難易度えらびに出る（選曲担当は取り消せる）
  * - 予約された曲を、部屋の設定（部屋主だけ・全員・順番・ランダム）に従って 1 曲ずつ「今の曲」にする
  * - 今の曲の音源を持っていない人がいれば、予約した人に送ってもらって配る（持っている人には送らない）
  * - 全員が受け取って「準備OK」なら、カウントダウンして同じ時刻に始める（部屋主はすぐ始めることもできる）
@@ -92,6 +93,8 @@ export interface RoomState {
   title: string;
   pass: string;
   settings: RoomSettings;
+  /** 選曲担当 */
+  pickerId?: string;
   queue: QItem[];
   current: { item: QItem; key: string } | null;
   last: QItem | null;
@@ -104,8 +107,10 @@ export interface RoomState {
 }
 
 export interface RoomSettings {
-  /** 曲を選べる人: 部屋主だけ・全員・全員（順番に）・全員（ランダム） */
-  pick: 'host' | 'all' | 'turn' | 'random';
+  /** 曲を選べる人: 選曲担当・部屋主だけ・全員・全員（順番に）・全員（ランダム） */
+  pick: 'picker' | 'host' | 'all' | 'turn' | 'random';
+  /** 選曲担当: 1 曲ごとにランダムで交代する */
+  rotate?: boolean;
   /** 1 人が予約できる曲の数 */
   limit: number;
   /** 全員が準備OK なら自動で始める */
@@ -114,7 +119,7 @@ export interface RoomSettings {
 
 export interface Result { name: string; course: string; score: number; good: number; ok: number; bad: number; maxCombo: number; rolls: number }
 
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 /** 音源の上限（バイト） */
 export const MAX_AUDIO = 40 * 1024 * 1024;
 /** 譜面の上限（文字数） */
@@ -147,7 +152,9 @@ export class RoomCore {
   private hostId = '';
   private title = '';
   private pass = '';
-  private settings: RoomSettings = { pick: 'all', limit: 2, auto: true };
+  private settings: RoomSettings = { pick: 'picker', limit: 1, auto: true, rotate: false };
+  /** 選曲担当（pick: 'picker' のとき、この人だけが曲を決める） */
+  private pickerId = '';
   private queue: QItem[] = [];
   /** 今の曲（予約から 1 曲ずつ。音源は持っていない人にだけ配る） */
   private current: {
@@ -215,6 +222,7 @@ export class RoomCore {
         title: this.title,
         pass: this.pass,
         settings: this.settings,
+        pickerId: this.pickerId,
         queue: this.queue.map(strip),
         current: cur ? { item: strip(cur.item), key: cur.key } : null,
         last: this.last ? strip(this.last) : null,
@@ -235,6 +243,7 @@ export class RoomCore {
     this.title = st.title;
     this.pass = st.pass;
     this.settings = st.settings;
+    this.pickerId = st.pickerId ?? '';
     this.queue = st.queue.map(fill);
     this.last = st.last ? fill(st.last) : null;
     this.lastBy = st.lastBy;
@@ -253,6 +262,7 @@ export class RoomCore {
       this.players.set(o.id, { ...o, conn, inGame: false, rate: 0, rateAt: this.now() });
     }
     if (!this.players.has(this.hostId)) this.hostId = this.players.keys().next().value ?? '';
+    if (!this.players.has(this.pickerId)) this.pickerId = this.hostId;
     if (!this.players.size) this.reset();
   }
 
@@ -285,12 +295,15 @@ export class RoomCore {
     const p: Player = { id: `p${++this.seq}`, cid, name, conn, ready: false, ok: false, course: '', inGame: false, rate: 0, rateAt: this.now() };
     this.players.set(p.id, p);
     if (!this.hostId) this.hostId = p.id;
+    if (!this.pickerId) this.pickerId = this.hostId;
     this.welcome(p);
     this.cancelCountdown();
     return p;
   }
 
   private reset() {
+    this.settings = { pick: 'picker', limit: 1, auto: true, rotate: false };
+    this.pickerId = '';
     this.queue = [];
     this.current = null;
     this.last = null;
@@ -333,6 +346,7 @@ export class RoomCore {
       // 部屋主が抜けたら、次に古い人が部屋主になる
       this.hostId = this.players.keys().next().value ?? '';
     }
+    if (this.pickerId === p.id) this.pickerId = this.hostId;
     if (this.players.size === 0) {
       this.reset();
       this.cancelCountdown();
@@ -378,6 +392,11 @@ export class RoomCore {
       case 'reserve': {
         // 曲を予約する
         if (this.settings.pick === 'host' && !host) return this.sendTo(p, { t: 'err', msg: 'この部屋では、部屋主だけが曲を選べます' });
+        if (this.settings.pick === 'picker') {
+          // 選曲担当だけ。決めている曲がある間（プレイ中も）は選べない
+          if (p.id !== this.pickerId) return this.sendTo(p, { t: 'err', msg: '選曲担当が曲を選びます' });
+          if (cur || this.queue.length) return;
+        }
         const mine = this.queue.filter((x) => x.by === p.id).length;
         if (mine >= this.settings.limit) return this.sendTo(p, { t: 'err', msg: `予約できるのは 1 人 ${this.settings.limit} 曲までです` });
         if (this.queue.length >= MAX_QUEUE) return this.sendTo(p, { t: 'err', msg: '予約がいっぱいです' });
@@ -428,15 +447,34 @@ export class RoomCore {
         break;
       }
       case 'settings': {
-        if (!host) return;
         const s = (m.s ?? {}) as Partial<RoomSettings>;
-        if (s.pick === 'host' || s.pick === 'all' || s.pick === 'turn' || s.pick === 'random') this.settings.pick = s.pick;
+        // 選曲担当は「1 曲ごとに交代」だけ変えられる
+        if (!host) {
+          if (p.id !== this.pickerId || Object.keys(s).some((k) => k !== 'rotate')) return;
+        }
+        if (s.pick === 'picker' || s.pick === 'host' || s.pick === 'all' || s.pick === 'turn' || s.pick === 'random') this.settings.pick = s.pick;
         if (s.limit !== undefined) this.settings.limit = Math.max(1, Math.min(5, Math.floor(Number(s.limit) || 1)));
         if (s.auto !== undefined) this.settings.auto = !!s.auto;
+        if (s.rotate !== undefined) this.settings.rotate = !!s.rotate;
         this.maybeCountdown();
         this.roster();
         break;
       }
+      case 'randPick': {
+        // 選曲担当をランダムで決める（部屋主か選曲担当。決めている曲がある間はできない）
+        if ((!host && p.id !== this.pickerId) || cur || this.phase !== 'wait') return;
+        this.pickRandom(false);
+        this.roster();
+        break;
+      }
+      case 'cancel':
+        // 選曲担当（その曲を決めた人）か部屋主: 決めた曲を取り消して、部屋に戻る
+        if (this.phase !== 'wait' || !cur || (!host && cur.item.by !== p.id)) return;
+        this.current = null;
+        this.cancelCountdown();
+        this.advance();
+        this.roster();
+        break;
       case 'skip':
         // 部屋主: 今の曲を飛ばす
         if (!host || this.phase !== 'wait' || !cur) return;
@@ -751,9 +789,17 @@ export class RoomCore {
     }
     this.broadcast({ t: 'results', list, history: this.history });
     this.current = null;
+    if (this.settings.pick === 'picker' && this.settings.rotate) this.pickRandom(true);
     // 次の予約があれば、すぐに準備を始める（受け取りを待つ時間を減らす）
     this.advance();
     this.roster();
+  }
+
+  /** 選曲担当をランダムで決める（others: 今の人以外から） */
+  private pickRandom(others: boolean) {
+    let ids = [...this.players.values()].filter((o) => o.conn).map((o) => o.id);
+    if (others && ids.length > 1) ids = ids.filter((id) => id !== this.pickerId);
+    if (ids.length) this.pickerId = ids[Math.floor(Math.random() * ids.length)];
   }
 
   private roster() {
@@ -762,6 +808,8 @@ export class RoomCore {
     this.broadcast({
       t: 'roster',
       host: this.hostId,
+      picker: this.pickerId,
+      max: MAX_PLAYERS,
       players,
       phase: this.phase,
       settings: this.settings,

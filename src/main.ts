@@ -1616,7 +1616,7 @@ $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) close
 $('btnSettings').addEventListener('click', () => { closeMenus(); openSheet('settings'); });
 
 /** TNDE スキンの設定画面の絵（CSS からは公開フォルダの場所が分からないので、ここで渡す） */
-for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp']]) {
+for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp']]) {
   document.documentElement.style.setProperty(k, `url("${new URL(`skins/tnde/${f}`, document.baseURI).href}")`);
 }
 function renderSheet() {
@@ -3092,6 +3092,10 @@ const online = new OnlineScreen({
   play,
   toast,
   videoOn: () => settings.videoMode !== 'off',
+  tnde: () => settings.skin === 'tnde',
+  plate: () => ({ name: settings.profile.name || 'プレイヤー', title: settings.profile.title, profile: { ...settings.profile } }),
+  diffOpen: (od) => home.openOnlineDiff(od),
+  diffClose: () => home.closeOnlineDiff(),
   // オンラインで読み込んだ音源・動画から、開いていた曲のものに戻す
   closed: () => void (async () => {
     const a = currentSongId ? await loadSongAudio(currentSongId) : null;

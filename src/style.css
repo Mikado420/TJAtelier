@@ -3365,3 +3365,52 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .sheet.tnde-set .st-text, .sheet.tnde-set .st-color { height: 36px; border: 3px solid var(--ink); border-radius: 8px; background: #fff; color: var(--ink); -webkit-text-fill-color: var(--ink); }
 .sheet.tnde-set .st-file, .sheet.tnde-set .st-ver, .sheet.tnde-set .st-state { color: #8a6a4a; }
 .sheet.tnde-set .st-chip span { border-radius: 8px; opacity: 0.5; }
+
+/* ---------- オンライン対戦の部屋（左: プレイヤーと話す欄・右: 選曲担当と退出） ---------- */
+.ol.in-room { --k: 'TNDE Kantei', var(--fd), sans-serif; background: var(--tnde-pattern) 0 0 / 480px 238px, linear-gradient(#5a1a4a 0%, #a02a9a 25%, #8a3ad0 45%, #3a8ad8 62%, #3ab0a0 78%, #8ac040 100%); }
+.ol.in-room .ol-head { height: 50px; padding: 0 calc(10px + var(--safe-r)) 0 calc(12px + var(--safe-l)); background: rgba(60, 14, 40, 0.9); border-bottom: 2px solid #e04a3a; }
+.ol.in-room .ol-back { display: none; }
+.ol.in-room .ol-title { font-family: var(--k); font-weight: 400; font-size: 26px; color: #fff; -webkit-text-stroke: 6px #c0302a; paint-order: stroke fill; }
+.ol.in-room .ol-sub { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.olr { position: absolute; inset: 0; padding: 8px calc(8px + var(--safe-r)) calc(8px + var(--safe-b)) calc(8px + var(--safe-l)); display: grid; grid-template-columns: minmax(0, 1fr) 236px; grid-template-rows: minmax(0, 1fr) 104px; gap: 8px; font-family: var(--k); }
+.olr-box { min-height: 0; background: rgba(22, 22, 34, 0.88); border-radius: 10px; padding: 8px 10px; color: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3); }
+.olr-pl { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 6px; }
+.olr-chat { grid-area: 2 / 1; display: flex; flex-direction: column; gap: 6px; }
+.olr-side { grid-area: 1 / 2; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.olr-exit { grid-area: 2 / 2; display: flex; align-items: center; }
+.olr-exit .olr-b { flex: 1; }
+.olr-pl h3 { margin: 0; display: flex; gap: 14px; font-weight: 400; font-size: 18px; }
+.olr-pl h3 b { font-family: var(--fd); font-weight: 800; }
+.olr-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(54px, 1fr); gap: 6px; }
+.olr-slot { position: relative; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 3px 6px; overflow: hidden; cursor: default; border-radius: 8px; background: rgba(255, 255, 255, 0.06); border: 2px solid rgba(255, 255, 255, 0.08); }
+.olr-slot.me { border-color: #e0503a; background: rgba(0, 0, 0, 0.35); }
+.olr-slot.empty { justify-content: center; color: rgba(255, 255, 255, 0.45); font-size: 16px; }
+.olr-plate { flex: none; height: min(40px, 100%); width: auto; max-width: 62%; object-fit: contain; object-position: left center; }
+.olr-name { flex: none; max-width: 45%; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.olr-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.olr-slot[data-ol] { cursor: pointer; }
+.olr-tags { display: flex; gap: 3px; flex-wrap: nowrap; }
+.olr-tag { flex: none; white-space: nowrap; height: 20px; padding: 0 6px; border-radius: 10px; border: 2px solid #1a1410; font-size: 12px; line-height: 16px; color: #fff; -webkit-text-stroke: 3px #1a1410; paint-order: stroke fill; }
+.olr-tag.red { background: #e0503a; }
+.olr-tag.grn { background: #3ab060; }
+.olr-st { font-size: 14px; color: #e8e2f0; white-space: nowrap; }
+.olr-st.ok { color: #7ef09a; }
+.olr-chat .ol-log { font-family: var(--fd); }
+.olr-say { flex: none; display: flex; gap: 6px; }
+.olr-say input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; border: 0; border-radius: 6px; background: #2a3a5a; color: #fff; font-size: 14px; }
+.olr-b { height: 38px; padding: 0 10px; border: 0; border-radius: 7px; background: #3a3a5a; color: #fff; font-family: var(--k); font-weight: 400; font-size: 16px; -webkit-text-stroke: 4px #1a1410; paint-order: stroke fill; white-space: nowrap; }
+.olr-b.red { background: #e0503a; }
+.olr-b.big { flex: none; height: 54px; font-size: 22px; }
+.olr-side > .olr-b { flex: none; }
+.olr-pmenu { display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+.olr-pmenu h3 { margin: 0 0 4px; font-family: 'TNDE Kantei', var(--fd), sans-serif; font-weight: 400; }
+.olr-b:disabled { opacity: 0.4; }
+.ol-sub .olr-b { height: 32px; font-size: 14px; background: #2a3a5a; }
+.olr-h { flex: none; margin: 0; font-weight: 400; font-size: 20px; color: #ff7a4a; -webkit-text-stroke: 4px #1a1410; paint-order: stroke fill; }
+.olr-who { flex: none; margin: -4px 0 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.olr-check { flex: none; display: flex; align-items: center; gap: 10px; font-size: 16px; cursor: pointer; }
+.olr-check input { appearance: none; -webkit-appearance: none; width: 30px; height: 30px; margin: 0; border-radius: 6px; background: #2a3a5a; border: 2px solid rgba(255, 255, 255, 0.2); display: grid; place-items: center; }
+.olr-check input:checked { background: #e0503a; }
+.olr-check input:checked::after { content: '✓'; color: #fff; font-size: 18px; font-weight: 900; }
+.olr-side .ol-prog { flex: none; }
+@media (max-width: 700px) { .olr { grid-template-columns: minmax(0, 1fr) 190px; } .olr-grid { grid-template-columns: 1fr; } }

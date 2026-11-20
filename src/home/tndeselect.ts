@@ -11,6 +11,20 @@ import { nameColor } from './folderColor';
 export type Crown = 'allgood' | 'fc' | 'clear' | 'fail';
 type Best = Record<string, { score: number; crown: Crown }>;
 
+/** オンライン対戦: 選曲担当が決めた曲の難易度えらび（全員がこの画面に移る。戻れるのは選曲担当だけ） */
+export interface OnlineDiff {
+  key: string;
+  song: SongEntry;
+  canBack(): boolean;
+  /** 部屋のみんな（自分は mine） */
+  players(): { name: string; mine: boolean; course: string; ok: boolean; ready: boolean }[];
+  /** 自分の今の難易度 */
+  course(): string;
+  back(): void;
+  /** 難易度を選んだ（ok = 決定した） */
+  pick(course: string, ok: boolean): void;
+}
+
 export interface TselHost {
   audio: AudioEngine;
   songs(): SongEntry[];
@@ -197,6 +211,9 @@ export class TndeSelect {
   private fadeIn = 1e9;
   // 難易度えらび
   private diffT = -1;
+  /** オンライン対戦の難易度えらび（出している間だけ） */
+  private online: OnlineDiff | null = null;
+  private saved: { items: Item[]; cur: number } | null = null;
   private diffOut = -1;
   private dsel = 5;
   private ura = false;
@@ -262,7 +279,46 @@ export class TndeSelect {
     }
     this.rebuild(s?.id);
     this.still = 0;
+    // オンライン対戦の難易度えらびを出していたら、出し直す
+    if (this.online) { const od = this.online; this.online = null; this.saved = null; this.openOnline(od); }
     if (!this.raf) { this.last = performance.now(); this.raf = requestAnimationFrame((t) => this.frame(t)); }
+  }
+
+  /** オンライン対戦の曲の難易度えらびを出す（一覧はしまっておく） */
+  openOnline(od: OnlineDiff) {
+    if (this.online?.key === od.key) { this.online = od; return; }
+    if (!this.online) this.saved = { items: this.items, cur: this.cur };
+    this.online = od;
+    this.items = [{ kind: 'song', s: od.song, look: lookOf('') }];
+    this.cur = 0;
+    this.scroll = 0;
+    this.pop = null;
+    this.opt.open = false;
+    const has = (c: string) => od.song.courses.some((x) => x.name === c);
+    const want = has(od.course()) ? od.course() : ['Oni', 'Edit', 'Hard', 'Normal', 'Easy'].find(has) ?? 'Oni';
+    this.ura = want === 'Edit';
+    this.dsel = want === 'Edit' ? 5 : 2 + COURSES.indexOf(want);
+    this.lastCard = this.dsel;
+    this.cursorT = 1e9;
+    this.diffT = 1000;
+    this.diffOut = -1;
+    this.startT = -1;
+    this.boxT = -1;
+    this.still = OPEN_AT + OPEN_MS;
+    this.previewed = null;
+    this.se('Diff');
+  }
+
+  /** オンライン対戦の難易度えらびを閉じて、一覧に戻す */
+  closeOnline() {
+    if (!this.online) return;
+    this.online = null;
+    if (this.saved?.items.length) { this.items = this.saved.items; this.cur = Math.min(this.saved.cur, this.items.length - 1); }
+    this.saved = null;
+    this.diffT = -1;
+    this.diffOut = -1;
+    this.startT = -1;
+    this.still = 0;
   }
 
   hide() {
@@ -596,6 +652,7 @@ export class TndeSelect {
     if (this.pop) { this.closePop(); return; }
     if (this.busy()) return;
     if (this.opt.open) { this.optClose(); return; }
+    if (this.diffT >= 0 && this.online) { if (this.online.canBack()) { this.se('Cancel'); this.online.back(); } return; }
     if (this.diffT >= 0) { this.se('Cancel'); this.diffOut = 0; return; }
     if (this.query || !this.qEl.classList.contains('hidden')) { this.se('Cancel'); this.closeSearch(); return; }
     if (this.path.length) { this.se('Cancel'); this.boxT = 0; this.boxTo = this.path.slice(0, -1); }
@@ -614,11 +671,11 @@ export class TndeSelect {
     // おにで右: 裏おにがあれば入れ替える
     if (d > 0 && this.dsel === 5) {
       const other = this.ura ? 'Oni' : 'Edit';
-      if (it.s.courses.some((x) => x.name === other)) { this.ura = !this.ura; this.se('Ura'); this.cursorT = 0; }
+      if (it.s.courses.some((x) => x.name === other)) { this.ura = !this.ura; this.se('Ura'); this.cursorT = 0; this.onlineCursor(); }
       return;
     }
     // 並び: もどる・設定・エディタ・譜面情報・かんたん〜おに
-    const order = [0, 1, 6, 7, 2, 3, 4, 5];
+    const order = this.online ? [0, 1, 2, 3, 4, 5] : [0, 1, 6, 7, 2, 3, 4, 5];
     let j = order.indexOf(this.dsel);
     do j += d; while (j >= 0 && j < order.length && !this.hasCourse(order[j]));
     if (j < 0 || j >= order.length) return;
@@ -626,12 +683,23 @@ export class TndeSelect {
     if (this.dsel >= 2 && this.dsel <= 5) this.lastCard = this.dsel;
     this.cursorT = 0;
     this.se('Ka');
+    this.onlineCursor();
+  }
+  /** オンライン: 難易度のカードに動いたら、その難易度を知らせる（決定は取り消し） */
+  private onlineCursor() {
+    const c = this.courseAt(this.dsel);
+    if (this.online && c) this.online.pick(c, false);
   }
   private decideDiff() {
     const it = this.center;
     if (it.kind !== 'song') return;
-    if (this.dsel === 0) { this.se('Cancel'); this.diffOut = 0; return; }
+    if (this.dsel === 0) { this.back(); return; }
     if (this.dsel === 1) { this.se('Don'); this.optOpen(); return; }
+    if (this.online) {
+      const c = this.courseAt(this.dsel);
+      if (c) { this.se('Don'); this.online.pick(c, true); }
+      return;
+    }
     if (this.dsel === 6 || this.dsel === 7) {
       const c = this.courseAt(this.lastCard) ?? this.focusCourse();
       this.se('Don');
@@ -734,9 +802,9 @@ export class TndeSelect {
     if (this.diffT >= 0) {
       const hit = [[382, 405, 115, 114], [514, 405, 115, 114], ...[647, 861, 1077, 1292].map((x) => [x, 405, 196, 355]), [382, 537, 115, 114], [514, 537, 115, 114]];
       const i = hit.findIndex(([x, y, w, h]) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h);
-      if (i < 0 || !this.hasCourse(i)) return;
+      if (i < 0 || !this.hasCourse(i) || (this.online && i >= 6)) return;
       if (i === this.dsel) this.decideDiff();
-      else { this.dsel = i; if (i >= 2 && i <= 5) this.lastCard = i; this.cursorT = 0; this.se('Ka'); }
+      else { this.dsel = i; if (i >= 2 && i <= 5) this.lastCard = i; this.cursorT = 0; this.se('Ka'); this.onlineCursor(); }
       return;
     }
     // 下のボタン
@@ -838,7 +906,7 @@ export class TndeSelect {
     // 試聴: まんなかの曲が開いたら流す（フォルダの上・フォルダを開く間は止める。流している間は前の曲のまま）
     const it = this.center;
     let want = this.previewed;
-    if (this.boxT >= 0 || (it.kind !== 'song' && this.still > 0)) want = null;
+    if (this.online || this.boxT >= 0 || (it.kind !== 'song' && this.still > 0)) want = null;
     else if (it.kind === 'song' && this.still >= 450) want = it.s;
     if (want !== this.previewed) {
       this.previewed = want;
@@ -852,7 +920,7 @@ export class TndeSelect {
       this.covered = !!top && top !== this.el && !this.el.parentElement?.contains(top);
     }
     const A = this.host.audio;
-    if (A.bgmStart('tsel:BgmIn', 'tsel:Bgm')) A.bgmLevel(A.previewing || this.startT >= 0 || this.covered ? 0 : 1);
+    if (A.bgmStart('tsel:BgmIn', 'tsel:Bgm')) A.bgmLevel(A.previewing || this.startT >= 0 || this.covered || this.online ? 0 : 1);
   }
 
   /** 帯が開いた量（0〜62。本家は止まって 400ms から 120ms で開くが、待たずに使えるよう 60ms から 140ms で開く） */
@@ -891,7 +959,8 @@ export class TndeSelect {
     this.side(ci);
     this.stageNums();
     this.timer();
-    this.full('credit', 3.5, 3);
+    if (this.online) this.onlinePanel();
+    else this.full('credit', 3.5, 3);
     if (this.sk) {
       const pl = this.host.plate();
       this.sk.plate(g, { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } as never, 60, 476);
@@ -1186,6 +1255,51 @@ export class TndeSelect {
     g.restore();
   }
 
+  /** オンライン: 右に部屋のみんな（ネームプレートと難易度。地が緑 = 準備OK・灰 = まだ） */
+  private onlinePanel() {
+    const od = this.online;
+    if (!od) return;
+    const g = this.g;
+    const list = od.players();
+    const X = 1556, W = 350, RH = 88, GAP = 10, Y = 300;
+    const H = list.length * (RH + GAP) - GAP + 32;
+    g.save();
+    g.fillStyle = 'rgba(60,30,10,0.3)';
+    rrect(g, X, Y + 5, W, H, 16); g.fill();
+    g.fillStyle = '#fffaf0';
+    rrect(g, X, Y, W, H, 16); g.fill();
+    g.lineWidth = 5; g.strokeStyle = '#1a1410'; g.stroke();
+    const pl = this.host.plate();
+    const CN: Record<string, [string, string]> = { Easy: ['かんたん', '#e8603c'], Normal: ['ふつう', '#5a9f3c'], Hard: ['むずかしい', '#3a7ca5'], Oni: ['おに', '#e0307a'], Edit: ['うら', '#7b4bd0'] };
+    list.forEach((p, i) => {
+      const y = Y + 16 + i * (RH + GAP), x = X + 14, w = W - 28;
+      g.fillStyle = p.ok ? '#3cc46a' : '#cfc8bd';
+      rrect(g, x, y, w, RH, 12); g.fill();
+      g.lineWidth = 4; g.strokeStyle = '#1a1410'; g.stroke();
+      if (this.sk) {
+        g.save();
+        g.translate(x + 6, y + (RH - 81 * 0.66) / 2);
+        g.scale(0.66, 0.66);
+        g.translate(6, -443.5);
+        this.sk.plate(g, (p.mine ? { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } : { name: p.name, title: '', wall: this.wall }) as never, 0, 0);
+        g.restore();
+      }
+      const [label, col] = CN[p.course] ?? [p.course, '#8a96a8'];
+      g.font = `26px ${KANTEI}`;
+      const tw = Math.min(96, g.measureText(label).width);
+      const cw = tw + 26, cx = x + w - cw - 8, cy = y + RH / 2 - 21;
+      g.fillStyle = col;
+      rrect(g, cx, cy, cw, 42, 21); g.fill();
+      g.lineWidth = 3; g.strokeStyle = '#1a1410'; g.stroke();
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.lineJoin = 'round'; g.lineWidth = 6; g.strokeStyle = '#1a1410';
+      g.strokeText(label, cx + cw / 2, cy + 22, 96);
+      g.fillStyle = '#fff';
+      g.fillText(label, cx + cw / 2, cy + 22, 96);
+    });
+    g.restore();
+  }
+
   private diffScreen() {
     const it = this.center;
     if (it.kind !== 'song') return;
@@ -1199,9 +1313,14 @@ export class TndeSelect {
     this.blit('diffBar', 0, 0, 77, 76, 382, 405, 77 * 1.5, 76 * 1.5);
     this.blit('diffBar', 88, 0, 77, 76, 514, 405, 77 * 1.5, 76 * 1.5);
     // もどる・設定の下に、同じ形のボタン（1 列 2 つ）
-    this.sqBtn(382, 537, 'edit', [214, 140, 235], [150, 80, 200]);
-    this.sqBtn(514, 537, 'info', [140, 200, 250], [60, 140, 220]);
-    this.songInfo(s, 1700, 350, 180, 1650, 550);
+    if (this.online) {
+      // 戻れない人（選曲担当でない人）は、もどるを暗くする
+      if (!this.online.canBack()) { g.fillStyle = 'rgba(30,20,60,0.7)'; rrect(g, 382, 405, 115.5, 114, 18); g.fill(); }
+    } else {
+      this.sqBtn(382, 537, 'edit', [214, 140, 235], [150, 80, 200]);
+      this.sqBtn(514, 537, 'info', [140, 200, 250], [60, 140, 220]);
+      this.songInfo(s, 1700, 350, 180, 1650, 550);
+    }
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
     // 選んでいる所の枠（カードの後ろ）

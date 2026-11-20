@@ -6,7 +6,7 @@ import type { AudioEngine } from '../audio/audio';
 import { closeCurtain, holdCurtain, openCurtain } from '../ui/curtain';
 import { uiScale } from '../orient';
 import { starSlots } from '../chart/stars';
-import { TndeSelect, type PlayOpts } from './tndeselect';
+import { type OnlineDiff, TndeSelect, type PlayOpts } from './tndeselect';
 import { nameColor } from './folderColor';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import {
@@ -305,6 +305,21 @@ export class Home {
       },
     }, this.el);
     await this.tsel.show(select);
+  }
+
+  /** オンライン対戦: 選曲担当が決めた曲の難易度えらびを、TNDE の選曲画面で出す（TNDE スキンでなければ false） */
+  openOnlineDiff(od: OnlineDiff) {
+    if (!this.host.tndeSkin()) return false;
+    const go = () => this.tsel?.openOnline(od);
+    if (!this.tsel || !this.visible) {
+      this.el.classList.remove('hidden');
+      this.el.classList.add('tnde');
+      void this.openTsel(this.sel).then(go);
+    } else go();
+    return true;
+  }
+  closeOnlineDiff() {
+    this.tsel?.closeOnline();
   }
 
   hide() {

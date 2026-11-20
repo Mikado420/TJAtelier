@@ -48,12 +48,16 @@ export interface SongMeta {
   vfromAudio: boolean;
 }
 
-export interface RoomSettings { pick: 'host' | 'all' | 'turn' | 'random'; limit: number; auto: boolean }
+export interface RoomSettings { pick: 'picker' | 'host' | 'all' | 'turn' | 'random'; limit: number; auto: boolean; rotate?: boolean }
 export interface RosterPlayer { p: string; name: string; ready: boolean; ok: boolean; inGame: boolean; course: string; away: boolean }
 export interface QueueItem { qid: string; by: string; byName: string; title: string; subtitle: string; course: string; level: number }
 export interface Standing { name: string; total: number; wins: number; plays: number }
 export interface Roster {
   host: string;
+  /** 選曲担当（前の版のサーバーには無い） */
+  picker?: string;
+  /** 部屋の人数の上限 */
+  max?: number;
   players: RosterPlayer[];
   phase: 'wait' | 'play';
   settings: RoomSettings;
