@@ -350,8 +350,8 @@ export class TndeSkin {
     return (this.man as unknown as { loadHints?: number }).loadHints ?? 0;
   }
   /** 元の大きさの単位で描く（細かくしてある絵も同じ座標で） */
-  blit(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
-    this.di(c, im, ...a);
+  blit(c: CanvasRenderingContext2D, im: CanvasImageSource, a0: number, a1: number, a2?: number, a3?: number, a4?: number, a5?: number, a6?: number, a7?: number) {
+    this.di(c, im, a0, a1, a2, a3, a4, a5, a6, a7);
   }
   /** 連番の n コマ目を (x, y) に k 倍で */
   anim(c: CanvasRenderingContext2D, name: string, n: number, x: number, y: number, k = S) {
@@ -459,21 +459,22 @@ export class TndeSkin {
     return (im as { height: number }).height / this.qOf(im);
   }
   /** 絵を貼る。絵の中の範囲は元の絵の px で書き、細かくしてある絵はその倍率で読む */
-  private di(c: CanvasRenderingContext2D, im: CanvasImageSource, ...a: number[]) {
-    const q = this.qOf(im);
-    if (a.length === 8) {
+  private di(c: CanvasRenderingContext2D, im: CanvasImageSource, a0: number, a1: number, a2?: number, a3?: number, a4?: number, a5?: number, a6?: number, a7?: number) {
+    // 毎フレーム何百回も呼ぶので、配列を作らない（作るとごみが増えて、iPhone でときどき止まる）
+    if (a7 !== undefined) {
+      const q = this.qOf(im);
       // 1.5 倍の絵は端が 1 px 足りないことがある。はみ出して切り出すと iPhone では何も描かれないので、絵の中に収める
-      let [sx, sy, sw, sh] = [a[0] * q, a[1] * q, a[2] * q, a[3] * q];
-      let [dw, dh] = [a[6], a[7]];
+      let sx = a0 * q, sy = a1 * q, sw = a2! * q, sh = a3! * q;
+      let dw = a6!, dh = a7;
       const W = (im as { width: number }).width;
       const H = (im as { height: number }).height;
       if (sx + sw > W) { const w = W - sx; dw *= w / sw; sw = w; }
       if (sy + sh > H) { const h = H - sy; dh *= h / sh; sh = h; }
       if (sw <= 0 || sh <= 0) return;
-      c.drawImage(im, sx, sy, sw, sh, a[4], a[5], dw, dh);
+      c.drawImage(im, sx, sy, sw, sh, a4!, a5!, dw, dh);
     }
-    else if (a.length === 4) c.drawImage(im, a[0], a[1], a[2], a[3]);
-    else c.drawImage(im, a[0], a[1], this.lw(im), this.lh(im));
+    else if (a3 !== undefined) c.drawImage(im, a0, a1, a2!, a3);
+    else c.drawImage(im, a0, a1, this.lw(im), this.lh(im));
   }
 
   /** 一度に読み込む絵の数をしぼる（iPhone は一度にたくさん頼むと止まりやすい） */

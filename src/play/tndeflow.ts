@@ -43,9 +43,11 @@ export class TndeOverlay {
   }
 
   private resize() {
-    const dpr = Math.min(3, window.devicePixelRatio || 1);
     const w = window.innerWidth;
     const h = window.innerHeight;
+    // 絵は 1920×1080 まで。16:9 の枠がそれより細かくなる分は塗らない（見た目は同じで軽くなる）
+    const fh = Math.min(h, (w * 9) / 16);
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1, fh > 0 ? 1080 / fh : 3));
     const pw = Math.round(w * dpr);
     const ph = Math.round(h * dpr);
     if (this.cv.width !== pw || this.cv.height !== ph) {

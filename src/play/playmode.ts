@@ -854,30 +854,41 @@ export class PlayMode {
   /** 動画用の画面にするか（タイミング調整のときはしない） */
   /** 絵の細かさの自動調整: 2 秒ごとに、コマ落ちの割合を見る */
   private res = { at: 0, frames: 0, slow: 0, last: 0, gaps: [] as number[] };
+  /** 前の曲で下げた細かさ（曲ごとに 3 倍から始めて、また始めの 2 秒が引っかからないように、この起動の間は覚えておく） */
+  private resCap = 3;
   private resetRes() {
-    this.renderer.dprCap = 3;
+    this.renderer.dprCap = this.settings.autoRes === false ? 3 : this.resCap;
     this.res = { at: 0, frames: 0, slow: 0, last: 0, gaps: [] };
   }
   private watchRes(t: number) {
-    if (this.settings.autoRes === false || this.renderer.dprCap <= 2) return;
+    if (this.settings.autoRes === false || this.renderer.dprCap <= 1.5) return;
     const R = this.res;
     if (R.last) {
       const gap = t - R.last;
-      R.frames++;
-      R.gaps.push(gap);
+      // 隠れていた・止まっていたあとの長い間は数えない
+      if (gap < 250) {
+        R.frames++;
+        R.gaps.push(gap);
+      }
     }
     R.last = t;
     if (!R.at) R.at = t;
     if (t - R.at < 2000) return;
     // その端末のふつうの 1 コマの間隔（速いほうから 2 割の所）の 1.6 倍以上かかったコマを「落ちた」とする
     const gs = R.gaps.slice().sort((a, b) => a - b);
+    const p20 = gs[Math.floor(gs.length * 0.2)] ?? 16.7;
     // 全体がずっと遅いとき（どのコマも遅い）も分かるように、60 コマ/秒より遅い値は使わない
-    const base = Math.min(17.5, gs[Math.floor(gs.length * 0.2)] ?? 16.7);
+    const base = Math.min(17.5, p20);
     const slow = gs.filter((g) => g > base * 1.6).length;
-    // 2 秒のうち 1 割以上落ちていたら、この曲の間は細かさを 2 倍までに下げる（一度下げたら戻さない。ちらつかないように）
+    // 2 秒のうち 1 割以上落ちていたら細かさを下げる（一度下げたら戻さない。ちらつかないように）
+    // 2 倍まで下げてもずっと 30 コマ/秒のまま（省電力モードなどで端末が 30 に決めている）なら、それ以上は下げない
     if (gs.length >= 8 && slow / gs.length >= 0.1) {
-      this.renderer.dprCap = 2;
-      this.renderer.resize();
+      const cur = Math.min(this.renderer.dprCap, this.renderer.drawRatio);
+      const next = cur > 2 ? 2 : p20 < 25 ? 1.5 : cur;
+      if (next < cur) {
+        this.renderer.dprCap = this.resCap = next;
+        this.renderer.resize();
+      }
     }
     R.at = t;
     R.gaps = [];

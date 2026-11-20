@@ -215,6 +215,10 @@ export class Renderer {
   private visBars: number[] = [];
 
   private dpr = 1;
+  /** 今の絵の細かさ（端末の px に対する倍率） */
+  get drawRatio() {
+    return this.dpr;
+  }
   private s = 1;
   private ox = 0;
   private oy = 0;
@@ -278,9 +282,14 @@ export class Renderer {
   resize() {
     // 高解像度の端末でも描く量を抑える（3倍だと1フレームの塗りが多すぎて、叩いた処理が遅れることがある）
     // オンライン対戦で相手のレーンも描くときは、描く量が増えるので解像度を少し下げる
-    this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
+    this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
+    // TNDE スキンの絵は 1920×1080 まで。画面の 16:9 の枠がそれより細かくなる分は、描いても見た目が変わらないので塗らない
+    if (this.tnde && !this.preview) {
+      const fh = Math.min(w / REF_W, h / REF_H) * REF_H;
+      if (fh > 0) this.dpr = Math.max(1, Math.min(this.dpr, 1080 / fh));
+    }
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
 
@@ -355,7 +364,17 @@ export class Renderer {
   frame = { x: 0, y: 0, s: 1 };
 
   /** TNDE スキン（読み込めたら入る）。null ならいつもの絵 */
-  tnde: TndeSkin | null = null;
+  private tndeSkin: TndeSkin | null = null;
+  get tnde() {
+    return this.tndeSkin;
+  }
+  set tnde(t: TndeSkin | null) {
+    if (t === this.tndeSkin) return;
+    const was = !!this.tndeSkin;
+    this.tndeSkin = t;
+    // スキンの有無で絵の細かさの上限が変わる
+    if (was !== !!t) this.resize();
+  }
   /** 自己ベスト（TNDE スキンの「ベストスコア更新」） */
   prevBest: number | null = null;
   /** ネームプレートの称号と名前 */
