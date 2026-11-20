@@ -1615,8 +1615,14 @@ $('sheetBold').addEventListener('click', () => {
 $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) closeSheet(); });
 $('btnSettings').addEventListener('click', () => { closeMenus(); openSheet('settings'); });
 
+/** TNDE スキンの設定画面の絵（CSS からは公開フォルダの場所が分からないので、ここで渡す） */
+for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp']]) {
+  document.documentElement.style.setProperty(k, `url("${new URL(`skins/tnde/${f}`, document.baseURI).href}")`);
+}
 function renderSheet() {
   const body = $('sheetBody');
+  // TNDE スキンのときの設定画面（本家のコンフィグ画面の素材で着せ替える）
+  $('sheet').classList.toggle('tnde-set', sheet === 'settings' && settings.skin === 'tnde');
   if (sheet === 'info') {
     $('sheetTitle').textContent = '曲・難易度の情報';
     const c = ed.chart;
@@ -1692,7 +1698,7 @@ function renderSheet() {
     body.innerHTML = `
       <div class="st-wrap">
         <nav class="st-nav" style="--from:${from};--to:${idx}"><i class="st-ind ${swap ? 'go' : ''}" aria-hidden="true"></i>${SETTINGS_TABS.map(([k, l, d]) => `<button data-sttab="${k}" class="${k === t ? 'on' : ''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('')}</nav>
-        <section class="an-card st-card st-pane ${swap ? 'swap' : ''}">${pane}</section>
+        <section class="an-card st-card st-pane ${swap ? 'swap' : ''}" data-tab="${t}" data-label="${SETTINGS_TABS[idx]?.[1] ?? ''}">${pane}</section>
       </div>`;
   } else if (sheet === 'cut') {
     renderCutSheet(body);

@@ -3319,3 +3319,49 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
   font: 26px 'TNDE Kantei', 'TNDE Seurat', sans-serif; box-shadow: 0 5px 8px rgba(60, 30, 10, 0.35);
 }
 .home .tsel-q.hidden { display: none; }
+
+/* ---------- TNDE スキンの設定画面（本家のコンフィグ画面の地・木の札） ---------- */
+.sheet.tnde-set { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', sans-serif; --ink: #1a1410; --og: #ff6b2d; background: var(--tnde-cfg-bg) 0 0 / 260px 260px, #5fd8c4; align-items: stretch; }
+.sheet.tnde-set .sheet-panel { width: 100%; max-height: none; height: 100%; background: transparent; border: 0; box-shadow: none; padding: var(--safe-t) var(--safe-r) 0 var(--safe-l); }
+.sheet.tnde-set .sheet-head { background: linear-gradient(rgba(40, 120, 110, 0.5), rgba(40, 120, 110, 0)); padding: 8px 16px 6px; justify-content: flex-start; gap: 12px; align-items: center; }
+.sheet.tnde-set .sheet-title { order: 2; }
+.sheet.tnde-set #sheetTitle { font-family: var(--tk); font-weight: 400; font-size: 30px; line-height: 1; color: #fff; -webkit-text-stroke: 7px var(--ink); paint-order: stroke fill; }
+.sheet.tnde-set #sheetClose { order: 1; width: 46px; min-width: 46px; height: 46px; padding: 0; font-size: 0; color: transparent; border-radius: 9px; background: var(--tnde-back) 0 0 / 526px 141.5px; box-shadow: none; }
+.sheet.tnde-set .sheet-body { padding: 6px 16px calc(14px + var(--safe-b)); overflow: hidden; }
+.sheet.tnde-set .st-wrap { flex: 1; min-height: 0; gap: 10px; align-items: stretch; }
+/* 左: 分類（どれも同じ大きさの木の札。選んでいるものだけ色を変える） */
+.sheet.tnde-set .st-nav { width: 200px; gap: 8px; background: transparent; overflow-y: auto; padding-bottom: 4px; }
+.sheet.tnde-set .st-ind, .sheet.tnde-set .st-nav svg { display: none; }
+.sheet.tnde-set .sheet-body .st-nav button { height: 50px; padding: 0; justify-content: center; background: var(--tnde-cfg-item) 0 0 / 100% 100%, #c49a6c; font-family: var(--tk); font-weight: 400; font-size: 20px; color: #fff; -webkit-text-stroke: 5px var(--ink); paint-order: stroke fill; }
+.sheet.tnde-set .sheet-body .st-nav button.on { filter: hue-rotate(-25deg) saturate(2.2) brightness(1.15); color: #fff; }
+.sheet.tnde-set .sheet-body .st-nav button[data-sttab="prof"] span { transform: none; }
+/* 右: 中身（クリーム色の箱・上に分類の色の帯） */
+.sheet.tnde-set .st-pane { position: relative; padding: 0 18px 12px; overflow-y: auto; overscroll-behavior: contain; background: #fffaf0; border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 rgba(60, 30, 10, 0.3); overflow: hidden; color: var(--ink); }
+.sheet.tnde-set .st-pane::before { content: attr(data-label); position: sticky; top: 0; z-index: 2; flex: none; margin: 0 -18px 8px; height: 44px; display: flex; align-items: center; padding-left: 16px; background: var(--tc, #b46cf0); font-family: var(--tk); font-size: 24px; color: #fff; -webkit-text-stroke: 6px var(--ink); paint-order: stroke fill; }
+.sheet.tnde-set .st-pane[data-tab="prof"] { --tc: #3fa4ff; }
+.sheet.tnde-set .st-pane[data-tab="view"] { --tc: #2fc0a0; }
+.sheet.tnde-set .st-pane[data-tab="vol"] { --tc: #f0a020; }
+.sheet.tnde-set .st-pane[data-tab="ed"] { --tc: #a07a52; }
+.sheet.tnde-set .st-pane[data-tab="data"] { --tc: #8a96a8; }
+.sheet.tnde-set .st-h { margin: 12px 0 0; font-family: var(--tk); font-weight: 400; font-size: 14px; letter-spacing: 0.1em; color: #a0784a; }
+.sheet.tnde-set .st-h:first-child { margin-top: 0; }
+.sheet.tnde-set .st-row, .sheet.tnde-set .st-pane .st-row { min-height: 52px; gap: 10px; border-bottom: 2px dashed #e2cfa8; font-family: var(--tk); font-weight: 400; font-size: 18px; color: var(--ink); }
+.sheet.tnde-set .st-row > span { color: var(--ink); min-width: 110px; }
+.sheet.tnde-set .st-sub { font-family: var(--tk); font-weight: 400; color: #a0784a; }
+/* 選ぶボタン・オン/オフ（同じ高さ・同じ縁） */
+.sheet.tnde-set .st-seg { gap: 6px; }
+.sheet.tnde-set .st-seg button, .sheet.tnde-set .st-auto, .sheet.tnde-set .st-btns button, .sheet.tnde-set .st-link { height: 38px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; color: var(--ink); font-family: var(--tk); font-weight: 400; font-size: 15px; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2); }
+.sheet.tnde-set .st-seg button.on, .sheet.tnde-set .st-auto.on { background: var(--og); color: #fff; -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill; }
+.sheet.tnde-set .st-btns { gap: 8px; }
+.sheet.tnde-set .st-sw { width: 58px; height: 32px; border-radius: 10px; border: 3px solid var(--ink); background: #fff; }
+.sheet.tnde-set .st-sw::after { top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 6px; background: #c8beb0; }
+.sheet.tnde-set .st-sw:checked { background: var(--og); }
+.sheet.tnde-set .st-sw:checked::after { transform: translateX(26px); background: #fff; }
+/* つまみと数（黒い地に白い数字） */
+.sheet.tnde-set input[type=range] { accent-color: var(--og); }
+.sheet.tnde-set .st-range output { min-width: 64px; height: 34px; line-height: 34px; padding: 0 8px; border-radius: 8px; background: #2a1e14; color: #fff; text-align: center; font-family: var(--ts); font-weight: 400; }
+.sheet.tnde-set .st-num input { height: 34px; border: 3px solid var(--ink); border-radius: 8px; background: #2a1e14; color: #fff; -webkit-text-fill-color: #fff; font-family: var(--ts); font-weight: 400; }
+.sheet.tnde-set .st-num i { color: #a0784a; }
+.sheet.tnde-set .st-text, .sheet.tnde-set .st-color { height: 36px; border: 3px solid var(--ink); border-radius: 8px; background: #fff; color: var(--ink); -webkit-text-fill-color: var(--ink); }
+.sheet.tnde-set .st-file, .sheet.tnde-set .st-ver, .sheet.tnde-set .st-state { color: #8a6a4a; }
+.sheet.tnde-set .st-chip span { border-radius: 8px; opacity: 0.5; }
