@@ -1158,9 +1158,19 @@ export class EditorView {
     /** その tick の命令を出す段の、命令の欄の上端（上下にスクロールする配置では、#DELAY の段ごとにその段の下） */
     const evRowY = (tick: number) => (this.stack ? this.rowGeom(ln.rowOf(tick)).y + L.laneH + 6 * s : L.evTop);
     const evItems: EventItem[] = [];
+    // 分岐を直前で決めるためのとても短い小節（#MEASURE 1/9999）と、その後で元の拍子に戻す #MEASURE は、分岐の印にまとめる
+    const preTicks = new Set<number>();
+    for (const e of course.events) {
+      if (e.kind !== 'measure' || e.num / e.den > 1 / 1000) continue;
+      const after = e.tick + Math.max(1, Math.round((TPB * 4 * e.num) / e.den));
+      if (!this.branches.some((b) => b.a === after)) continue;
+      preTicks.add(e.tick);
+      preTicks.add(after);
+    }
     for (const e of course.events) {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
       if (e.kind === 'gogo' || TJA_ONLY.has(e.kind) || !this.evShow[e.kind]) continue;
+      if (e.kind === 'measure' && preTicks.has(e.tick)) continue;
       if (e.tick > rightTick) continue;
       const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {

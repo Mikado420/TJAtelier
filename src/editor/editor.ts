@@ -1,6 +1,6 @@
 import {
-  alignMeasures, branchPath, measureAt, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
-  type BranchNo, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
+  alignMeasures, branchPath, forcedOf, measureAt, measureTicks, preMeasureOf, PRE_MEASURE, shiftCourse, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
+  type BranchNo, type BranchPart, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
 import type { AudioFile } from '../io/load';
@@ -186,6 +186,116 @@ export class Editor {
     return out;
   }
 
+  /** 位置 tick の小節の頭（分岐を置く所） */
+  branchHead(tick: number): number {
+    return this.measureOf(Math.max(0, tick)).start;
+  }
+
+  /** その小節の頭から始まる分岐（直前で決める分岐は、前のとても短い小節の頭でも見つける） */
+  branchAt(head: number): EBranch | undefined {
+    const c = this.mainCourse;
+    return (c.branches ?? []).find((b) => b.start === head || preMeasureOf(c, b)?.tick === head);
+  }
+
+  /**
+   * 分岐を置く・変える（単体の #SCROLL のように、始まりの位置だけで決める）。
+   * - 強制分岐: 区間を持たない（#BRANCHSTART のすぐ後に #BRANCHEND）
+   * - 条件の分岐: 次の分岐の始まり（無ければ譜面の終わり）までを区間にする。玄人・達人は普通譜面を写す
+   *   （ほかの区間の途中に置いたら、その区間はそこで終わり、後ろの部分は新しい区間に移す）
+   * - pre: 直前で決める（#BRANCHSTART の前に #MEASURE 1/9999 のとても短い小節を入れる）
+   */
+  placeBranch(at: number, cfg: { type: EBranch['type']; x: number; y: number; pre: boolean }, old?: EBranch): EBranch | null {
+    let out: EBranch | null = null;
+    this.mutate(() => {
+      this.path = null;
+      const c = this.mainCourse;
+      const list = (c.branches ??= []);
+      let b = old && list.includes(old) ? old : undefined;
+      // 直前で決めるかどうか（とても短い小節を足す・外す）
+      const curPre = b ? preMeasureOf(c, b) : undefined;
+      let start = b ? b.start : at;
+      if (cfg.pre && !curPre) {
+        const L = measureTicks(PRE_MEASURE.num, PRE_MEASURE.den);
+        const m = this.measureOfIn(c, start);
+        shiftCourse(c, start, L);
+        if (!c.events.some((e) => e.kind === 'measure' && e.tick === start + L)) c.events.push({ tick: start + L, kind: 'measure', num: m.num, den: m.den });
+        c.events.push({ tick: start, kind: 'measure', ...PRE_MEASURE });
+        if (b && b.start !== start + L) b.start = start + L; // （shiftCourse で動いている）
+        start += L;
+      } else if (!cfg.pre && curPre) {
+        const L = start - curPre.tick;
+        c.events = c.events.filter((e) => e !== curPre);
+        shiftCourse(c, start, -L);
+        start -= L;
+        // 元に戻す #MEASURE が、前と同じ拍子なら要らない
+        const back = c.events.find((e) => e.kind === 'measure' && e.tick === start);
+        if (back && back.kind === 'measure') {
+          const before = this.measureOfIn({ ...c, events: c.events.filter((e) => e !== back) }, start);
+          if (before.num === back.num && before.den === back.den) c.events = c.events.filter((e) => e !== back);
+        }
+      }
+      sortCourse(c);
+      const forced = forcedOf(cfg) !== null;
+      // 区間の終わり（強制分岐は区間なし）
+      const nextStart = Math.min(...list.filter((x) => x !== b && x.start > start).map((x) => preMeasureOf(c, x)?.tick ?? x.start), Infinity);
+      const ce = Math.max(contentEnd(c), start);
+      const lastM = this.measureOfIn(c, ce);
+      const end = forced ? start : Math.min(nextStart, Math.max(start + 1, lastM.start + lastM.length));
+      const copyN = (a: number, z: number) => ({
+        notes: c.notes.filter((n) => n.tick >= a && n.tick < z).map((n) => ({ ...n })),
+        events: c.events.filter((e) => e.tick >= a && e.tick < z && e.kind !== 'bpm' && e.kind !== 'measure' && e.kind !== 'delay').map((e) => ({ ...e })),
+      });
+      if (!b) {
+        // ほかの区間の途中なら、その区間をここで終わらせる（後ろの部分は新しい区間へ）
+        const host = list.find((x) => x.start < start && start < x.end);
+        let e = copyN(start, end);
+        let m = copyN(start, end);
+        if (host) {
+          const cut = (part: BranchPart) => {
+            const moved = { notes: part.notes.filter((n) => n.tick >= start && n.tick < end), events: part.events.filter((x) => x.tick >= start && x.tick < end) };
+            part.notes = part.notes.filter((n) => n.tick < start);
+            part.events = part.events.filter((x) => x.tick < start);
+            return moved;
+          };
+          const he = cut(host.e);
+          const hm = cut(host.m);
+          if (!forced) { e = he; m = hm; }
+          host.end = start;
+        }
+        b = { start, end, type: cfg.type, x: cfg.x, y: cfg.y, close: true, e: forced ? { notes: [], events: [] } : e, m: forced ? { notes: [], events: [] } : m };
+        list.push(b);
+      } else {
+        b.type = cfg.type;
+        b.x = cfg.x;
+        b.y = cfg.y;
+        b.start = start;
+        if (forced && b.end > b.start) {
+          // 強制分岐にした: 区間を外す（普通譜面を残す）
+          b.e = { notes: [], events: [] };
+          b.m = { notes: [], events: [] };
+          b.end = b.start;
+          b.close = true;
+        } else if (!forced && b.end <= b.start) {
+          b.end = end;
+          b.e = copyN(start, end);
+          b.m = copyN(start, end);
+          b.close = true;
+        }
+      }
+      list.sort((p, q) => p.start - q.start || p.end - q.end);
+      sortCourse(c);
+      out = b;
+    });
+    this.path = null;
+    this.emit(true);
+    return out;
+  }
+
+  /** 譜面 c での tick の小節 */
+  private measureOfIn(c: ECourse, tick: number): Measure {
+    return measureAt(measures(c, tick + 1), tick);
+  }
+
   /** 区間を消す（その区間は、開いている分岐の譜面を残す） */
   removeBranch(b: EBranch) {
     this.mutate(() => {
@@ -198,6 +308,18 @@ export class Editor {
       }
       c.branches = (c.branches ?? []).filter((x) => x !== b);
       if (!c.branches.length) delete c.branches;
+      // 直前で決めるための短い小節も外す
+      const pre = preMeasureOf(c, b);
+      if (pre) {
+        const L = b.start - pre.tick;
+        c.events = c.events.filter((e) => e !== pre);
+        shiftCourse(c, b.start, -L);
+        const back = c.events.find((e) => e.kind === 'measure' && e.tick === pre.tick);
+        if (back && back.kind === 'measure') {
+          const before = this.measureOfIn({ ...c, events: c.events.filter((e) => e !== back) }, pre.tick);
+          if (before.num === back.num && before.den === back.den) c.events = c.events.filter((e) => e !== back);
+        }
+      }
       sortCourse(c);
     });
     this.path = null;

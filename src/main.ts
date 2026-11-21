@@ -6,7 +6,7 @@ import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
-import { branchPath, COURSE_NAMES, contentEnd, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
+import { branchPath, COURSE_NAMES, contentEnd, FORCE_COND, forcedOf, preMeasureOf, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
@@ -1062,25 +1062,14 @@ function updateSelBar() {
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
     if (k === 'exit') return;
-    b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : k === 'gim' ? !has : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
+    b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'gim' ? !has : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
     if (k === 'ev') b.classList.toggle('on', ed.clipEvents);
     if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
-    if (k === 'branch') b.classList.toggle('hidden', collab.active);
   });
 }
 function selAction(k: string) {
   if (k === 'exit') { setTool(toolBeforeSelect === 'select' ? 'don' : toolBeforeSelect); return; }
   if (k === 'adopt') { collab.adoptSelection(); updateSelBar(); view.invalidate(); return; }
-  if (k === 'branch') {
-    const s = ed.sel;
-    if (!s) return;
-    const b = ed.addBranch(s.start, s.end);
-    if (!b) return;
-    ed.clearSelection();
-    ed.setBranch(ed.branch);
-    updateSelBar();
-    return;
-  }
   if (k === 'ev') {
     ed.clipEvents = !ed.clipEvents;
     try { localStorage.setItem(CLIP_EV_KEY, ed.clipEvents ? '1' : '0'); } catch { /* 保存できない */ }
@@ -1088,14 +1077,6 @@ function selAction(k: string) {
     return;
   }
   if (k === 'gim') { toggleGimMenu(); return; }
-  if (k === 'bars') {
-    // 選んだ音符すべての位置に小節線（#MEASURE）
-    const n = ed.barlinesAtNotes();
-    if (n) toast(`${n} か所に小節線を置きました`);
-    updateSelBar();
-    view.invalidate();
-    return;
-  }
   if (k === 'copy') { const n = ed.copySelection(); toast(`${n} 個コピーしました`); }
   else if (k === 'cut') { const n = ed.cutSelection(); toast(`${n} 個切り取りました`); }
   else if (k === 'del') { const n = ed.deleteSelection(); toast(`${n} 個消しました`); }
@@ -1124,6 +1105,8 @@ function toggleGimMenu() {
   if (!gimMenu.classList.contains('hidden')) { closeGimMenu(); return; }
   const btn = $('selBar').querySelector<HTMLElement>('[data-sel="gim"]')!;
   gimMenu.querySelector<HTMLButtonElement>('[data-gim="fill"]')!.disabled = !ed.clip;
+  gimMenu.querySelector<HTMLButtonElement>('[data-gim="bars"]')!.disabled = !ed.selectedNotes().length;
+  gimMenu.querySelector<HTMLButtonElement>('[data-gim="branch"]')!.classList.toggle('hidden', collab.active);
   gimMenu.classList.remove('hidden');
   btn.classList.add('on');
   // ボタンの上に、右端をそろえて出す
@@ -1152,6 +1135,14 @@ gimMenu.addEventListener('click', (e) => {
   } else if (k === 'fill' && ed.clip) {
     gimEdit = { kind: 'fill', start: ed.sel.start, end: ed.sel.end, digits: 3, fill: 'replace' };
     openSheet('fill');
+  } else if (k === 'bars') {
+    // 選んだ音符すべての位置に小節線（#MEASURE）
+    const n = ed.barlinesAtNotes();
+    if (n) toast(`${n} か所に小節線を置きました`);
+    updateSelBar();
+    view.invalidate();
+  } else if (k === 'branch') {
+    openBranchAt(ed.sel.start);
   }
 });
 document.addEventListener('pointerdown', (e) => {
@@ -1484,12 +1475,6 @@ brCtl.addEventListener('click', (e) => {
 }
 
 /** 選んだ範囲が、今ある区間に重なるか */
-function overlapsBranch() {
-  const sel = ed.sel;
-  if (!sel) return true;
-  return (ed.mainCourse.branches ?? []).some((b) => b.start <= sel.end && sel.start < b.end);
-}
-
 let brGhostKey = '';
 const brGhostCache: ({ fp: string; bpm: number; offset: number; chart: EChart } | undefined)[] = [];
 /** 譜面の中身の目印（音符・命令の位置と値） */
@@ -1505,7 +1490,7 @@ function syncBranches(force = false) {
   const main = ed.mainCourse;
   const bs = (!collab.active && main?.branches) || [];
   if (!bs.length && ed.branch) ed.branch = 0;
-  view.branches = bs.map((b) => ({ a: b.start, b: b.end, label: `${BR_TYPE[b.type]} ${b.x}/${b.y}` }));
+  view.branches = bs.map((b) => ({ a: b.start, b: b.end, label: branchLabel(b) }));
   view.branchNo = ed.branch;
   brCtl.classList.toggle('hidden', !bs.length);
   brCtl.querySelectorAll<HTMLButtonElement>('[data-br]').forEach((b) => b.classList.toggle('on', b.dataset.br === 'stack' ? settings.brStack : Number(b.dataset.br) === ed.branch));
@@ -1540,35 +1525,115 @@ function syncBranches(force = false) {
 }
 
 /** 区間の条件の画面 */
-let brEdit: EBranch | null = null;
+/** 分岐の印の文字（強制分岐は分岐先） */
+const FORCE_NAME = ['普通', '玄人', '達人'];
+function branchLabel(b: EBranch): string {
+  const f = forcedOf(b);
+  return f !== null ? `強制 ${FORCE_NAME[f]}` : `${BR_TYPE[b.type]} ${b.x}/${b.y}`;
+}
+
+/** 分岐の設定（始まりの位置だけで決める。old があれば変更） */
+let brEdit: { at: number; old?: EBranch; type: EBranch['type'] | 'f'; x: number; y: number; force: BranchNo; pre: boolean } | null = null;
+
+/** 位置 tick の小節に分岐を置く・変える画面を開く */
+function openBranchAt(tick: number) {
+  const head = ed.branchHead(tick);
+  const old = ed.branchAt(head);
+  openBranchEdit(old, head);
+}
+function openBranchEdit(old: EBranch | undefined, at: number) {
+  const f = old ? forcedOf(old) : null;
+  brEdit = old
+    ? { at: old.start, old, type: f !== null ? 'f' : old.type, x: f !== null ? 60 : old.x, y: f !== null ? 80 : old.y, force: f ?? 2, pre: !!preMeasureOf(ed.mainCourse, old) }
+    : { at, type: 'p', x: 60, y: 80, force: 2, pre: true };
+  openSheet('branch');
+}
+const brCfg = (b: NonNullable<typeof brEdit>) =>
+  b.type === 'f' ? { type: 'p' as const, x: FORCE_COND[b.force][0], y: FORCE_COND[b.force][1], pre: b.pre } : { type: b.type, x: b.x, y: b.y, pre: b.pre };
+
 function renderBranchSheet(body: HTMLElement) {
-  const b = brEdit!;
-  let type = b.type;
-  $('sheetTitle').textContent = '#BRANCHSTART';
-  body.innerHTML = `
-    <div class="st-seg br-type">${(['p', 'r', 's'] as const).map((t) => `<button data-bt="${t}" class="${t === type ? 'on' : ''}">${BR_TYPE[t]}</button>`).join('')}</div>
-    <label class="field br-f1"><span>EXPERT</span><input type="number" inputmode="decimal" step="any" id="brX" value="${b.x}"></label>
-    <label class="field br-f2"><span>MASTER</span><input type="number" inputmode="decimal" step="any" id="brY" value="${b.y}"></label>
-    <div class="btns three">
-      <button data-bact="del">消す</button>
-      <button data-bact="cancel">やめる</button>
-      <button data-bact="ok" class="primary">変更</button>
+  const st = brEdit!;
+  $('sheetTitle').textContent = '分岐';
+  const seg = (key: string, items: [string, string][], cur: string) =>
+    `<div class="btns grad-seg" style="grid-template-columns: repeat(${items.length}, minmax(0, 1fr))">${items.map(([v, label]) => `<button data-bset="${key}" data-v="${v}" class="${v === cur ? 'primary' : ''}">${label}</button>`).join('')}</div>`;
+  const draw = () => {
+    body.innerHTML = `
+    <div class="grad-layout">
+      <div class="grad-form">
+        ${seg('type', [['p', '精度'], ['r', '連打'], ['s', 'スコア'], ['f', '強制']], st.type)}
+        ${st.type === 'f'
+          ? seg('force', [['0', '普通'], ['1', '玄人'], ['2', '達人']], String(st.force))
+          : `<label class="field"><span>玄人</span><input type="number" inputmode="decimal" step="any" data-bv="x" value="${st.x}"></label>
+             <label class="field"><span>達人</span><input type="number" inputmode="decimal" step="any" data-bv="y" value="${st.y}"></label>`}
+        <h3>判定</h3>
+        ${seg('pre', [['0', '1小節前'], ['1', '直前']], st.pre ? '1' : '0')}
+        <div class="btns${st.old ? ' three' : ''}">
+          ${st.old ? '<button data-bact="del">消す</button>' : ''}
+          <button data-bact="cancel">やめる</button>
+          <button data-bact="ok" class="primary">${st.old ? '変更' : '置く'}</button>
+        </div>
+      </div>
+      <div class="grad-tja">
+        <div class="grad-tja-head">${ed.measureOf(st.at).index + 1}</div>
+        <pre id="gradTja"></pre>
+      </div>
     </div>`;
-  body.querySelectorAll<HTMLButtonElement>('[data-bt]').forEach((x) => x.addEventListener('click', () => {
-    type = x.dataset.bt as EBranch['type'];
-    body.querySelectorAll('[data-bt]').forEach((y) => y.classList.toggle('on', y === x));
-  }));
-  body.querySelectorAll<HTMLButtonElement>('[data-bact]').forEach((x) => x.addEventListener('click', () => {
-    const act = x.dataset.bact;
-    if (act === 'ok') {
-      const vx = Number(body.querySelector<HTMLInputElement>('#brX')!.value);
-      const vy = Number(body.querySelector<HTMLInputElement>('#brY')!.value);
-      if (!Number.isFinite(vx) || !Number.isFinite(vy)) return;
-      ed.setBranchCond(b, type, vx, vy);
-    } else if (act === 'del') ed.removeBranch(b);
-    brEdit = null;
-    closeSheet();
-  }));
+    body.querySelectorAll<HTMLButtonElement>('[data-bset]').forEach((x) => x.addEventListener('click', () => {
+      const k = x.dataset.bset;
+      const v = x.dataset.v!;
+      if (k === 'type') st.type = v as typeof st.type;
+      else if (k === 'force') st.force = Number(v) as BranchNo;
+      else if (k === 'pre') st.pre = v === '1';
+      draw();
+    }));
+    body.querySelectorAll<HTMLInputElement>('input[data-bv]').forEach((inp) => inp.addEventListener('input', () => {
+      const v = Number(inp.value);
+      if (inp.value.trim() === '' || !Number.isFinite(v)) return;
+      if (inp.dataset.bv === 'x') st.x = v;
+      else st.y = v;
+      preview();
+    }));
+    body.querySelectorAll<HTMLButtonElement>('[data-bact]').forEach((x) => x.addEventListener('click', () => {
+      const act = x.dataset.bact;
+      if (act === 'ok') {
+        const b = ed.placeBranch(st.at, brCfg(st), st.old);
+        if (!b) return;
+        ed.clearSelection();
+        ed.setBranch(ed.branch);
+      } else if (act === 'del' && st.old) ed.removeBranch(st.old);
+      brEdit = null;
+      closeSheet();
+      updateSelBar();
+      view.invalidate();
+    }));
+    preview();
+  };
+  const preview = () => {
+    // 置いたあとの .tja（分岐の前の小節から、分岐の区間の終わりまで）
+    const tmp = new Editor(JSON.parse(JSON.stringify(ed.chart)) as EChart);
+    tmp.selectCourse(ed.courseIndex);
+    const old = st.old ? tmp.mainCourse.branches?.find((b) => b.start === st.old!.start) : undefined;
+    const b = tmp.placeBranch(st.at, brCfg(st), old);
+    const pre = document.getElementById('gradTja');
+    if (!b || !pre) return;
+    const c = tmp.mainCourse;
+    const text = ['#START', ...writeCourseBody(c), '#END'].join('\n');
+    const lines = text.split('\n');
+    const k = (c.branches ?? []).indexOf(b);
+    let li = -1;
+    for (let i = 0, n = -1; i < lines.length; i++) if (lines[i].startsWith('#BRANCHSTART') && ++n === k) { li = i; break; }
+    if (li < 0) return;
+    // 前の小節の頭（2 つ前の「,」の次の行）から
+    let from = li;
+    for (let commas = 0; from > 1; from--) { if (lines[from - 1].trim().endsWith(',')) { if (++commas === 2) break; } }
+    // 分岐の終わり（#BRANCHEND か次の #BRANCHSTART）のあと 1 小節まで
+    let to = li + 1;
+    while (to < lines.length && !lines[to].startsWith('#BRANCHEND') && !lines[to].startsWith('#BRANCHSTART') && lines[to] !== '#END') to++;
+    if (lines[to]?.startsWith('#BRANCHEND')) to++;
+    while (to < lines.length && lines[to] !== '#END' && !lines[to].startsWith('#BRANCHSTART')) { to++; if (lines[to - 1].trim().endsWith(',')) break; }
+    pre.innerHTML = tjaLinesHtml(text, tjaMarks(text), from, to);
+  };
+  draw();
 }
 
 // ---------- キーボード（PC） ----------
@@ -1678,7 +1743,7 @@ function openSheet(kind: SheetKind) {
   // TJA の画面は縦いっぱいに使う
   $('sheet').classList.toggle('tja', kind === 'events');
   // グラデの設定は縦いっぱい・横広めで、左に設定、右に .tja の書き方
-  $('sheet').classList.toggle('grad', kind === 'grad' || kind === 'sim' || kind === 'fill');
+  $('sheet').classList.toggle('grad', kind === 'grad' || kind === 'sim' || kind === 'fill' || kind === 'branch');
   // BPM・OFFSET の画面は画面いっぱい
   $('sheet').classList.toggle('tempo', kind === 'tempo' || kind === 'cut');
   // 譜面情報は縦いっぱい・横広め
@@ -1779,7 +1844,7 @@ function renderSheet() {
   // TNDE スキンのときの設定画面（本家のコンフィグ画面の素材で着せ替える）
   $('sheet').classList.toggle('tnde-set', sheet === 'settings' && settings.skin === 'tnde');
   $('sheet').classList.toggle('tnde-an', sheet === 'analysis' && settings.skin === 'tnde');
-  $('sheet').classList.toggle('tnde-gr', (sheet === 'grad' || sheet === 'sim' || sheet === 'fill') && settings.skin === 'tnde');
+  $('sheet').classList.toggle('tnde-gr', (sheet === 'grad' || sheet === 'sim' || sheet === 'fill' || sheet === 'branch') && settings.skin === 'tnde');
   if (sheet === 'info') {
     $('sheetTitle').textContent = '曲・難易度の情報';
     const c = ed.chart;
@@ -3574,7 +3639,7 @@ function openEvents(items: EventItem[]) {
     const e = it.events[0];
     if (it.branch !== undefined) {
       const b = ed.mainCourse.branches?.[it.branch];
-      if (b) { brEdit = b; openSheet('branch'); }
+      if (b) openBranchEdit(b, b.start);
       return;
     }
     if (it.grad) {

@@ -86,6 +86,42 @@ export interface EBranch {
 /** 0 = 普通・1 = 玄人・2 = 達人 */
 export type BranchNo = 0 | 1 | 2;
 
+/** 強制分岐の条件（精度は 0〜100 なので、必ずその譜面になる値） */
+export const FORCE_COND: Record<BranchNo, [number, number]> = { 0: [101, 101], 1: [-1, 101], 2: [-1, -2] };
+
+/** 強制分岐ならその分岐先（そうでなければ null） */
+export function forcedOf(b: Pick<EBranch, 'type' | 'x' | 'y'>): BranchNo | null {
+  if (b.type !== 'p') return null;
+  for (const k of [0, 1, 2] as const) if (b.x === FORCE_COND[k][0] && b.y === FORCE_COND[k][1]) return k;
+  return null;
+}
+
+/** 分岐を直前で決めるために、#BRANCHSTART の前に入れるとても短い小節（#MEASURE 1/9999） */
+export const PRE_MEASURE = { num: 1, den: 9999 } as const;
+
+/** 直前で決める分岐か（#BRANCHSTART のすぐ前が、音符の無いとても短い小節）。その小節の #MEASURE を返す */
+export function preMeasureOf(c: ECourse, b: EBranch): EEvent | undefined {
+  const ev = c.events.find((e) => e.kind === 'measure' && e.num / e.den <= 1 / 1000 && e.tick < b.start && e.tick + measureTicks(e.num, e.den) === b.start);
+  if (!ev) return undefined;
+  if (c.notes.some((n) => n.tick >= ev.tick && n.tick < b.start)) return undefined;
+  return ev;
+}
+
+/** tick が at 以上のもの（音符・命令・分岐の区間・グラデ・#END の位置）を d だけずらす */
+export function shiftCourse(c: ECourse, at: number, d: number) {
+  const mv = (t: number) => (t >= at ? t + d : t);
+  const notes = (ns: ENote[]) => { for (const n of ns) { n.tick = mv(n.tick); if (n.endTick !== undefined) n.endTick = mv(n.endTick); } };
+  notes(c.notes);
+  for (const e of c.events) e.tick = mv(e.tick);
+  for (const b of c.branches ?? []) {
+    b.start = mv(b.start);
+    if (Number.isFinite(b.end)) b.end = b.end > at || (b.end === at && b.start >= at) ? b.end + d : b.end;
+    for (const part of [b.e, b.m]) { notes(part.notes); for (const e of part.events) e.tick = mv(e.tick); }
+  }
+  for (const g of c.grads ?? []) { g.start = mv(g.start); g.end = mv(g.end); }
+  if (c.endTick !== undefined) c.endTick = mv(c.endTick);
+}
+
 /** 分岐しても全部の譜面で同じにする命令（時間の流れ） */
 export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay']);
 
@@ -490,6 +526,7 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
   const branches = bs.map((b) => {
     const i = ms.findIndex((m) => m.start >= b.start);
     const judgeTick = i > 0 ? ms[i - 1].start : b.start;
+    // （直前で決める分岐は、前のとても短い小節の頭 = ほぼ #BRANCHSTART の位置で決まる）
     return { start: t.tickToTime(b.start), end: Number.isFinite(b.end) ? t.tickToTime(b.end) : Infinity, judge: t.tickToTime(judgeTick), type: b.type, x: b.x, y: b.y };
   });
   // #SECTION（どの分岐に書いてあっても）・#LEVELHOLD（分岐の中なら、その分岐にいるときだけ）
