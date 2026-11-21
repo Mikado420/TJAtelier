@@ -3468,9 +3468,7 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 #app.tnde-ed .tool.roll i { background-image: var(--ed-roll); width: min(86%, calc(84px * var(--es, 0.45))); height: auto; aspect-ratio: 130 / 72; }
 #app.tnde-ed .tool.roll.big i { background-image: var(--ed-bigRoll); width: min(90%, calc(92px * var(--es, 0.45))); height: auto; aspect-ratio: 196 / 108; }
 #app.tnde-ed .tool.balloon i { background-image: var(--ed-balloon); width: min(88%, calc(96px * var(--es, 0.45))); height: auto; aspect-ratio: 178 / 73; }
-/* 命令のしるし（塗りだけ）。ゴーゴーは TNDE のゴーゴーの火の玉 */
-#app.tnde-ed .tool.gogo svg { display: none; }
-#app.tnde-ed .tool.gogo::before { content: ''; flex: none; width: 58%; height: 58%; max-width: calc(80px * var(--es, 0.45)); min-width: 26px; background: var(--ed-gogo) center / contain no-repeat; }
+/* 命令のしるし（塗りだけ）。ゴーゴーは初期スキンのしるしのまま */
 #app.tnde-ed .tool.cmd svg { stroke: none; }
 #app.tnde-ed .tool.measure svg text { font-family: var(--ed-k); font-weight: 400; font-size: 18px; }
 #app.tnde-ed .tool.cmd.active svg { stroke: none; }

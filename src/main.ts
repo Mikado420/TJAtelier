@@ -1660,7 +1660,7 @@ $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) close
 $('btnSettings').addEventListener('click', () => { closeMenus(); openSheet('settings'); });
 
 /** TNDE スキンの設定画面の絵（CSS からは公開フォルダの場所が分からないので、ここで渡す） */
-for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp'], ['--tnde-info-bg', 'cfg/info_bg.webp'], ['--tnde-cfg-bg2', 'cfg/bg2.webp'], ...['don', 'ka', 'bigDon', 'bigKa', 'roll', 'bigRoll', 'balloon', 'gogo'].map((n) => [`--ed-${n}`, `ed/${n}.webp`])]) {
+for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp'], ['--tnde-info-bg', 'cfg/info_bg.webp'], ['--tnde-cfg-bg2', 'cfg/bg2.webp'], ...['don', 'ka', 'bigDon', 'bigKa', 'roll', 'bigRoll', 'balloon'].map((n) => [`--ed-${n}`, `ed/${n}.webp`])]) {
   document.documentElement.style.setProperty(k, `url("${new URL(`skins/tnde/${f}`, document.baseURI).href}")`);
 }
 function renderSheet() {
