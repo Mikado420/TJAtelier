@@ -899,6 +899,10 @@ export class EditorView {
   }
   /** 音符を TNDE スキンの絵で描く */
   tnde = false;
+  /** 字（TNDE スキンではプレイ画面の下の曲名と同じ丸ゴシック） */
+  private get ff() {
+    return this.tnde ? `'TNDE Seurat', 'Makinas 4 Flat', sans-serif` : `'Makinas 4 Flat', sans-serif`;
+  }
 
   private draw() {
     const { ctx, ed } = this;
@@ -994,7 +998,7 @@ export class EditorView {
         const x = xt(bd.a);
         if (x >= L.colW - 4 && x <= this.w) {
           const g = geomOf(bd.a);
-          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px 'Makinas 4 Flat', sans-serif`;
+          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px ${this.ff}`;
           ctx.textAlign = 'left';
           ctx.textBaseline = 'top';
           ctx.fillStyle = bd.color;
@@ -1118,7 +1122,7 @@ export class EditorView {
         const row = ln.rowOf(m.start);
         const g = this.rowGeom(row);
         const lw = Math.max(1, 2 * s);
-        ctx.font = `600 ${Math.round(28 * s)}px 'Makinas 4 Flat', sans-serif`;
+        ctx.font = `600 ${Math.round(28 * s)}px ${this.ff}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         // 波形の上の小節線と番号は、いつものレーンの小節だけ
@@ -1147,7 +1151,7 @@ export class EditorView {
       ctx.rect(0, L.laneY, this.w, this.h - L.laneY);
       ctx.clip();
     }
-    ctx.font = `600 ${Math.round(22 * s)}px 'Makinas 4 Flat', sans-serif`;
+    ctx.font = `600 ${Math.round(22 * s)}px ${this.ff}`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     const grads = course.grads ?? [];
@@ -1393,7 +1397,7 @@ export class EditorView {
     const xt = (tick: number) => xd(ln.disp(tick));
     const [leftTick, rightTick] = ln.tickRange(this.dOfTl(x0 - 60 * s), this.dOfTl(x1 + 60 * s));
     const course = ed.course;
-    const font = (w: number, px: number) => `${w} ${Math.round(px)}px 'Makinas 4 Flat', sans-serif`;
+    const font = (w: number, px: number) => `${w} ${Math.round(px)}px ${this.ff}`;
 
     const headH = Math.max(18, 44 * s);
     // 波形はレーンと同じ縮尺（音符はレーンにあるので、ここには出さない）
@@ -1659,7 +1663,7 @@ export class EditorView {
       ctx.restore();
       // 名前（右の端。タップでそのレーンへ）
       const label = `${g.main ? '★' : ''}${g.name}`;
-      ctx.font = `600 ${Math.round(Math.max(10, 17 * s))}px 'Makinas 4 Flat', sans-serif`;
+      ctx.font = `600 ${Math.round(Math.max(10, 17 * s))}px ${this.ff}`;
       const tw = ctx.measureText(label).width;
       const pw = tw + 22 * s;
       const ph = Math.min(rh - 8 * s, 30 * s);
@@ -1694,7 +1698,7 @@ export class EditorView {
     const tR = own.timeOfDisp(this.dOf(this.w + L.bigR * 2));
     const map = this.rowMap;
     const lw = Math.max(1, 2 * s);
-    const font = (w: number, px: number) => `${w} ${Math.round(px)}px 'Makinas 4 Flat', sans-serif`;
+    const font = (w: number, px: number) => `${w} ${Math.round(px)}px ${this.ff}`;
     ctx.save();
     ctx.beginPath();
     ctx.rect(x0, L.laneY, this.w - x0, L.blockH);
@@ -1785,7 +1789,7 @@ export class EditorView {
         for (const sp of spans(bd.a, bd.b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, bh);
         const x = Xt(bd.a);
         if (x >= x0 - 4 && x <= this.w) {
-          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px 'Makinas 4 Flat', sans-serif`;
+          ctx.font = `800 ${Math.round(Math.max(9, 15 * s))}px ${this.ff}`;
           ctx.textAlign = 'left';
           ctx.textBaseline = 'top';
           ctx.fillText(bd.label, Math.max(x0 + 2, x + 3 * s), rowG(ln.rowOf(bd.a)).y + bh + 2 * s);
@@ -1803,7 +1807,7 @@ export class EditorView {
       // 小節線・拍の点・小節番号
       const step = this.ed.step;
       const stepPx = (step / TPB) * this.zoom;
-      ctx.font = `600 ${Math.round(28 * s)}px 'Makinas 4 Flat', sans-serif`;
+      ctx.font = `600 ${Math.round(28 * s)}px ${this.ff}`;
       ctx.textBaseline = 'top';
       for (const m of geo.ms) {
         if (m.start + m.length < leftTick) continue;
@@ -1877,7 +1881,7 @@ export class EditorView {
       }
       // 譜面の下: 命令（GOGO 以外。自分のレーンと同じ形）
       {
-        ctx.font = `600 ${Math.round(22 * s)}px 'Makinas 4 Flat', sans-serif`;
+        ctx.font = `600 ${Math.round(22 * s)}px ${this.ff}`;
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && !TJA_ONLY.has(e.kind) && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
@@ -1933,7 +1937,7 @@ export class EditorView {
     if (!this.cursors.length) return;
     const ctx = this.ctx;
     const s = L.s;
-    ctx.font = `600 ${Math.round(Math.max(9, 14 * s))}px 'Makinas 4 Flat', sans-serif`;
+    ctx.font = `600 ${Math.round(Math.max(9, 14 * s))}px ${this.ff}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     for (const c of this.cursors) {
@@ -2172,7 +2176,7 @@ export class EditorView {
     // 曲の長さ（上）と現在時刻（下）を縦書きで（Malody と同じ位置）
     // 曲の頭より前（1 小節ぶん）にいるときは、音源の頭より前ならマイナスの時刻になる
     const time = this.ed.timing.tickToTime(this.pos);
-    ctx.font = `700 ${Math.round(34 * s)}px 'Makinas 4 Flat', sans-serif`;
+    ctx.font = `700 ${Math.round(34 * s)}px ${this.ff}`;
     ctx.fillStyle = '#fff';
     ctx.textBaseline = 'middle';
     const vtext = (text: string, x: number, y: number, align: CanvasTextAlign) => {
