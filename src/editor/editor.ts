@@ -5,6 +5,7 @@ import {
 import type { NoteType } from '../chart/types';
 import type { AudioFile } from '../io/load';
 import { applyGrad, gradMatches, markPins, type Grad } from './grad';
+import { applySim, flipNotes, tileClip } from './gimmick';
 
 /** scroll = #SCROLL（1 か所をタップ×2 でその位置だけ、2 か所でグラデ）、bpm = #BPMCHANGE、measure = #MEASURE */
 export type Tool = NoteType | 'erase' | 'gogo' | 'scroll' | 'bpm' | 'measure' | 'select';
@@ -53,7 +54,7 @@ export class Editor {
   /** 選んでいる範囲（選択ツール。両端を含む） */
   sel: { start: number; end: number } | null = null;
   /** コピーしたノーツ（範囲の始まりからの位置）と範囲の長さ。曲を替えても残る */
-  clip: { notes: ENote[]; span: number; events?: EEvent[] } | null = null;
+  clip: { notes: ENote[]; span: number; step?: number; events?: EEvent[] } | null = null;
   /** コピー・切り取りで命令（#MEASURE・#GOGOSTART など）も一緒に写すか */
   clipEvents = false;
 
@@ -508,7 +509,7 @@ export class Editor {
       if (n.endTick !== undefined) c.endTick = n.endTick - s.start;
       return c;
     });
-    this.clip = { notes, span: s.end - s.start };
+    this.clip = { notes, span: s.end - s.start, step: this.step };
     if (this.clipEvents) {
       const inRange = this.eventsIn(s.start, s.end);
       const events: EEvent[] = inRange.map((e) => { const c = { ...e, tick: e.tick - s.start } as EEvent & { pin?: boolean }; delete c.pin; return c; });
@@ -519,6 +520,34 @@ export class Editor {
       this.clip.events = events;
     }
     return notes.length;
+  }
+
+  /** あべこべ: 選んでいる範囲のドン⇔カッ（大きい音符も）を入れ替える */
+  flipSelection(): number {
+    const s = this.sel;
+    if (!s || !this.selectedNotes().some((n) => n.type === 'don' || n.type === 'ka' || n.type === 'bigDon' || n.type === 'bigKa')) return 0;
+    let n = 0;
+    this.mutate(() => { n = flipNotes(this.course, s.start, s.end); });
+    return n;
+  }
+
+  /** 同時出現: 選んでいる範囲に #SCROLL を置く */
+  simSelection(digits: number): number {
+    const s = this.sel;
+    if (!s) return 0;
+    let n = 0;
+    this.mutate(() => { n = applySim(this.course, s.start, s.end, this.chart.bpm, digits); });
+    return n;
+  }
+
+  /** 敷き詰め: コピーした範囲を、選んでいる範囲に繰り返して置く */
+  fillSelection(fill: 'replace' | 'empty'): number {
+    const s = this.sel;
+    const clip = this.clip;
+    if (!s || !clip) return 0;
+    let n = 0;
+    this.mutate(() => { n = tileClip(this.course, s.start, s.end, clip, fill); });
+    return n;
   }
 
   /** 選んでいる範囲のノーツを消す */

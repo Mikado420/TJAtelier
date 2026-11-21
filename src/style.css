@@ -3523,3 +3523,33 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .sheet.tnde-set .st-sw:checked { background: #4d9fbe; border-color: #2b7290; }
 .sheet.tnde-set .st-range output, .sheet.tnde-set .st-num input { background: #11141c; border: 2px solid #323a50; }
 .sheet.tnde-set .st-text, .sheet.tnde-set .st-color { background: #11141c; border: 2px solid #323a50; color: #f2ead8; -webkit-text-fill-color: #f2ead8; }
+
+/* ---------- ギミックのメニュー（選択の「ギミック」の上に出す） ---------- */
+.gim-menu { min-width: 150px; z-index: 9; }
+.gim-menu button:disabled { opacity: 0.35; }
+#app.tnde-ed .gim-menu { background: #1f2433; border: 2px solid #4d9fbe; border-radius: 10px; padding: 5px; gap: 4px; }
+#app.tnde-ed .gim-menu button { height: 36px; padding: 0 12px; border-radius: 7px; font: 400 15px 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; color: #f2ead8; }
+
+/* ---------- グラデ・同時出現・敷き詰め（TNDE）: 設定画面と同じ紺と水色 ---------- */
+.sheet.tnde-gr { font-synthesis: none; background: #161a24; }
+.sheet.tnde-gr .sheet-panel { background: transparent; border: 0; box-shadow: none; }
+.sheet.tnde-gr .sheet-head { background: transparent; padding: 8px 16px 6px; justify-content: flex-start; gap: 12px; align-items: center; }
+.sheet.tnde-gr .sheet-title { order: 2; }
+.sheet.tnde-gr #sheetTitle { font-family: 'TNDE Seurat', sans-serif; font-weight: 400; font-size: 26px; line-height: 1; color: #f2ead8; text-shadow: none; }
+.sheet.tnde-gr #sheetClose { order: 1; flex: none; width: 46px; min-width: 46px; height: 46px; padding: 0; font-size: 0; color: transparent; border: 0; border-radius: 9px; background: var(--tnde-back) 0 0 / 526px 141.5px; box-shadow: none; }
+.sheet.tnde-gr #sheetClose svg { display: none; }
+.sheet.tnde-gr .sheet-body { padding: 4px 16px calc(12px + var(--safe-b)); }
+.sheet.tnde-gr .sheet-body * { font-family: 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; }
+.sheet.tnde-gr .grad-form { background: #1f2433; border: 2px solid #323a50; border-radius: 12px; padding: 8px 12px; gap: 5px; }
+.sheet.tnde-gr .grad-form h3 { margin: 2px 0 0; padding: 0 0 0 10px; border-left: 5px solid #4d9fbe; color: #f2ead8; font-size: 14px; line-height: 18px; font-weight: 400; }
+.sheet.tnde-gr .field > span { color: #9aa6ba; font-size: 14px; font-weight: 400; }
+.sheet.tnde-gr .field input { height: 30px; background: #11141c; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; -webkit-text-fill-color: #f2ead8; font-size: 16px; }
+.sheet.tnde-gr .btns button { height: 30px; padding: 0 4px; border: 2px solid #323a50; border-radius: 10px; background: #262c3d; color: #f2ead8; font-size: 15px; font-weight: 400; clip-path: none; box-shadow: none; }
+.sheet.tnde-gr .btns button.primary { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+.sheet.tnde-gr .grad-tja { background: #11141c; border: 2px solid #323a50; border-radius: 12px; }
+.sheet.tnde-gr .grad-tja-head { padding: 8px 12px 6px; border-bottom: 1px solid #2c3346; color: #f2ead8; font-size: 15px; border-left: 5px solid #4d9fbe; margin: 8px 10px 0; padding: 0 0 0 10px; border-bottom: 0; }
+.sheet.tnde-gr .grad-tja pre { font-family: 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; font-size: 14px; line-height: 20px; }
+.sheet.tnde-gr .grad-form .btns { gap: 5px; }
+.sheet.tnde-gr .sheet-head { padding-top: 6px; padding-bottom: 4px; }
+.sheet.tnde-gr .grad-form { gap: 5px; }
+.sheet.tnde-gr .field > span { font-size: 13px; }

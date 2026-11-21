@@ -24,6 +24,7 @@ import type { BeatAI } from './audio/beatThis';
 import { analyzeTempo, computeMeters, planBars, planBeatTimes, planTimeAt, tempoPlan, type Meter, type TempoOptions, type TempoPlan, type TempoResult } from './audio/tempo';
 import { meterAt as meterAtTick, moveBoundary, nudge, removeSection, sectionAtTime, sections as editSections, setBpm, setEnd, setMeter, setStart, shiftDownbeat, splitAt, tickAtTime } from './editor/tempoEdit';
 import { applyGrad, gradValid, type Grad } from './editor/grad';
+import { applySim, tileClip } from './editor/gimmick';
 import { writeCourseBody } from './chart/tjaWrite';
 
 import { DIVISORS, Editor, type Tool } from './editor/editor';
@@ -1053,6 +1054,7 @@ function updateSelBar() {
   bar.classList.toggle('hidden', !on);
   // 選択中は、道具の帯の所に選択の操作を出す（道具の帯は隠す）
   $('editor').parentElement!.classList.toggle('selecting', on);
+  if (!on || !ed.sel) closeGimMenu();
   if (!on) return;
   const n = ed.selectedNotes().length;
   const has = !!ed.sel;
@@ -1060,7 +1062,7 @@ function updateSelBar() {
   bar.querySelectorAll<HTMLButtonElement>('[data-sel]').forEach((b) => {
     const k = b.dataset.sel!;
     if (k === 'exit') return;
-    b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
+    b.disabled = k === 'ev' ? false : k === 'paste' ? !ed.clip : k === 'clear' ? !has && ed.pendingLong === null : k === 'branch' ? !has || overlapsBranch() : k === 'gim' ? !has : (k === 'copy' || k === 'cut') && ed.clipEvents ? !has : !has || !n;
     if (k === 'ev') b.classList.toggle('on', ed.clipEvents);
     if (k === 'adopt') b.classList.toggle('hidden', !collab.active || !!collab.lane?.main);
     if (k === 'branch') b.classList.toggle('hidden', collab.active);
@@ -1085,6 +1087,7 @@ function selAction(k: string) {
     updateSelBar();
     return;
   }
+  if (k === 'gim') { toggleGimMenu(); return; }
   if (k === 'bars') {
     // 選んだ音符すべての位置に小節線（#MEASURE）
     const n = ed.barlinesAtNotes();
@@ -1109,6 +1112,114 @@ $('selBar').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-sel]');
   if (b && !b.disabled) selAction(b.dataset.sel!);
 });
+
+// ---------- ギミック（あべこべ・同時出現・敷き詰め） ----------
+
+const gimMenu = $('gimMenu');
+function closeGimMenu() {
+  $('gimMenu').classList.add('hidden');
+  $('selBar').querySelector('[data-sel="gim"]')?.classList.remove('on');
+}
+function toggleGimMenu() {
+  if (!gimMenu.classList.contains('hidden')) { closeGimMenu(); return; }
+  const btn = $('selBar').querySelector<HTMLElement>('[data-sel="gim"]')!;
+  gimMenu.querySelector<HTMLButtonElement>('[data-gim="fill"]')!.disabled = !ed.clip;
+  gimMenu.classList.remove('hidden');
+  btn.classList.add('on');
+  // ボタンの上に、右端をそろえて出す
+  const host = (gimMenu.offsetParent as HTMLElement | null) ?? document.body;
+  const hr = host.getBoundingClientRect();
+  const br = btn.getBoundingClientRect();
+  gimMenu.style.right = `${Math.max(4, hr.right - br.right)}px`;
+  gimMenu.style.top = 'auto';
+  gimMenu.style.bottom = `${Math.max(4, hr.bottom - br.top + 6)}px`;
+}
+gimMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-gim]');
+  if (!b || b.disabled) return;
+  closeGimMenu();
+  const k = b.dataset.gim;
+  if (!ed.sel) return;
+  if (k === 'flip') {
+    const n = ed.flipSelection();
+    toast(n ? `${n} 個入れ替えました` : '入れ替える音符がありません');
+    updateSelBar();
+    view.invalidate();
+  } else if (k === 'sim') {
+    gimEdit = { kind: 'sim', start: ed.sel.start, end: ed.sel.end, digits: 3, fill: 'replace' };
+    openSheet('sim');
+  } else if (k === 'fill' && ed.clip) {
+    gimEdit = { kind: 'fill', start: ed.sel.start, end: ed.sel.end, digits: 3, fill: 'replace' };
+    openSheet('fill');
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  const t = e.target as HTMLElement;
+  if (!gimMenu.classList.contains('hidden') && !gimMenu.contains(t) && !t.closest('[data-sel="gim"]')) closeGimMenu();
+});
+
+let gimEdit: { kind: 'sim' | 'fill'; start: number; end: number; digits: number; fill: 'replace' | 'empty' } | null = null;
+
+function renderGimSheet(body: HTMLElement) {
+  const st = gimEdit!;
+  const sim = st.kind === 'sim';
+  $('sheetTitle').textContent = sim ? '同時出現' : '敷き詰め';
+  const clip = ed.clip;
+  const form = sim
+    ? `<label class="field"><span>小数の桁数</span><input type="number" min="0" max="6" step="1" inputmode="numeric" data-gm="digits" value="${st.digits}"></label>`
+    : `<div class="btns grad-seg" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+        <button data-gfill="replace" class="${st.fill === 'replace' ? 'primary' : ''}">置き換え</button>
+        <button data-gfill="empty" class="${st.fill === 'empty' ? 'primary' : ''}">空きだけ</button>
+      </div>`;
+  const m1 = ed.measureOf(st.start);
+  const m2 = ed.measureOf(st.end);
+  body.innerHTML = `
+    <div class="grad-layout">
+      <div class="grad-form">
+        ${form}
+        <div class="btns">
+          <button data-gmact="cancel">やめる</button>
+          <button data-gmact="ok" class="primary">置く</button>
+        </div>
+      </div>
+      <div class="grad-tja">
+        <div class="grad-tja-head">${m1.index + 1}〜${m2.index + 1}</div>
+        <pre id="gradTja"></pre>
+      </div>
+    </div>`;
+  const preview = () => {
+    const c = JSON.parse(JSON.stringify(ed.course)) as ECourse;
+    if (sim) applySim(c, st.start, st.end, ed.chart.bpm, st.digits);
+    else if (clip) tileClip(c, st.start, st.end, clip, st.fill);
+    body.querySelector<HTMLElement>('#gradTja')!.innerHTML = rangeTjaPreview(c, st.start, st.end);
+  };
+  body.querySelector<HTMLInputElement>('input[data-gm="digits"]')?.addEventListener('input', (e) => {
+    const inp = e.target as HTMLInputElement;
+    if (inp.value.trim() === '') return;
+    st.digits = Math.max(0, Math.min(6, Math.round(Number(inp.value)))) || 0;
+    preview();
+  });
+  body.querySelectorAll<HTMLButtonElement>('[data-gfill]').forEach((b) => b.addEventListener('click', () => {
+    st.fill = b.dataset.gfill as 'replace' | 'empty';
+    body.querySelectorAll<HTMLButtonElement>('[data-gfill]').forEach((x) => x.classList.toggle('primary', x === b));
+    preview();
+  }));
+  body.querySelectorAll<HTMLButtonElement>('[data-gmact]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.gmact === 'ok') {
+      const keep = ed.sel;
+      ed.sel = { start: st.start, end: st.end };
+      const n = sim ? ed.simSelection(st.digits) : ed.fillSelection(st.fill);
+      ed.sel = keep;
+      toast(sim ? `${n} か所に #SCROLL を置きました` : `${n} 個置きました`);
+    }
+    gimEdit = null;
+    closeSheet();
+    updateSelBar();
+    view.invalidate();
+  }));
+  preview();
+}
 
 // ---------- 譜面情報 ----------
 
@@ -1556,7 +1667,7 @@ function toggleBigAtPos() {
 
 // ---------- シート ----------
 
-type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch';
+type SheetKind = 'info' | 'settings' | 'events' | 'grad' | 'sim' | 'fill' | 'point' | 'evlist' | 'tempo' | 'cut' | 'gpick' | 'analysis' | 'branch';
 let sheet: SheetKind | null = null;
 
 function openSheet(kind: SheetKind) {
@@ -1567,7 +1678,7 @@ function openSheet(kind: SheetKind) {
   // TJA の画面は縦いっぱいに使う
   $('sheet').classList.toggle('tja', kind === 'events');
   // グラデの設定は縦いっぱい・横広めで、左に設定、右に .tja の書き方
-  $('sheet').classList.toggle('grad', kind === 'grad');
+  $('sheet').classList.toggle('grad', kind === 'grad' || kind === 'sim' || kind === 'fill');
   // BPM・OFFSET の画面は画面いっぱい
   $('sheet').classList.toggle('tempo', kind === 'tempo' || kind === 'cut');
   // 譜面情報は縦いっぱい・横広め
@@ -1637,7 +1748,7 @@ function refreshSheet() {
   if ($('sheetBody').contains(document.activeElement) && (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) return;
   // TJA のテキストは書き換え中かもしれないので、譜面が変わっても勝手に描き直さない
   if (sheet === 'events' && document.getElementById('tjaText')) return;
-  if (sheet === 'grad' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick' || sheet === 'analysis' || sheet === 'branch') return;
+  if (sheet === 'grad' || sheet === 'sim' || sheet === 'fill' || sheet === 'point' || sheet === 'tempo' || sheet === 'cut' || sheet === 'gpick' || sheet === 'analysis' || sheet === 'branch') return;
   if (sheet === 'evlist') { renderSheet(); return; }
   renderSheet();
 }
@@ -1668,6 +1779,7 @@ function renderSheet() {
   // TNDE スキンのときの設定画面（本家のコンフィグ画面の素材で着せ替える）
   $('sheet').classList.toggle('tnde-set', sheet === 'settings' && settings.skin === 'tnde');
   $('sheet').classList.toggle('tnde-an', sheet === 'analysis' && settings.skin === 'tnde');
+  $('sheet').classList.toggle('tnde-gr', (sheet === 'grad' || sheet === 'sim' || sheet === 'fill') && settings.skin === 'tnde');
   if (sheet === 'info') {
     $('sheetTitle').textContent = '曲・難易度の情報';
     const c = ed.chart;
@@ -1757,6 +1869,8 @@ function renderSheet() {
     renderPointSheet(body);
   } else if (sheet === 'grad' && gradEdit) {
     renderGradSheet(body);
+  } else if ((sheet === 'sim' || sheet === 'fill') && gimEdit) {
+    renderGimSheet(body);
   } else if (sheet === 'gpick' && gradPick) {
     renderGradPickSheet(body);
   } else if (sheet === 'analysis' && analysisOf) {
@@ -3349,11 +3463,16 @@ function gradTjaPreview(g: Grad, old?: Grad): string {
   if (old) c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= old.start && e.tick <= old.end));
   sortCourse(c);
   applyGrad(c, g, ed.chart.bpm);
+  return rangeTjaPreview(c, g.start, g.end);
+}
+
+/** 譜面 c の .tja のうち、範囲 [start, end] の小節の部分を色付きの HTML で返す */
+function rangeTjaPreview(c: ECourse, start: number, end: number): string {
   sortCourse(c);
   const text = ['#START', ...writeCourseBody(c), '#END'].join('\n');
   const marks = tjaMarks(text);
-  const a = ed.measureOf(g.start).index + 1;
-  const b = ed.measureOf(g.end).index + 1;
+  const a = ed.measureOf(start).index + 1;
+  const b = ed.measureOf(end).index + 1;
   const n = marks.lineStarts.length;
   const lineText = (li: number) => text.slice(marks.lineStarts[li], li + 1 < n ? marks.lineStarts[li + 1] - 1 : text.length).trim();
   // 小節の最初の行と、その前に並ぶ命令の行（#SCROLL など）から

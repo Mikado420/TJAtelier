@@ -42,7 +42,7 @@ export interface Grad {
 }
 
 /** その位置の BPM を返す関数（譜面の最初の BPM と、難易度の #BPMCHANGE から） */
-function bpmFn(c: ECourse, baseBpm: number) {
+export function bpmFn(c: ECourse, baseBpm: number) {
   const evs = c.events.filter((e) => e.kind === 'bpm' && e.value > 0) as { tick: number; value: number }[];
   evs.sort((a, b) => a.tick - b.tick);
   return (tick: number) => {
@@ -59,7 +59,7 @@ function bpmFn(c: ECourse, baseBpm: number) {
  * その位置の秒数を返す関数（BPM・#DELAY と、#MEASURE の短い小節の本当の長さ（measureScale）から。
  * 始点からの差だけを使うので、OFFSET は入れない）
  */
-function timeFn(c: ECourse, baseBpm: number) {
+export function timeFn(c: ECourse, baseBpm: number) {
   const evs = c.events.filter((e) => e.kind === 'bpm' || e.kind === 'delay' || e.kind === 'measure').slice().sort((a, b) => a.tick - b.tick);
   return (tick: number) => {
     let time = 0;
