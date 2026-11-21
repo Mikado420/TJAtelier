@@ -50,4 +50,14 @@ describe('ギミック', () => {
     // 空きだけ: 3 小節目の 3 拍目（ドン）は残り、そこには置かない
     expect(a.fillSelection('empty')).toBe(7);
   });
+
+  it('同時出現: 始点に残っていた #SCROLL（前に置いたものなど）は消して置き直す', () => {
+    const body = '#BPMCHANGE 57\n0000,\n#MEASURE 2/4\n#BPMCHANGE 90\n#SCROLL 9.279\n' + '0,\n'.repeat(16) + '#MEASURE 4/4\n0202,\n';
+    const ed = new Editor(parseTJA('TITLE:t\nBPM:57\nCOURSE:Oni\nLEVEL:1\n#START\n' + body + '#END\n'));
+    ed.sel = { start: M, end: M + 15 * (M / 2) };
+    ed.simSelection(3);
+    const s = scrolls(ed);
+    expect(s.find(([t]) => t === M)).toBeUndefined();
+    expect(s[0]).toEqual([M + M / 2, Number((APPEAR_BEATS / 2).toFixed(3))]);
+  });
 });

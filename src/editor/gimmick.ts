@@ -77,7 +77,7 @@ const round = (v: number, digits: number) => {
  * 同時出現で置く #SCROLL。
  * 判定枠が範囲の始点に来た瞬間 T に、範囲（始点より後ろ）のすべての音符・小節線が右端から出てくるようにする。
  * 位置 k の #SCROLL = 右端までの拍数 ÷ （T から k までの拍数）（拍数は BPM × 秒数 ÷ 60。#HBSCROLL は譜面の拍）。
- * 始点そのものにある音符はそのまま（その瞬間に判定枠にいるので）
+ * 始点そのものにある音符には #SCROLL を置かない（その瞬間に判定枠にいるので）。始点に前から #SCROLL があれば消す（前に置いた同時出現の残りなど）
  */
 export function simScrolls(c: ECourse, start: number, end: number, baseBpm: number, digits: number): { tick: number; value: number }[] {
   const { ticks, after } = simTargets(c, start, end);
@@ -106,7 +106,7 @@ export function applySim(c: ECourse, start: number, end: number, baseBpm: number
   const to = keepAfter ? last : end;
   // 戻す位置に元からある #SCROLL はそのまま
   const atAfter = keepAfter ? c.events.find((e) => e.kind === 'scroll' && e.tick === last) : undefined;
-  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick > start && (e.tick < to || (e.tick === to && !atAfter))));
+  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= start && (e.tick < to || (e.tick === to && !atAfter))));
   if (c.grads) c.grads = c.grads.filter((g) => g.end < start || g.start > to);
   for (const s of list) {
     if (s.tick === last && keepAfter && atAfter) continue;
