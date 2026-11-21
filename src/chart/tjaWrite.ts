@@ -1,5 +1,5 @@
 import type { NoteType } from './types';
-import { branchPath, contentEnd, measures, scrollText, SHARED_KINDS, sortCourse, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure } from './model';
+import { alignMeasures, branchPath, contentEnd, measures, scrollText, SHARED_KINDS, sortCourse, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure } from './model';
 
 /** 編集用モデル → TJA テキスト */
 
@@ -115,6 +115,7 @@ export function writeCourseBody(c: ECourse): string[] {
  * （元のテキストの小節と 1 つずつ比べるため）
  */
 export function writeMeasures(c: ECourse, atLeast = 0): string[][] {
+  c = alignMeasures(c);
   const end = contentEnd(c);
   let ms = measures(c, end);
   // 最後の小節の内容があるところまで

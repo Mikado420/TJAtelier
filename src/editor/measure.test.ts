@@ -69,3 +69,20 @@ describe('選んだ音符すべての位置に小節線', () => {
     expect(bars(ed)).toEqual(before);
   });
 });
+
+describe('小節の途中に #MEASURE を置いたあと', () => {
+  const TJA2 = 'TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n1111,\n#MEASURE 3/4\n111,\n1111,\n#END\n';
+  const M2 = TPB * 4;
+  for (const [t, num, den] of [[M2 / 4, 4, 4], [M2 + M2 / 2, 3, 4], [M2 / 3, 4, 4], [M2 + (M2 * 3) / 16, 5, 8]] as const) {
+    it(`${t / M2} 小節目に ${num}/${den}: 後ろの #MEASURE も小節の頭に書かれ、読み直しても音符の位置が同じ`, () => {
+      const ed = new Editor(parseTJA(TJA2));
+      ed.addEvent({ tick: t, kind: 'measure', num, den });
+      const text = writeTJA(ed.chart);
+      const body = text.slice(text.indexOf('#START'), text.indexOf('#END')).split('\n');
+      // #MEASURE の前の行は、小節の終わり（,）か #START・ほかの命令
+      body.forEach((l, i) => { if (l.startsWith('#MEASURE')) expect(/,$|^#/.test(body[i - 1])).toBe(true); });
+      const back = parseTJA(text);
+      expect(back.courses[0].notes.map((n) => n.tick)).toEqual(ed.course.notes.map((n) => n.tick).sort((a, b) => a - b));
+    });
+  }
+});

@@ -1,5 +1,5 @@
 import {
-  branchPath, measureAt, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
+  alignMeasures, branchPath, measureAt, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
   type BranchNo, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
@@ -152,6 +152,9 @@ export class Editor {
     if (this.undoStack.length > 300) this.undoStack.shift();
     this.redoStack = [];
     fn();
+    // 小節の途中に残った #MEASURE は、それが効く次の小節の頭へ（.tja で小節の途中に書かないように）
+    const al = alignMeasures(this.course);
+    if (al !== this.course) this.course.events = al.events;
     // 玄人・達人の変更を、難易度の譜面に書き戻す
     const p = this.path;
     if (p) setBranchPath(p.of, p.k, p.c);

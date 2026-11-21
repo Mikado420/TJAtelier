@@ -284,6 +284,43 @@ export function measures(c: ECourse, untilTick: number): Measure[] {
   return out;
 }
 
+/**
+ * 小節の途中にある #MEASURE を、それが効く次の小節の頭へ移した譜面を返す（同じ頭に重なれば後ろのものが残る）。
+ * 小節の長さは小節の頭の #MEASURE で決まる（measures）ので、途中の #MEASURE は次の小節から効く。
+ * .tja に書くと小節の途中（「000」の間）に #MEASURE が入り、ほかのシミュレータでずれるため、書く前にそろえる。
+ * そろえる必要がなければ c をそのまま返す
+ */
+export function alignMeasures(c: ECourse): ECourse {
+  const ev = c.events.filter((e) => e.kind === 'measure');
+  if (!ev.length) return c;
+  const last = Math.max(...ev.map((e) => e.tick));
+  // measures は #MEASURE が位置の順に並んでいる前提（変更の直後は並んでいないことがある）
+  const list = measures({ ...c, events: [...c.events].sort((a, b) => a.tick - b.tick) }, last);
+  const tail = list[list.length - 1];
+  const starts = [...list.map((m) => m.start), tail.start + tail.length];
+  const headOf = (t: number) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] >= t) hi = mid;
+      else lo = mid + 1;
+    }
+    return starts[lo];
+  };
+  const moved = new Map<EEvent, number>();
+  for (const e of ev) { const h = headOf(e.tick); if (h !== e.tick) moved.set(e, h); }
+  if (!moved.size) return c;
+  // 同じ頭に来る #MEASURE は、元の位置がいちばん後ろのものだけ残す
+  const keep = new Map<number, EEvent>();
+  for (const e of [...ev].sort((a, b) => a.tick - b.tick)) keep.set(moved.get(e) ?? e.tick, e);
+  const keepSet = new Set(keep.values());
+  const events = c.events
+    .filter((e) => e.kind !== 'measure' || keepSet.has(e))
+    .map((e) => (moved.has(e) ? { ...e, tick: moved.get(e)! } : e));
+  return { ...c, events };
+}
+
 export function measureAt(list: Measure[], tick: number): Measure {
   let lo = 0;
   let hi = list.length - 1;
