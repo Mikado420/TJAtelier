@@ -1310,6 +1310,9 @@ export class TndeSelect {
     if (bk) g.drawImage(bk.im, 960 - 858 * 0.75, 435 - 528 * 0.75, 858 * 1.5, 528 * 1.5);
     this.put(this.text(s.title, 52, 16, '#100b0b', { kx: 0.98, punct: 0.4 }), 961.5, 195, 1100);
     if (s.subtitle) this.put(this.text(s.subtitle, 30, 10, '#100b0b', { kx: 0.9 }), 962, 256.5, 1100);
+    const sel = this.dsel;
+    // ボタンを選んでいるときの黄色い光（ボタンの後ろ）
+    if (sel < 2 || sel > 5) this.blit('diffCursor', 86, 410, 88, 85, BTN_X[sel] + 57.75 - 66, BTN_Y[sel] + 57 - 63.75, 88 * 1.5, 85 * 1.5);
     this.blit('diffBar', 0, 0, 77, 76, 382, 405, 77 * 1.5, 76 * 1.5);
     this.blit('diffBar', 88, 0, 77, 76, 514, 405, 77 * 1.5, 76 * 1.5);
     // もどる・設定の下に、同じ形のボタン（1 列 2 つ）
@@ -1324,9 +1327,7 @@ export class TndeSelect {
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
     // 選んでいる所の枠（カードの後ろ）
-    const sel = this.dsel;
-    if (sel >= 2) this.blit('diffCursor', 56, 135, 147, 250, cx[sel - 2] + 98.25 - 110.25, 405 + 177.75 - 187.5, 147 * 1.5, 250 * 1.5);
-    else this.blit('diffCursor', 86, 410, 88, 85, BTN_X[sel] + 57.75 - 66, BTN_Y[sel] + 57 - 63.75, 88 * 1.5, 85 * 1.5);
+    if (sel >= 2 && sel <= 5) this.blit('diffCursor', 56, 135, 147, 250, cx[sel - 2] + 98.25 - 110.25, 405 + 177.75 - 187.5, 147 * 1.5, 250 * 1.5);
     cx.forEach((x, i) => {
       const c = this.courseAt(i + 2)!;
       const cs = s.courses.find((q) => q.name === c);
