@@ -44,17 +44,17 @@ function beatFn(c: ECourse) {
   };
 }
 
-/** 範囲の対象（音符の始まり・小節の頭）と、範囲の後ろで元の #SCROLL に戻す位置 */
+/** 範囲の対象（始点より後ろの音符の始まり・小節の頭）と、範囲の後ろで元の #SCROLL に戻す位置 */
 function simTargets(c: ECourse, start: number, end: number): { ticks: number[]; after: number | null } {
   const set = new Set<number>();
   let after = Infinity;
   for (const n of c.notes) {
-    if (n.tick >= start && n.tick <= end) set.add(n.tick);
+    if (n.tick > start && n.tick <= end) set.add(n.tick);
     else if (n.tick > end) after = Math.min(after, n.tick);
   }
   const ms = measures(c, end + TPB * 16);
   for (const m of ms) {
-    if (m.start >= start && m.start <= end) set.add(m.start);
+    if (m.start > start && m.start <= end) set.add(m.start);
     else if (m.start > end) after = Math.min(after, m.start);
   }
   return { ticks: [...set].sort((a, b) => a - b), after: Number.isFinite(after) ? after : null };
@@ -75,23 +75,22 @@ const round = (v: number, digits: number) => {
 
 /**
  * 同時出現で置く #SCROLL。
- * 範囲の頭が今の #SCROLL で右端に出てくる瞬間 T に、範囲のすべての音符・小節線が右端にそろうようにする。
- * 位置 k の #SCROLL = 右端までの拍数 ÷ （T から k までの拍数）（拍数は BPM × 秒数 ÷ 60。#HBSCROLL は譜面の拍）
+ * 判定枠が範囲の始点に来た瞬間 T に、範囲（始点より後ろ）のすべての音符・小節線が右端から出てくるようにする。
+ * 位置 k の #SCROLL = 右端までの拍数 ÷ （T から k までの拍数）（拍数は BPM × 秒数 ÷ 60。#HBSCROLL は譜面の拍）。
+ * 始点そのものにある音符はそのまま（その瞬間に判定枠にいるので）
  */
 export function simScrolls(c: ECourse, start: number, end: number, baseBpm: number, digits: number): { tick: number; value: number }[] {
   const { ticks, after } = simTargets(c, start, end);
   if (!ticks.length) return [];
-  let s0 = scrollAt(c, start);
-  if (!(s0 > 0)) s0 = 1;
   const out: { tick: number; value: number }[] = [];
   if (c.scrollMode) {
     const beat = beatFn(c);
-    const bT = beat(start) - APPEAR_BEATS / s0;
+    const bT = beat(start);
     for (const k of ticks) out.push({ tick: k, value: round(APPEAR_BEATS / (beat(k) - bT), digits) });
   } else {
     const time = timeFn(c, baseBpm);
     const bpm = bpmFn(c, baseBpm);
-    const T = time(start) - (APPEAR_BEATS * 60) / (bpm(start) * s0);
+    const T = time(start);
     for (const k of ticks) out.push({ tick: k, value: round((APPEAR_BEATS * 60) / (bpm(k) * (time(k) - T)), digits) });
   }
   if (after !== null) out.push({ tick: after, value: scrollAt(c, after) });
@@ -107,7 +106,7 @@ export function applySim(c: ECourse, start: number, end: number, baseBpm: number
   const to = keepAfter ? last : end;
   // 戻す位置に元からある #SCROLL はそのまま
   const atAfter = keepAfter ? c.events.find((e) => e.kind === 'scroll' && e.tick === last) : undefined;
-  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= start && (e.tick < to || (e.tick === to && !atAfter))));
+  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick > start && (e.tick < to || (e.tick === to && !atAfter))));
   if (c.grads) c.grads = c.grads.filter((g) => g.end < start || g.start > to);
   for (const s of list) {
     if (s.tick === last && keepAfter && atAfter) continue;

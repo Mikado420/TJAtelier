@@ -16,13 +16,13 @@ describe('ギミック', () => {
     expect(ed.course.notes.slice(0, 5).map((n) => n.type)).toEqual(['ka', 'don', 'bigKa', 'bigDon', 'don']);
   });
 
-  it('同時出現: 音符・小節線ごとに 右端の拍数 ÷ (出現から判定までの拍数)。後ろで元に戻す', () => {
+  it('同時出現: 判定枠が始点に来た瞬間に出る。音符・小節線ごとに 右端の拍数 ÷ (始点からの拍数)。後ろで元に戻す', () => {
     const ed = new Editor(parseTJA(TJA));
     ed.sel = { start: M, end: M + (M * 3) / 4 };
     ed.simSelection(6);
     const D = APPEAR_BEATS;
     const r = (v: number) => Number(v.toFixed(6));
-    expect(scrolls(ed)).toEqual([[M, 1], [M + M / 4, r(D / (D + 1))], [M + M / 2, r(D / (D + 2))], [M + (M * 3) / 4, r(D / (D + 3))], [M * 2, 1]]);
+    expect(scrolls(ed)).toEqual([[M + M / 4, r(D / 1)], [M + M / 2, r(D / 2)], [M + (M * 3) / 4, r(D / 3)], [M * 2, 1]]);
   });
 
   it('同時出現: BPM が倍なら、その後ろの #SCROLL は半分（同じ秒数の位置で比べる）', () => {
@@ -30,8 +30,8 @@ describe('ギミック', () => {
     ed.sel = { start: 0, end: M };
     ed.simSelection(6);
     const D = APPEAR_BEATS;
-    // 2 小節目の頭は 120BPM で 4 拍ぶん後ろ（2 秒）。240BPM なので 拍数 = (D + 4) を 240 で見る
-    expect(scrolls(ed)).toEqual([[0, 1], [M, Number(((D * 60) / (240 * ((D + 4) / 2))).toFixed(6))], [M * 2, 1]]);
+    // 2 小節目の頭は始点から 2 秒後ろ。その位置の BPM は 240
+    expect(scrolls(ed)).toEqual([[M, Number(((D * 60) / (240 * 2)).toFixed(6))], [M * 2, 1]]);
   });
 
   it('敷き詰め: コピーした範囲（+1 マス）を繰り返して置く。置き換え・空きだけ', () => {
