@@ -3330,13 +3330,13 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .sheet.tnde-set .sheet-body { padding: 6px 16px calc(14px + var(--safe-b)); overflow: hidden; }
 .sheet.tnde-set .st-wrap { flex: 1; min-height: 0; gap: 10px; align-items: stretch; }
 /* 左: 分類（どれも同じ大きさの木の札。選んでいるものだけ色を変える） */
-.sheet.tnde-set .st-nav { width: 200px; gap: 8px; background: transparent; overflow-y: auto; padding-bottom: 4px; }
+.sheet.tnde-set .st-nav { width: 200px; gap: 8px; background: transparent; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding-bottom: 4px; }
 .sheet.tnde-set .st-ind, .sheet.tnde-set .st-nav svg { display: none; }
 .sheet.tnde-set .sheet-body .st-nav button { height: 50px; padding: 0; justify-content: center; background: var(--tnde-cfg-item) 0 0 / 100% 100%, #c49a6c; font-family: var(--tk); font-weight: 400; font-size: 20px; color: #fff; -webkit-text-stroke: 5px var(--ink); paint-order: stroke fill; }
 .sheet.tnde-set .sheet-body .st-nav button.on { filter: hue-rotate(-25deg) saturate(2.2) brightness(1.15); color: #fff; }
 .sheet.tnde-set .sheet-body .st-nav button[data-sttab="prof"] span { transform: none; }
 /* 右: 中身（クリーム色の箱・上に分類の色の帯） */
-.sheet.tnde-set .st-pane { position: relative; padding: 0 18px 12px; overflow-y: auto; overscroll-behavior: contain; background: #fffaf0; border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 rgba(60, 30, 10, 0.3); overflow: hidden; color: var(--ink); }
+.sheet.tnde-set .st-pane { position: relative; padding: 0 18px 12px; overflow-y: auto; overscroll-behavior: contain; background: #fffaf0; border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 rgba(60, 30, 10, 0.3); color: var(--ink); -webkit-overflow-scrolling: touch; touch-action: pan-y; }
 .sheet.tnde-set .st-pane::before { content: attr(data-label); position: sticky; top: 0; z-index: 2; flex: none; margin: 0 -18px 8px; height: 44px; display: flex; align-items: center; padding-left: 16px; background: var(--tc, #b46cf0); font-family: var(--tk); font-size: 24px; color: #fff; -webkit-text-stroke: 6px var(--ink); paint-order: stroke fill; }
 .sheet.tnde-set .st-pane[data-tab="prof"] { --tc: #3fa4ff; }
 .sheet.tnde-set .st-pane[data-tab="view"] { --tc: #2fc0a0; }
