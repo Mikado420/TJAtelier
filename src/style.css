@@ -3321,7 +3321,7 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .home .tsel-q.hidden { display: none; }
 
 /* ---------- TNDE スキンの設定画面（本家のコンフィグ画面の地・木の札） ---------- */
-.sheet.tnde-set { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', sans-serif; --ink: #1a1410; --og: #ff6b2d; background: var(--tnde-info-bg) center / cover, #0e1a2e; align-items: stretch; }
+.sheet.tnde-set { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', sans-serif; --ink: #1a1410; --og: #ff6b2d; background: var(--tnde-cfg-bg2) 0 0 / 260px 260px, #ffd84a; align-items: stretch; }
 .sheet.tnde-set .sheet-panel { width: 100%; max-height: none; height: 100%; background: transparent; border: 0; box-shadow: none; padding: var(--safe-t) var(--safe-r) 0 var(--safe-l); }
 .sheet.tnde-set .sheet-head { background: transparent; padding: 8px 16px 6px; justify-content: flex-start; gap: 12px; align-items: center; }
 .sheet.tnde-set .sheet-title { order: 2; }
@@ -3416,7 +3416,7 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 @media (max-width: 700px) { .olr { grid-template-columns: minmax(0, 1fr) 190px; } .olr-grid { grid-template-columns: 1fr; } }
 
 /* ---------- TNDE スキンの譜面情報（暗くした紺の地・白い箱・色の帯） ---------- */
-.sheet.tnde-an { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', var(--fd), sans-serif; --ink: #14110e; background: var(--tnde-info-bg) center / cover, #0e1a2e; }
+.sheet.tnde-an { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', var(--fd), sans-serif; --ink: #14110e; background: var(--tnde-cfg-bg2) 0 0 / 260px 260px, #ffd84a; }
 .sheet.tnde-an .sheet-panel { background: transparent; border: 0; box-shadow: none; }
 .sheet.tnde-an .sheet-head { background: transparent; padding: 8px 16px 6px; align-items: center; justify-content: flex-start; gap: 12px; }
 .sheet.tnde-an .sheet-title { order: 2; }
@@ -3465,9 +3465,9 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 #app.tnde-ed .tool.ka i { background-image: var(--ed-ka); }
 #app.tnde-ed .tool.don.big i { background-image: var(--ed-bigDon); }
 #app.tnde-ed .tool.ka.big i { background-image: var(--ed-bigKa); }
-#app.tnde-ed .tool.roll i { background-image: var(--ed-roll); width: calc(84px * var(--es, 0.45)); height: calc(46px * var(--es, 0.45)); }
-#app.tnde-ed .tool.roll.big i { background-image: var(--ed-bigRoll); width: calc(92px * var(--es, 0.45)); height: calc(51px * var(--es, 0.45)); }
-#app.tnde-ed .tool.balloon i { background-image: var(--ed-balloon); width: calc(96px * var(--es, 0.45)); height: calc(39px * var(--es, 0.45)); }
+#app.tnde-ed .tool.roll i { background-image: var(--ed-roll); width: min(86%, calc(84px * var(--es, 0.45))); height: auto; aspect-ratio: 130 / 72; }
+#app.tnde-ed .tool.roll.big i { background-image: var(--ed-bigRoll); width: min(90%, calc(92px * var(--es, 0.45))); height: auto; aspect-ratio: 196 / 108; }
+#app.tnde-ed .tool.balloon i { background-image: var(--ed-balloon); width: min(88%, calc(96px * var(--es, 0.45))); height: auto; aspect-ratio: 178 / 73; }
 /* 命令のしるし（塗りだけ）。ゴーゴーは TNDE のゴーゴーの火の玉 */
 #app.tnde-ed .tool.gogo svg { display: none; }
 #app.tnde-ed .tool.gogo::before { content: ''; flex: none; width: 58%; height: 58%; max-width: calc(80px * var(--es, 0.45)); min-width: 26px; background: var(--ed-gogo) center / contain no-repeat; }
