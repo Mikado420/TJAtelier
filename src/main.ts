@@ -1616,13 +1616,14 @@ $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) close
 $('btnSettings').addEventListener('click', () => { closeMenus(); openSheet('settings'); });
 
 /** TNDE スキンの設定画面の絵（CSS からは公開フォルダの場所が分からないので、ここで渡す） */
-for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp']]) {
+for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp'], ['--tnde-info-bg', 'cfg/info_bg.webp']]) {
   document.documentElement.style.setProperty(k, `url("${new URL(`skins/tnde/${f}`, document.baseURI).href}")`);
 }
 function renderSheet() {
   const body = $('sheetBody');
   // TNDE スキンのときの設定画面（本家のコンフィグ画面の素材で着せ替える）
   $('sheet').classList.toggle('tnde-set', sheet === 'settings' && settings.skin === 'tnde');
+  $('sheet').classList.toggle('tnde-an', sheet === 'analysis' && settings.skin === 'tnde');
   if (sheet === 'info') {
     $('sheetTitle').textContent = '曲・難易度の情報';
     const c = ed.chart;

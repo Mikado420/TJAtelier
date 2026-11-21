@@ -3414,3 +3414,38 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .olr-check input:checked::after { content: '✓'; color: #fff; font-size: 18px; font-weight: 900; }
 .olr-side .ol-prog { flex: none; }
 @media (max-width: 700px) { .olr { grid-template-columns: minmax(0, 1fr) 190px; } .olr-grid { grid-template-columns: 1fr; } }
+
+/* ---------- TNDE スキンの譜面情報（暗くした紺の地・白い箱・色の帯） ---------- */
+.sheet.tnde-an { --tk: 'TNDE Kantei', sans-serif; --ts: 'TNDE Seurat', var(--fd), sans-serif; --ink: #14110e; background: var(--tnde-info-bg) center / cover, #0e1a2e; }
+.sheet.tnde-an .sheet-panel { background: transparent; border: 0; box-shadow: none; }
+.sheet.tnde-an .sheet-head { background: transparent; padding: 8px 16px 6px; align-items: center; justify-content: flex-start; gap: 12px; }
+.sheet.tnde-an .sheet-title { order: 2; }
+.sheet.tnde-an #sheetTitle { align-items: center; }
+.sheet.tnde-an #sheetClose { order: 1; flex: none; width: 46px; min-width: 46px; height: 46px; padding: 0; font-size: 0; color: transparent; border-radius: 9px; background: var(--tnde-back) 0 0 / 526px 141.5px; box-shadow: none; }
+.sheet.tnde-an .an-ttl { justify-content: center; }
+.sheet.tnde-an .an-ttl b { font-family: var(--tk); font-weight: 400; font-size: 26px; line-height: 1.1; color: #f2ead8; -webkit-text-stroke: 6px var(--ink); paint-order: stroke fill; }
+.sheet.tnde-an .an-ttl small { font-family: var(--ts); font-weight: 400; color: #d8d0c0; }
+.sheet.tnde-an .an-tabs { gap: 6px; }
+.sheet.tnde-an .an-tabs button { height: 36px; padding: 0 12px; align-items: center; border: 3px solid var(--ink); border-radius: 10px; font-family: var(--tk); font-weight: 400; font-size: 15px; color: #fff; -webkit-text-stroke: 4px var(--ink); paint-order: stroke fill; opacity: 0.55; box-shadow: none; }
+.sheet.tnde-an .an-tabs button b { font-family: var(--tk); font-weight: 400; font-size: 14px; }
+.sheet.tnde-an .an-tabs button.on { opacity: 1; box-shadow: 0 0 0 3px #fff; }
+.sheet.tnde-an .an-c { background: #fff; border: 3px solid var(--ink); border-top-width: 3px; border-top-color: var(--ink); border-radius: 12px; overflow: hidden; color: #1e1a16; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); --hc: #3a78b0; }
+.sheet.tnde-an .an-cards > .an-c:nth-child(2) { --hc: #b8592e; }
+.sheet.tnde-an .an-cards > .an-c:nth-child(3) { --hc: #b08a2a; }
+.sheet.tnde-an .an-flow { --hc: #2a8a78; }
+.sheet.tnde-an .sheet-body > .an-c:not(.an-flow):not(.an-imgp) { --hc: #b08a2a; }
+.sheet.tnde-an .an-imgp { --hc: #6a5a9a; }
+.sheet.tnde-an .sheet-body .an-c > h3 { background: var(--hc); color: #f2ead8; font-family: var(--tk); font-weight: 400; font-size: 18px; -webkit-text-stroke: 5px var(--ink); paint-order: stroke fill; border-left: 0; }
+.sheet.tnde-an .sheet-body .an-c > h3 .an-rate, .sheet.tnde-an .sheet-body .an-c > h3 .an-imgbtn { -webkit-text-stroke: 0; }
+.sheet.tnde-an .an-st { border-bottom: 2px dashed #ddd6c8; }
+.sheet.tnde-an .an-st:last-child { border-bottom: 0; }
+.sheet.tnde-an .an-st > span { font-family: var(--tk); font-weight: 400; color: #7a6a58; }
+.sheet.tnde-an .an-st > b { font-family: var(--ts); font-weight: 400; color: #1e1a16; }
+.sheet.tnde-an .an-st > b small { color: #7a6a58; }
+.sheet.tnde-an .an-ratio em.don { color: #d8402e; }
+.sheet.tnde-an .an-ratio em.ka { color: #1f9aa6; }
+.sheet.tnde-an .an-st em.roll { color: #c08a00; }
+.sheet.tnde-an .an-st em.balloon { color: #d06010; }
+.sheet.tnde-an .an-st em.pop { color: #2a9a4a; }
+.sheet.tnde-an .an-st em.miss { color: #d03a2a; }
+.sheet.tnde-an .an-c > h3 .an-rate small { color: #f2ead8; -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; }
