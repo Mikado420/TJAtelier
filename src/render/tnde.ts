@@ -90,6 +90,8 @@ export interface TndeFrame {
   mods?: PlayMods | null;
   /** 動画用の画面: レーンと左のパネルだけ描く（背景・ゲージ・キャラ・曲名は描かない） */
   laneOnly?: boolean;
+  /** エディタの見本（レーンだけ）。遊んだあとは、読み込んである絵をそのまま使う（手放したり読み直したりしない） */
+  preview?: boolean;
   /** 背景の動画（画像）を出している所: full = 全面（上下の背景を描かない）、bottom = 下だけ（下の背景・踊り子・モブを描かない） */
   bgMode?: '' | 'full' | 'bottom';
   game: Game;
@@ -287,6 +289,8 @@ export class TndeSkin {
   }
   /** 隠れていて描かない所（full: 上下の背景・踊り子、bottom: 下の背景・踊り子、lane: レーンと左のパネルだけ） */
   private view: '' | 'full' | 'bottom' | 'lane' = '';
+  /** 一度でもプレイ画面で描いたか */
+  private played = false;
 
   /** 譜面に風船・ゴーゴーがあるか（無ければその動きの絵を読まない） */
   private need = { balloon: true, gogo: true };
@@ -934,13 +938,16 @@ export class TndeSkin {
 
   draw(c: CanvasRenderingContext2D, F: TndeFrame) {
     const { game, course, now, wall } = F;
-    this.choose(F.info.title);
+    if (!F.preview) {
+      this.choose(F.info.title);
+      this.played = true;
+    }
     // 動画を全面・下に出すとき、動画用の画面のときは、隠れる背景・踊り子・どんちゃんの絵を読まない（手放す）
-    const view = F.laneOnly ? 'lane' : F.bgMode === 'full' ? 'full' : F.bgMode ? 'bottom' : '';
+    const view = F.preview ? (this.played ? this.view : 'lane') : F.laneOnly ? 'lane' : F.bgMode === 'full' ? 'full' : F.bgMode ? 'bottom' : '';
     if (view !== this.view) this.view = view;
     if (this.setKey() !== this.loadedSet) void this.sync();
     // 曲の半分を過ぎたら、終わりの演出の絵を読み込み始める（フルコンボの連番はフルコンボできそうなときだけ）
-    {
+    if (!F.preview) {
       const half = this.lastNote(course) * 0.5;
       const st = game.stats;
       if (now > half || F.end) {

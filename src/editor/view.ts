@@ -1,5 +1,6 @@
 import { measures, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type ENote, type Measure } from '../chart/model';
-import { drawAny, drawRoll, hexPath } from '../render/notes';
+import { drawAny, drawRoll, hexPath, noteSkin } from '../render/notes';
+import { drawTndeNote } from '../render/tndeNotes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
 import type { Grad } from './grad';
@@ -889,8 +890,15 @@ export class EditorView {
     // 隠れていて大きさが 0 のとき（プレイ中など）は描かない（見えるようになって大きさが戻ってから描く）
     if (!this.canvas.width || !this.canvas.height) return;
     this.dirty = false;
-    this.draw();
+    noteSkin.fn = this.tnde ? drawTndeNote : null;
+    try {
+      this.draw();
+    } finally {
+      noteSkin.fn = null;
+    }
   }
+  /** 音符を TNDE スキンの絵で描く */
+  tnde = false;
 
   private draw() {
     const { ctx, ed } = this;

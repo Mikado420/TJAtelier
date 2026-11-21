@@ -12,6 +12,7 @@ import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
 import type { Course, Note } from './chart/types';
 import { Renderer } from './render/renderer';
+import { loadTndeNotes } from './render/tndeNotes';
 import { DEFAULT_PROFILE, type PlateStyle } from './render/tnde';
 import { serverBase } from './online/net';
 import { Game } from './engine/game';
@@ -654,6 +655,49 @@ document.querySelectorAll<HTMLButtonElement>('#tools .tool').forEach((b) => {
   });
 });
 setTool('don');
+
+// ---------- エディタの TNDE スキン（下の道具・右の帯のしるし・音符・上のレーン） ----------
+const ED_ICONS: Record<string, string> = {
+  btnHome: '<path d="M2.5 12 12 3.5l9.5 8.5h-2.8v8.5h-4.5v-5.8h-4.4v5.8H5.3V12z"/>',
+  btnUndo: '<path d="M2.8 10.3 9.5 3.8v3.8h4.5a6.8 6.8 0 0 1 0 13.6H9.5v-4.4H14a2.4 2.4 0 0 0 0-4.8H9.5v4.6z"/>',
+  btnRedo: '<path d="M21.2 10.3 14.5 3.8v3.8H10a6.8 6.8 0 0 0 0 13.6h4.5v-4.4H10a2.4 2.4 0 0 1 0-4.8h4.5v4.6z"/>',
+  btnMenu: '<rect x="3" y="4" width="18" height="3.8" rx="1.9"/><rect x="3" y="10.1" width="18" height="3.8" rx="1.9"/><rect x="3" y="16.2" width="18" height="3.8" rx="1.9"/>',
+  btnTest: '<path d="M6.5 3.5 20.5 12 6.5 20.5z" stroke-linejoin="round" stroke-width="1.6"/>',
+  btnSettings: '<path fill-rule="evenodd" d="M10.5 1.5h3l.8 3 2.2 1.1 2.7-1.6 2.1 2.1-1.6 2.7 1 2.3 3 .8v3l-3 .8-1 2.2 1.6 2.7-2.1 2.1-2.7-1.6-2.2 1-.8 3.1h-3l-.8-3.1-2.2-1-2.7 1.6-2.1-2.1 1.6-2.7-1-2.2-3-.8v-3l3-.8 1-2.3L3.4 7.1l2.1-2.1 2.7 1.6 2.2-1.1zM12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8z"/>',
+};
+const TOOL_ICONS: Record<string, string> = {
+  scroll: '<path d="M2 14h8M1 20h9M2 26h8" stroke="#b07ce8" stroke-width="3" stroke-linecap="round" fill="none"/><path d="M12 11l8 9-8 9h5l8-9-8-9z" fill="#a46ae8"/><path d="M20 11l8 9-8 9h5l8-9-8-9z" fill="#b884f0"/><path d="M28 11l8 9-8 9h4.5l8-9-8-9z" fill="#cca2f8"/>',
+  bpm: '<path d="M12 36 16.5 4h7L28 36z" fill="#4fb8e6"/><path d="M15.5 30h9" stroke="#2a7fa8" stroke-width="2.4"/><path d="M20 28.5 28.5 8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="26" cy="14" r="2.8" fill="#ffd23f"/>',
+  measure: '<text x="20" y="28" text-anchor="middle" fill="#ffd23f">4/4</text>',
+  select: '<rect x="4" y="7" width="24" height="20" rx="2.5" fill="none" stroke="#6fc4ea" stroke-width="3" stroke-dasharray="4.8 3.4"/><path d="M19 18 37 26l-8 2.5-4 7.5z" fill="#6fc4ea"/>',
+};
+const edOrig = new Map<Element, string>();
+const BASE_URL = new URL('./', document.baseURI).href;
+function applyEdSkin() {
+  const on = settings.skin === 'tnde';
+  $('app').classList.toggle('tnde-ed', on);
+  const swap = (el: Element | null, html: string) => {
+    if (!el) return;
+    if (!edOrig.has(el)) edOrig.set(el, el.innerHTML);
+    el.innerHTML = on ? html : edOrig.get(el)!;
+  };
+  for (const [id, d] of Object.entries(ED_ICONS)) swap(document.querySelector(`#${id} svg`), d);
+  for (const [g, d] of Object.entries(TOOL_ICONS)) swap(document.querySelector(`#tools [data-group="${g}"] svg`), d);
+  if (on) loadTndeNotes(BASE_URL, () => view.invalidate());
+  view.tnde = on;
+  view.invalidate();
+  if (on) {
+    void play.tndeSkin().then((sk) => {
+      if (settings.skin !== 'tnde' || !sk) return;
+      pvRenderer.tnde = sk;
+      pvResized = true;
+    });
+  } else {
+    pvRenderer.tnde = null;
+    pvResized = true;
+  }
+}
+applyEdSkin();
 
 // グリッド（音符の間隔）: 下の「‹ 間隔 ›」。‹ › で 1/8〜1/64 を 1 つずつ、真ん中をタップで自由グリッド
 const setDivisor = (d: number) => {
@@ -1616,7 +1660,7 @@ $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) close
 $('btnSettings').addEventListener('click', () => { closeMenus(); openSheet('settings'); });
 
 /** TNDE スキンの設定画面の絵（CSS からは公開フォルダの場所が分からないので、ここで渡す） */
-for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp'], ['--tnde-info-bg', 'cfg/info_bg.webp']]) {
+for (const [k, f] of [['--tnde-cfg-bg', 'cfg/bg.webp'], ['--tnde-cfg-item', 'cfg/item.webp'], ['--tnde-back', 'sel/diffBar.webp'], ['--tnde-pattern', 'sel/pattern.webp'], ['--tnde-info-bg', 'cfg/info_bg.webp'], ...['don', 'ka', 'bigDon', 'bigKa', 'roll', 'bigRoll', 'balloon', 'gogo'].map((n) => [`--ed-${n}`, `ed/${n}.webp`])]) {
   document.documentElement.style.setProperty(k, `url("${new URL(`skins/tnde/${f}`, document.baseURI).href}")`);
 }
 function renderSheet() {
@@ -1923,6 +1967,7 @@ function onSkinClick(b: HTMLButtonElement) {
   b.parentElement!.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
   play.applySettings();
   home.skinChanged();
+  applyEdSkin();
 }
 /** 打音の欄 */
 function hitRow() {

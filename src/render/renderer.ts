@@ -389,7 +389,7 @@ export class Renderer {
   }
   /** 動画用の画面で、レーンと左のパネルだけ TNDE スキンで描くか */
   private get skinLane() {
-    return !!this.tnde?.ready && this.broadcast && !this.preview && !this.spectate && !this.opponents.length;
+    return !!this.tnde?.ready && (this.broadcast || this.preview) && !this.spectate && !this.opponents.length;
   }
 
   /** 背景の動画の出し方（'' = 動画なし）。変えたら resize() で背景を描き直す */
@@ -1069,6 +1069,7 @@ export class Renderer {
       title: this.plate.title,
       profile: this.plate.profile,
       laneOnly,
+      preview: this.preview,
       bgMode: this.videoMode,
       end: this.endFx,
       branch: this.tndeBranch(game, now),

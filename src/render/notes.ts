@@ -159,9 +159,13 @@ export function drawBalloon(
   }
 }
 
+/** 音符の絵を差し替える（エディタを TNDE スキンで描く間だけ入れる。描けたら true） */
+export const noteSkin: { fn: null | ((ctx: CanvasRenderingContext2D, type: NoteType, x: number, y: number, r: number, endX?: number) => boolean) } = { fn: null };
+
 export function drawAny(
   ctx: CanvasRenderingContext2D, type: NoteType, x: number, y: number, r: number, endX?: number, hitsLeft?: number | null,
 ) {
+  if (noteSkin.fn?.(ctx, type, x, y, r, endX)) return;
   if (type === 'roll' || type === 'bigRoll') drawRoll(ctx, x, endX ?? x, y, r, type);
   else if (type === 'balloon') drawBalloon(ctx, x, y, r, hitsLeft ?? null, endX);
   else drawNoteHead(ctx, x, y, r, type);
