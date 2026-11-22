@@ -201,6 +201,7 @@ export class OnlineScreen {
   private render() {
     const sub = this.root.querySelector('.ol-sub')!;
     this.root.classList.toggle('in-room', this.view === 'room');
+    this.root.classList.toggle('tnde', this.host.tnde());
     if (this.view === 'lobby') {
       this.root.querySelector('.ol-title')!.textContent = 'オンライン';
       sub.textContent = '';

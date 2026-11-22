@@ -3559,3 +3559,31 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .st-ver span { margin-left: 10px; font-size: 13px; }
 .sheet.tnde-set .st-ver { margin-top: 14px; }
 .sheet.tnde-set .st-ver b { color: #f2ead8; }
+
+/* ---------- エディタ（TNDE）: 選んでいるときの下のメニュー。枠をなくして線で区切る ---------- */
+#app.tnde-ed .stage .sel-bar { background: #1f2433; border-top: 2px solid #4d9fbe; }
+#app.tnde-ed .stage .sel-bar button { background: transparent; border: 0; border-left: 1px solid #323a50; border-radius: 0; color: #f2ead8; font: 400 15px 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; }
+#app.tnde-ed .stage .sel-bar button.on { background: #4d9fbe; color: #fff; }
+#app.tnde-ed .stage .sel-bar .sel-info { color: #9aa6ba; font: 400 15px 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; }
+#app.tnde-ed .stage .sel-bar .sel-exit { background: transparent; border: 0; }
+#app.tnde-ed .stage .sel-bar .sel-exit svg { stroke: #4d9fbe; }
+
+/* ---------- オンラインの部屋の一覧（TNDE）: 設定画面と同じ紺と水色 ---------- */
+.ol.tnde:not(.in-room) { background: #161a24; font-family: 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; }
+.ol.tnde:not(.in-room) * { font-family: inherit; }
+.ol.tnde:not(.in-room) .ol-head { height: 58px; background: transparent; }
+.ol.tnde:not(.in-room) .ol-back { width: 46px; height: 46px; font-size: 0; border-radius: 9px; background: var(--tnde-back) 0 0 / 526px 141.5px; }
+.ol.tnde:not(.in-room) .ol-back svg { display: none; }
+.ol.tnde:not(.in-room) .ol-title { font-weight: 400; font-size: 26px; color: #f2ead8; }
+.ol.tnde:not(.in-room) .ol-lobby { gap: 10px; padding: 0 12px 12px; grid-template-columns: 230px 1fr; }
+.ol.tnde:not(.in-room) .ol-side { background: #1f2433; border: 2px solid #323a50; border-radius: 12px; }
+.ol.tnde:not(.in-room) .ol-rooms { background: #1f2433; border: 2px solid #323a50; border-radius: 12px; padding: 10px; }
+.ol.tnde:not(.in-room) .ol-field span { color: #9aa6ba; font-size: 13px; }
+.ol.tnde:not(.in-room) .ol-field input { background: #11141c; border: 2px solid #323a50; border-radius: 8px; }
+.ol.tnde:not(.in-room) .ol-btn { clip-path: none; transform: none; border-radius: 10px; background: #262c3d; border: 2px solid #323a50; font-weight: 400; color: #f2ead8; }
+.ol.tnde:not(.in-room) .ol-btn.primary { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+.ol.tnde:not(.in-room) .ol-roomcard { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; clip-path: none; }
+.ol.tnde:not(.in-room) .ol-rt { color: #f2ead8; }
+.ol.tnde:not(.in-room) .ol-rs, .ol.tnde:not(.in-room) .ol-rm { color: #9aa6ba; }
+.ol.tnde:not(.in-room) .ol-rm b { color: #4d9fbe; }
+.ol.tnde:not(.in-room) .ol-empty { color: #9aa6ba; }
