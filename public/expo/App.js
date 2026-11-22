@@ -76,6 +76,25 @@ const Manual = HAS_V2 ? ManualV2 : HAS_V3 ? ManualV3 : ManualRN;
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const B64I = new Uint8Array(128);
 for (let i = 0; i < B64.length; i++) B64I[B64.charCodeAt(i)] = i;
+/**
+ * ほぼ無音の WAV（1 秒）。プレイ中はこれを繰り返し鳴らし続けて、音の出口を起こしたままにする。
+ * 音が途切れると iPhone は音の出口を休ませ、次の音を鳴らすときに起こし直す（その間の打音が遅れる・小さく始まる・鳴らない）
+ */
+function silentWav() {
+  const rate = 44100;
+  const n = rate;
+  const b = new Uint8Array(44 + n * 2);
+  const dv = new DataView(b.buffer);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+  str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  str(36, 'data'); dv.setUint32(40, n * 2, true);
+  // 完全な 0 だと省かれることがあるので、聞こえないほど小さい値を交互に入れる
+  for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
+  return b;
+}
+
 function fromBase64(s) {
   const len = s.length;
   const pad = s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0;
@@ -191,6 +210,31 @@ export default function App() {
   const hitPool = useRef({ don: [], ka: [] });
   const hitIdx = useRef({ don: 0, ka: 0 });
   const hitGen = useRef(0);
+
+  /** プレイ中だけ、ほぼ無音を鳴らし続ける（音の出口を起こしたままにして、打音が遅れたり小さく始まったり鳴らなかったりしないように） */
+  const keepAlive = useRef(null);
+  useEffect(() => {
+    if (!EA || typeof EA.createAudioPlayer !== 'function') return;
+    if (!playing) {
+      try { keepAlive.current?.pause(); } catch { /* 止められない */ }
+      return;
+    }
+    try {
+      try { EA.setIsAudioActiveAsync?.(true)?.catch?.(() => {}); } catch { /* 無い */ }
+      if (!keepAlive.current) {
+        const f = new File(Paths.cache, 'keepalive.wav');
+        try { if (f.exists) f.delete(); } catch { /* 上書き */ }
+        f.create();
+        f.write(silentWav());
+        const p = EA.createAudioPlayer({ uri: f.uri });
+        p.loop = true;
+        keepAlive.current = p;
+      }
+      keepAlive.current.play();
+    } catch {
+      // 鳴らせない（打音はふつうに鳴らす）
+    }
+  }, [playing]);
 
   /** Web 版から届いた打音（base64 の WAV）を、ファイルにして再生器を作り直す */
   const loadHits = useCallback((m) => {
