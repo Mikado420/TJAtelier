@@ -760,7 +760,7 @@ export class PlayMode {
     const ok = await Promise.race([sk.needScreen('load').then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 6000))]);
     if (!ok) return false;
     this.closeTnde();
-    this.audio.playUi('tnde:decide');
+    // （「さあ始まるドン！」の声は、曲えらびで決めたときに鳴らしている）
     let done!: (p: Promise<unknown>) => void;
     const ready = new Promise<unknown>((r) => { done = (p) => r(p); });
     this.early = { curtain: this.overlay.loading(sk, info.title, info.sub, ready, undefined, info.jacket), ready: done };
@@ -816,7 +816,8 @@ export class PlayMode {
         this.tnde = s;
         for (const [k, f] of [['clear', 'clear'], ['fc', 'fc'], ['allgood', 'dfc']]) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${f}.ogg`, true);
         // 読み込み画面・リザルト画面の音（声は曲と同じくらいの大きさに）
-        for (const k of ['decide', 'resGauge', 'resPom', 'rankIn', 'crownClear', 'crownFc', 'crownDfc', 'best', 'resIn', 'resBgm']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`);
+        for (const k of ['decide', 'resGauge', 'resPom', 'rankIn', 'crownClear', 'crownFc', 'crownDfc', 'best']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`, 'se');
+        for (const k of ['resIn', 'resBgm']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`);
         for (const k of ['resClear', 'resFailed']) void this.audio.loadUi(`tnde:${k}`, `skins/tnde/se/${k}.ogg`, true);
         if (this.settings.skin === 'tnde') {
           R.tnde = s;

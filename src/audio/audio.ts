@@ -50,19 +50,40 @@ export class AudioEngine {
   private uiBufs = new Map<string, AudioBuffer>();
   /** 大きさを揃えて鳴らす画面の音の倍率（演出の声: 曲と同じくらいの聞こえる大きさにする） */
   private uiNorm = new Map<string, number>();
-  /** 画面の音を読み込む（失敗しても何もしない）。voice = 曲と同じくらいの大きさに揃える */
-  async loadUi(name: string, url: string, voice = false) {
+  /**
+   * 画面の音を読み込む（失敗しても何もしない）。
+   * kind: voice = 演出の声（曲と同じくらいの大きさに揃える）、se = 効果音（曲に負けない大きさに揃える。割れない所まで）、
+   * plain = そのまま（画面の音の音量 0.6 倍）。true は voice（前からの書き方）
+   */
+  async loadUi(name: string, url: string, kind: 'voice' | 'se' | 'plain' | boolean = 'plain') {
+    const k = kind === true ? 'voice' : kind === false ? 'plain' : kind;
     try {
       const res = await fetch(url);
       if (!res.ok) return;
       const buf = await this.ctx.decodeAudioData(await res.arrayBuffer());
       this.uiBufs.set(name, buf);
-      if (voice) {
+      if (k === 'voice') {
         const lv = AudioEngine.level(buf, false);
         // 画面の音の音量（0.6 倍）のぶんも戻し、曲・打音と同じ大きさ（TARGET）に
         if (lv > 0) this.uiNorm.set(name, Math.min(12, AudioEngine.TARGET / lv / 0.6));
+      } else if (k === 'se') {
+        // いちばん大きい所（0.05 秒ごと）を SE_TARGET に。ただし波の山が 1 を越えない（割れない）まで
+        const lv = AudioEngine.level(buf, true);
+        const peak = AudioEngine.peak(buf);
+        if (lv > 0 && peak > 0) this.uiNorm.set(name, Math.min(AudioEngine.SE_TARGET / lv, 1 / peak) / 0.6);
       }
     } catch { /* 鳴らせない */ }
+  }
+  /** 効果音の大きさ（いちばん大きい 0.05 秒の大きさ。曲の大きい所と同じくらい） */
+  private static readonly SE_TARGET = 0.45;
+  /** 波のいちばん高い所 */
+  private static peak(buf: AudioBuffer) {
+    let m = 0;
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > m) m = v; }
+    }
+    return m;
   }
   /** 画面の音を ctx で鳴らす（大きさを揃える音は、間に音量を挟む） */
   private uiSource(ctx: BaseAudioContext, name: string, buf: AudioBuffer, out: AudioNode) {

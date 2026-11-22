@@ -369,7 +369,10 @@ export class TndeSelect {
     this.man = man;
     // 大きな絵（フォルダのキャラ・難易度えらびの背景・どんちゃんの跳ぶ動き・帯の色）は、使うときに読む
     await Promise.all([...Object.keys(man.img), ...Object.keys(man.anim)].filter((n) => !LAZY.test(n)).map((n) => this.fetchImg(n)));
-    for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura', 'BgmIn', 'Bgm']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
+    for (const k of ['Ka', 'Don', 'Diff', 'Cancel', 'Ura']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`, 'se');
+    for (const k of ['BgmIn', 'Bgm']) void this.host.audio.loadUi(`tsel:${k}`, `${BASE}se/sel${k}.ogg`);
+    // 曲を決めたときの「さあ始まるドン！」
+    void this.host.audio.loadUi('tsel:Decide', `${BASE}se/decide.ogg`, 'se');
     await Promise.all([document.fonts.load(`40px ${KANTEI}`, '選曲自己ベスト'), document.fonts.load(`36px ${SEURAT}`, '1曲目∞')]);
   }
 
@@ -710,6 +713,7 @@ export class TndeSelect {
       return;
     }
     this.se('Don');
+    this.se('Decide');
     this.startT = 0;
   }
 
