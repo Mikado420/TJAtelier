@@ -9,6 +9,11 @@
 declare const __BUILD_ID__: string;
 
 export const BUILD_ID: string = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
+declare const __BUILD_NUM__: string;
+declare const __BUILD_DATE__: string;
+/** 画面に出す版（公開の通し番号と日付） */
+export const BUILD_NUM: string = typeof __BUILD_NUM__ === 'string' ? __BUILD_NUM__ : 'dev';
+export const BUILD_DATE: string = typeof __BUILD_DATE__ === 'string' ? __BUILD_DATE__ : '';
 
 export interface UpdateHooks {
   /** 今すぐ読み直してよいか（テストプレイ中などは待つ） */

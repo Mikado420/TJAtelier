@@ -45,7 +45,7 @@ import { isZipBlob, readZip, readZipIndex, writeZip } from './io/zip';
 import { BACKUP_MANIFEST, exportBackup, importBackup } from './io/backup';
 import { isNativeHost, PlayMode } from './play/playmode';
 import { fitRoot, localPoint, pixelRatio, typing } from './orient';
-import { BUILD_ID, startAutoUpdate } from './update';
+import { BUILD_DATE, BUILD_NUM, startAutoUpdate } from './update';
 import { Collab, collabProjects, sharedMap } from './collab/controller';
 import { CollabLobby } from './collab/lobby';
 import { forgetJoined } from './collab/session';
@@ -1920,8 +1920,7 @@ function renderSheet() {
             <button data-act="backup">バックアップを書き出す</button>
             <button data-act="restore">バックアップから戻す</button>
           </div>
-          ${isNativeHost() ? `<p class="st-ver">アプリ v${nativeAppVersion() || '2 以前'}</p>` : ''}
-          <p class="st-ver">TJAtelier ${esc(BUILD_ID.slice(0, 7))}</p>`;
+          <p class="st-ver"><b>v${esc(BUILD_NUM)}</b>${BUILD_DATE ? `<span>${esc(BUILD_DATE)}</span>` : ''}${isNativeHost() ? `<span>アプリ v${nativeAppVersion() || '2 以前'}</span>` : ''}</p>`;
     // タブを替えたときだけ、選んだ印をすべらせて、中身を横から出す
     const idx = SETTINGS_TABS.findIndex(([k]) => k === t);
     const from = settingsShownTab === null ? idx : SETTINGS_TABS.findIndex(([k]) => k === settingsShownTab);

@@ -3,12 +3,17 @@ import { defineConfig } from 'vite';
 // ビルドごとの版（GitHub Actions ではコミットの SHA）。
 // version.json として一緒に公開し、アプリは起動時・復帰時にこれを見て新しい版があれば自動で読み直す。
 const buildId = process.env.GITHUB_SHA ?? `local-${Date.now()}`;
+// 画面に出す版: 公開の通し番号（公開のたびに 1 つ増える）と、公開した日（日本時間）
+const buildNum = process.env.GITHUB_RUN_NUMBER ?? '0';
+const buildDate = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '.');
 
 export default defineConfig(({ command }) => ({
   // base: './' にしておくと GitHub Pages のサブパス (/リポジトリ名/) でもそのまま動く
   base: './',
   define: {
     __BUILD_ID__: JSON.stringify(command === 'serve' ? 'dev' : buildId),
+    __BUILD_NUM__: JSON.stringify(command === 'serve' ? 'dev' : buildNum),
+    __BUILD_DATE__: JSON.stringify(buildDate),
   },
   // 別のスレッド（BPM の測定）は ES モジュールにする（拍の AI の実行環境をあとから import するため）
   worker: { format: 'es' },

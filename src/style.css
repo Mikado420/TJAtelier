@@ -3553,3 +3553,9 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .sheet.tnde-gr .sheet-head { padding-top: 6px; padding-bottom: 4px; }
 .sheet.tnde-gr .grad-form { gap: 5px; }
 .sheet.tnde-gr .field > span { font-size: 13px; }
+
+/* ---------- データの版（通し番号・日付・アプリの版） ---------- */
+.st-ver b { font-weight: 400; font-size: 17px; color: var(--text, #f2ead8); }
+.st-ver span { margin-left: 10px; font-size: 13px; }
+.sheet.tnde-set .st-ver { margin-top: 14px; }
+.sheet.tnde-set .st-ver b { color: #f2ead8; }
