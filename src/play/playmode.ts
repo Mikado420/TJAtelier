@@ -1608,7 +1608,8 @@ export class PlayMode {
       (n) => this.audio.playUi(`tnde:${n}`),
       [
         ['もう一度', () => { this.closeTnde(); document.getElementById('retry')?.click(); }],
-        [back?.textContent || 'エディタへ', () => { this.closeTnde(); back?.click(); }],
+        // （リザルトの絵は、戻る先の画面が出るまで残す。曲えらびへ戻るときに後ろのエディタが一瞬見えないように）
+        [back?.textContent || 'エディタへ', () => { back?.click(); }],
       ],
       {
         acc: this.auto ? undefined : `${acc.toFixed(2)}%`,
@@ -1795,14 +1796,15 @@ export class PlayMode {
     return this.calibrating;
   }
 
-  close() {
+  /** keepScreen: 読み込み・リザルトの画面は残す（次の画面が出てから closeTnde で消す） */
+  close(keepScreen = false) {
     // 途中でやめたときは結果も記録も出さずに止める（最後まで遊んだときは finish 済み）
     if (this.active && !this.online) this.stopQuietly();
     else this.finish();
     this.root.classList.add('hidden');
     document.body.classList.remove('playing');
     this.result.classList.add('hidden');
-    this.closeTnde();
+    if (!keepScreen) this.closeTnde();
     // プレイの絵（曲ごとの背景など）を手放す。選曲画面の絵と合わせてメモリが足りなくならないように
     this.tnde?.release();
     this.onExit();

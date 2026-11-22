@@ -3079,11 +3079,20 @@ $('applyCalib').addEventListener('click', () => {
   toast(`判定調整を ${settings.offset}ms にしました`);
 });
 $('back').addEventListener('click', () => {
-  play.close();
-  if (playFromHome) {
-    playFromHome = false;
-    void (async () => { await persist(); await home.show(currentSongId); })();
-  }
+  if (!playFromHome) { play.close(); return; }
+  // 曲えらびへ戻る: 曲えらびが出るまで、後ろのエディタを隠して、リザルトの画面を残しておく（エディタが一瞬見えないように）
+  playFromHome = false;
+  $('app').style.visibility = 'hidden';
+  play.close(true);
+  void (async () => {
+    try {
+      await persist();
+      await home.show(currentSongId);
+    } finally {
+      play.closeTnde();
+      $('app').style.visibility = '';
+    }
+  })();
 });
 // ポーズ: 左上のボタン。つづける／はじめから（曲の最初から）／エディタへ
 $('playPause').addEventListener('click', () => play.pause());
