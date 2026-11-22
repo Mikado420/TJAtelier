@@ -218,6 +218,8 @@ export class TndeSelect {
   private dsel = 5;
   private ura = false;
   private cursorT = 1e9;
+  /** 裏おにに入れ替えてからの時間（カードがくるっと回る） */
+  private uraT = 1e9;
   private startT = -1;
   /** ほかの画面が上に重なっているか（見るのは 200ms ごと） */
   private covered = false;
@@ -671,7 +673,7 @@ export class TndeSelect {
     // おにで右: 裏おにがあれば入れ替える
     if (d > 0 && this.dsel === 5) {
       const other = this.ura ? 'Oni' : 'Edit';
-      if (it.s.courses.some((x) => x.name === other)) { this.ura = !this.ura; this.se('Ura'); this.cursorT = 0; this.onlineCursor(); }
+      if (it.s.courses.some((x) => x.name === other)) { this.ura = !this.ura; this.se('Ura'); this.cursorT = 0; this.uraT = 0; this.onlineCursor(); }
       return;
     }
     // 並び: もどる・設定・エディタ・譜面情報・かんたん〜おに
@@ -864,6 +866,7 @@ export class TndeSelect {
     } else this.still += dt;
     this.fadeIn += dt;
     this.cursorT += dt;
+    this.uraT += dt;
     this.opt.t += dt;
     if (this.boxT >= 0) {
       this.boxT += dt;
@@ -1326,16 +1329,24 @@ export class TndeSelect {
     }
     const cx = [647, 861, 1077, 1292];
     const src = [176, 319, 463, this.ura ? 749 : 606];
+    // 裏おにに入れ替えたとき（だけ）: おにのカードがくるっと回る（前半は前の面、後半で新しい面）
+    const FLIP = 320;
+    const flipP = this.uraT < FLIP ? this.uraT / FLIP : 1;
+    if (flipP < 0.5) src[3] = this.ura ? 606 : 749;
     // 選んでいる所の枠（カードの後ろ）
-    if (sel >= 2 && sel <= 5) this.blit('diffCursor', 56, 135, 147, 250, cx[sel - 2] + 98.25 - 110.25, 405 + 177.75 - 187.5, 147 * 1.5, 250 * 1.5);
+    const flipK = flipP < 1 ? Math.abs(Math.cos(flipP * Math.PI)) : 1;
+    if (sel >= 2 && sel <= 5) {
+      // （おにのカードが回っている間は、枠もいっしょに細くする）
+      const cw = 147 * 1.5 * (sel === 5 ? flipK : 1);
+      this.blit('diffCursor', 56, 135, 147, 250, cx[sel - 2] + 98.25 - (cw / 2), 405 + 177.75 - 187.5, cw, 250 * 1.5);
+    }
     cx.forEach((x, i) => {
       const c = this.courseAt(i + 2)!;
       const cs = s.courses.find((q) => q.name === c);
       const ga = g.globalAlpha;
       if (!cs) g.globalAlpha = ga * 0.35;
-      // 裏に入れ替えたとき: カードがくるっと回る
       let kx = 1;
-      if (i === 3 && this.cursorT < 200 && sel === 5) kx = Math.abs(Math.cos(rad(this.cursorT * 0.9)));
+      if (i === 3) kx = flipK;
       const w = 131 * 1.5 * kx;
       this.blit('diffBar', src[i], 0, 131, 237, x + (131 * 1.5 - w) / 2, 405, w, 237 * 1.5);
       g.globalAlpha = ga;
