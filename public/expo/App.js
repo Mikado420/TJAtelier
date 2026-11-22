@@ -35,7 +35,7 @@ try {
   EA = null;
 }
 /** 同じ音を重ねて鳴らせるように、1 つの音につき何個の再生器を順に使うか */
-const HIT_VOICES = 6;
+const HIT_VOICES = 8;
 /** gesture-handler 3 系の書き方（useManualGesture）が使えるか。なければ 2 系の Gesture.Manual() */
 const HAS_V3 = typeof GH.useManualGesture === 'function';
 const HAS_V2 = !!(GH.Gesture && typeof GH.Gesture.Manual === 'function');
@@ -205,13 +205,24 @@ export default function App() {
         const pool = [];
         for (let i = 0; i < HIT_VOICES; i++) {
           const p = EA.createAudioPlayer({ uri: f.uri });
-          // 鳴り終わったら頭に戻しておく（次に使うとき、すぐ鳴らせるように）
-          try { p.addListener?.('playbackStatusUpdate', (st) => { if (st && st.didJustFinish) p.seekTo(0).catch?.(() => {}); }); } catch { /* 知らせが無い */ }
-          pool.push(p);
+          // ready = 頭にいて、すぐ鳴らせる。at = 最後に鳴らし始めた時刻
+          const v = { p, ready: true, at: 0 };
+          // 鳴り終わったら頭に戻し、戻り終わってから「すぐ鳴らせる」にする
+          // （戻る前に play すると、終わりの位置のまま鳴らずに終わる = 打音が鳴らない原因だった）
+          try {
+            p.addListener?.('playbackStatusUpdate', (st) => {
+              if (!st || !st.didJustFinish) return;
+              v.ready = false;
+              Promise.resolve()
+                .then(() => p.seekTo(0))
+                .then(() => { if (!p.playing) v.ready = true; }, () => { v.ready = true; });
+            });
+          } catch { /* 知らせが無い */ }
+          pool.push(v);
         }
         hitPool.current[kind] = pool;
         hitIdx.current[kind] = 0;
-        for (const p of old) { try { p.remove(); } catch { /* 外せない */ } }
+        for (const v of old) { try { v.p.remove(); } catch { /* 外せない */ } }
       } catch {
         hitPool.current[kind] = [];
       }
@@ -229,16 +240,39 @@ export default function App() {
     return ring <= 1 ? 'don' : 'ka';
   }, []);
 
-  /** 打音を鳴らす（鳴らせたら true） */
+  /** 打音を鳴らす（鳴らせたら true。false なら Web 版が鳴らす） */
   const playHit = useCallback((kind) => {
     const pool = hitPool.current[kind];
     if (!pool || !pool.length) return false;
-    const i = hitIdx.current[kind];
-    hitIdx.current[kind] = (i + 1) % pool.length;
-    const p = pool[i];
+    const n = pool.length;
+    const start = hitIdx.current[kind];
+    const now = Date.now();
     try {
-      if (p.playing || p.currentTime > 0.001) p.seekTo(0);
-      p.play();
+      // 頭にいて、すぐ鳴らせる再生器を順に探す
+      for (let k = 0; k < n; k++) {
+        const v = pool[(start + k) % n];
+        if (!v.ready || v.p.isLoaded === false) continue;
+        hitIdx.current[kind] = (start + k + 1) % n;
+        v.ready = false;
+        v.at = now;
+        v.p.play();
+        return true;
+      }
+      // どれも鳴っている・戻っている途中（とても速い連打）: いちばん前に鳴らし始めたものを頭から鳴らし直す
+      let o = null;
+      for (const v of pool) if (v.p.isLoaded !== false && (!o || v.at < o.at)) o = v;
+      if (!o) return false;
+      o.at = now;
+      o.ready = false;
+      if (o.p.playing) {
+        // 鳴っている途中なら、頭に戻すだけで鳴り続ける
+        o.p.seekTo(0);
+      } else {
+        // 止まっている（終わりの位置かもしれない）なら、頭に戻り終わってから鳴らす
+        Promise.resolve()
+          .then(() => o.p.seekTo(0))
+          .then(() => o.p.play(), () => o.p.play());
+      }
       return true;
     } catch {
       return false;
