@@ -13,7 +13,7 @@ describe('分岐（始まりの位置だけで置く）', () => {
     const ed = new Editor(parseTJA(TJA));
     const b = ed.placeBranch(M * 2, { type: 'p', x: -1, y: -2, pre: true })!;
     expect(forcedOf(b)).toBe(2);
-    expect(body(ed)).toBe('1111,\n2222,\n#MEASURE 1/9999\n0,\n#BRANCHSTART p,-1,-2\n#BRANCHEND\n#MEASURE 4/4\n1212,\n2121,');
+    expect(body(ed)).toBe('1111,\n2222,\n#MEASURE 1/9999\n#BARLINEOFF\n0,\n#BRANCHSTART p,-1,-2\n#BRANCHEND\n#MEASURE 4/4\n#BARLINEON\n1212,\n2121,');
     // 読み直しても同じ。直前で決める分岐として見つかる
     const back = new Editor(parseTJA(writeTJA(ed.chart)));
     const bb = back.branchAt(M * 2)!;
@@ -44,5 +44,22 @@ describe('分岐（始まりの位置だけで置く）', () => {
     const b2 = ed.placeBranch(M * 2, { type: 'p', x: -1, y: -2, pre: true })!;
     ed.removeBranch(b2);
     expect(body(ed)).toBe('1111,\n2222,\n1212,\n2121,');
+  });
+
+  it('黄色の小節線は分岐を決める小節（1 小節前・直前はとても短い小節）。強制分岐の直前は出さない', () => {
+    const yellow = (ed: Editor) => toPlayable(ed.chart, ed.mainCourse).bars.filter((b) => b.branch).map((b) => Math.round(b.time * 1000));
+    const a = new Editor(parseTJA(TJA));
+    a.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: false });
+    expect(yellow(a)).toEqual([2000]); // 2 小節目の頭（BPM 120 で 2 秒）
+    const b = new Editor(parseTJA(TJA));
+    b.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: true });
+    expect(yellow(b)).toEqual([4000, 4000]); // 短い小節とすぐ後の小節線（重なる）
+    const c = new Editor(parseTJA(TJA));
+    const f = c.placeBranch(M * 2, { type: 'p', x: -1, y: -2, pre: true })!;
+    expect(yellow(c)).toEqual([]);
+    // 条件の分岐に変えると #BARLINEOFF / ON を外して黄色が出る
+    c.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: true }, f);
+    expect(c.mainCourse.events.filter((e) => e.kind === 'barline')).toEqual([]);
+    expect(yellow(c)).toEqual([4000, 4000]);
   });
 });

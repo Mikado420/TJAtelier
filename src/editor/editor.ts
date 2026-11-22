@@ -198,6 +198,36 @@ export class Editor {
   }
 
   /**
+   * 強制分岐を直前で決めるときは、前のとても短い小節の線（黄色）を出さない:
+   * 短い小節に #BARLINEOFF、分岐の小節に #BARLINEON（もともと線を出していたときだけ）。それ以外ならその 2 つを外す
+   */
+  private syncPreBarline(c: ECourse, b: EBranch) {
+    const pre = preMeasureOf(c, b);
+    if (!pre) return;
+    const off = c.events.find((e) => e.kind === 'barline' && e.tick === pre.tick && !e.on);
+    const on = c.events.find((e) => e.kind === 'barline' && e.tick === b.start && e.on);
+    if (forcedOf(b) === null) {
+      if (off) c.events = c.events.filter((e) => e !== off && e !== on);
+      return;
+    }
+    if (off) return;
+    // 短い小節の前で線を出していたか
+    let shown = true;
+    let at = -1;
+    for (const e of c.events) if (e.kind === 'barline' && e.tick < pre.tick && e.tick >= at) { shown = e.on; at = e.tick; }
+    c.events.push({ tick: pre.tick, kind: 'barline', on: false });
+    if (shown && !c.events.some((e) => e.kind === 'barline' && e.tick === b.start)) c.events.push({ tick: b.start, kind: 'barline', on: true });
+  }
+
+  /** 直前で決めるための短い小節で入れた #BARLINEOFF / #BARLINEON を外す */
+  private dropPreBarline(c: ECourse, b: EBranch, pre: EEvent) {
+    const off = c.events.find((e) => e.kind === 'barline' && e.tick === pre.tick && !e.on);
+    if (!off) return;
+    const on = c.events.find((e) => e.kind === 'barline' && e.tick === b.start && e.on);
+    c.events = c.events.filter((e) => e !== off && e !== on);
+  }
+
+  /**
    * 分岐を置く・変える（単体の #SCROLL のように、始まりの位置だけで決める）。
    * - 強制分岐: 区間を持たない（#BRANCHSTART のすぐ後に #BRANCHEND）
    * - 条件の分岐: 次の分岐の始まり（無ければ譜面の終わり）までを区間にする。玄人・達人は普通譜面を写す
@@ -224,6 +254,7 @@ export class Editor {
         start += L;
       } else if (!cfg.pre && curPre) {
         const L = start - curPre.tick;
+        if (b) this.dropPreBarline(c, b, curPre);
         c.events = c.events.filter((e) => e !== curPre);
         shiftCourse(c, start, -L);
         start -= L;
@@ -282,6 +313,7 @@ export class Editor {
           b.close = true;
         }
       }
+      this.syncPreBarline(c, b);
       list.sort((p, q) => p.start - q.start || p.end - q.end);
       sortCourse(c);
       out = b;
@@ -312,6 +344,7 @@ export class Editor {
       const pre = preMeasureOf(c, b);
       if (pre) {
         const L = b.start - pre.tick;
+        this.dropPreBarline(c, b, pre);
         c.events = c.events.filter((e) => e !== pre);
         shiftCourse(c, b.start, -L);
         const back = c.events.find((e) => e.kind === 'measure' && e.tick === pre.tick);

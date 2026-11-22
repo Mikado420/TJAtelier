@@ -1071,6 +1071,13 @@ export class EditorView {
       }
     }
 
+    /** その小節の頭で小節線を出すか（#BARLINEOFF / #BARLINEON） */
+    const barShown = (tick: number) => {
+      let on = true;
+      let at = -1;
+      for (const e of course.events) if (e.kind === 'barline' && e.tick <= tick && e.tick >= at) { on = e.on; at = e.tick; }
+      return on;
+    };
     // グリッド（小節線＋分割の点）
     // 曲の頭より前には小節線・グリッドを出さない
     const ms = ed.measuresUntil(Math.max(0, rightTick));
@@ -1132,8 +1139,11 @@ export class EditorView {
           ctx.fillStyle = C.text;
           ctx.fillText(String(m.index + 1), x + 6 * s, L.waveY + 6 * s);
         }
-        // 譜面分岐の始まり（直前で決める分岐の前のとても短い小節も）は黄色
-        const brBar = this.branches.some((b) => b.a === m.start || (m.num / m.den <= 1 / 1000 && b.a === m.start + m.length));
+        // 譜面分岐を決める小節（分岐の 1 小節前。直前で決める分岐はその前のとても短い小節）の線は黄色（#BARLINEOFF の所は除く）
+        // （とても短い小節のすぐ後の線はほぼ同じ所に重なるので、短い小節の線が黄色ならそれも黄色）
+        const tinyBefore = course.events.find((e) => e.kind === 'measure' && e.num / e.den <= 1 / 1000 && e.tick < m.start && e.tick + Math.max(1, Math.round((TPB * 4 * e.num) / e.den)) === m.start);
+        const brBar = (this.branches.some((b) => b.a === m.start + m.length || (m.start === 0 && b.a === 0)) && barShown(m.start))
+          || (!!tinyBefore && this.branches.some((b) => b.a === m.start) && barShown(tinyBefore.tick));
         laneClip(() => {
           ctx.fillStyle = brBar ? '#ffd400' : C.measure;
           ctx.fillRect(x - lw / 2, g.y, lw, g.h);
@@ -1172,7 +1182,7 @@ export class EditorView {
     for (const e of course.events) {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
       if (e.kind === 'gogo' || TJA_ONLY.has(e.kind) || !this.evShow[e.kind]) continue;
-      if (e.kind === 'measure' && preTicks.has(e.tick)) continue;
+      if ((e.kind === 'measure' || e.kind === 'barline') && preTicks.has(e.tick)) continue;
       if (e.tick > rightTick) continue;
       const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {

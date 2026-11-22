@@ -514,8 +514,10 @@ function pvSync() {
   pvResized = true;
 }
 function pvBuild(now: number) {
-  const course = toPlayable(ed.chart, ed.course);
-  const game = new Game(course.notes, { ...course, fixed: ed.branch });
+  // 譜面分岐もテストプレイと同じに流す（分岐の設定が N・E・M ならその譜面。おまかせなら、玄人・達人を開いているときはその譜面、普通なら分岐の条件どおり）
+  const course = toPlayable(ed.chart, ed.mainCourse);
+  const set = ({ N: 0, E: 1, M: 2 } as Record<string, number | undefined>)[settings.branch ?? 'auto'];
+  const game = new Game(course.notes, { ...course, fixed: set ?? (ed.branch ? ed.branch : undefined) });
   const events = buildAutoEvents(course.notes);
   // 今の位置までは、オートで叩いた状態にしておく（演出は出さない）
   let idx = 0;
@@ -527,6 +529,7 @@ function pvBuild(now: number) {
   }
   game.update(now);
   game.onJudge = (e) => { pvRenderer.pushJudge(e); pvActiveUntil = performance.now() + 700; };
+  game.onBranch = (i, a, b) => { pvRenderer.pushBranch(a, b, course.branches?.[i]?.start ?? 0); pvActiveUntil = performance.now() + 1200; };
   pv = { course, game, events, idx, t: now };
   pvDirty = false;
 }

@@ -1755,7 +1755,7 @@ export class TndeSkin {
       if (x < LANE_X || x > TW) continue;
       if (b.branch) {
         c.fillStyle = BRANCH_BAR;
-        c.fillRect(x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 3, 130);
+        c.fillRect(x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 3 * S, 130 * S);
       } else this.put(c, 'bar', x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 0, 0, 3, 130);
     }
     const row = this.faceRow(game.stats.combo, beat, wall) * 130;

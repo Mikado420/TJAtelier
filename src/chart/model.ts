@@ -585,13 +585,19 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
     if (last.time === p.time) params[params.length - 1] = p;
     else params.push(p);
   }
-  // 譜面分岐の始まり（直前で決める分岐の前のとても短い小節も）の小節線は黄色
-  const brStarts = new Set((course.branches ?? []).map((b) => b.start));
-  for (const m of measures(course, cEnd)) {
+  // 譜面分岐を決める小節（分岐の 1 小節前。直前で決める分岐はその前のとても短い小節）の小節線は黄色
+  const msAll = measures(course, cEnd);
+  const brJudge = new Set<number>();
+  for (const b of course.branches ?? []) {
+    const i = msAll.findIndex((m) => m.start >= b.start);
+    brJudge.add(i > 0 ? msAll[i - 1].start : b.start);
+  }
+  for (const m of msAll) {
     if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
     const im = t.scrollImAt(m.start);
-    const br = brStarts.has(m.start) || (m.num / m.den <= 1 / 1000 && brStarts.has(m.start + m.length));
+    // （とても短い小節のすぐ後の小節線はほぼ同じ所に重なるので、それも黄色にする）
+    const br = brJudge.has(m.start) || (bars.length > 0 && !!bars[bars.length - 1].branch && msAll.some((p) => p.start + p.length === m.start && p.num / p.den <= 1 / 1000 && brJudge.has(p.start)));
     bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}), ...(br ? { branch: true as const } : {}) });
   }
   // ゴーゴー区間は「直前に通過したノーツ」ではなくイベントの時刻で決める
