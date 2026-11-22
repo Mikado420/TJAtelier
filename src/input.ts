@@ -69,7 +69,7 @@ export function bindInput(
   usePassive: () => boolean = () => false,
 ): { refresh: () => void; dispose: () => void } {
   const pos = (x: number, y: number) => {
-    const p = localPoint({ clientX: x, clientY: y }, canvas);
+    const p = localPoint({ clientX: x, clientY: y }, canvas, true);
     const r = canvas.getBoundingClientRect();
     const w = Math.max(r.width, r.height) || 1;
     return `${(p.x / w).toFixed(2)},${(p.y / w).toFixed(2)}`;
@@ -85,7 +85,7 @@ export function bindInput(
   };
 
   const hitAt = (clientX: number, clientY: number, at: number, silent = false) => {
-    const { x: px, y: py } = localPoint({ clientX, clientY }, canvas);
+    const { x: px, y: py } = localPoint({ clientX, clientY }, canvas, true);
     const d = getDrum();
     // ポーズボタンを出さないとき: 上の真ん中に触れたらポーズ
     if (d.pause && py < d.pause.bottom && Math.abs(px - d.x) < d.pause.half) {

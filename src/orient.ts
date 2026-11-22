@@ -30,8 +30,39 @@ export function onRotateChange(fn: () => void) {
 }
 
 /** clientX / clientY を、要素の（回転前の）左上を原点とする座標に変換 */
-export function localPoint(e: { clientX: number; clientY: number }, el: Element) {
-  const r = el.getBoundingClientRect();
+/**
+ * 要素の位置（叩くたびに測ると、画面の配置の計算を待って打音が遅れることがあるので、覚えておく）。
+ * 画面の大きさ・向きが変わったとき、要素の大きさが変わったときに測り直す
+ */
+const rects = new WeakMap<Element, DOMRect>();
+let rectGen = 0;
+const rectGens = new WeakMap<Element, number>();
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', () => { rectGen++; });
+  window.addEventListener('orientationchange', () => { rectGen++; });
+}
+/** 覚えておいた位置を捨てる（画面を出し直したときなど） */
+export function forgetRects() {
+  rectGen++;
+}
+const watched = new WeakSet<Element>();
+function rectOf(el: Element) {
+  if (!watched.has(el) && typeof ResizeObserver !== 'undefined') {
+    watched.add(el);
+    new ResizeObserver(() => { rectGens.delete(el); }).observe(el);
+  }
+  let r = rects.get(el);
+  if (!r || rectGens.get(el) !== rectGen) {
+    r = el.getBoundingClientRect();
+    rects.set(el, r);
+    rectGens.set(el, rectGen);
+  }
+  return r;
+}
+
+export function localPoint(e: { clientX: number; clientY: number }, el: Element, cache = false) {
+  // （位置を覚えておくのは、プレイ画面のように動かない要素だけ。エディタなどはスクロールで動くので毎回測る）
+  const r = cache ? rectOf(el) : el.getBoundingClientRect();
   if (isRotated()) {
     // #root は時計回りに 90° 回っている: 要素の x 軸は画面の下向き、y 軸は画面の左向き
     return { x: (e.clientY - r.top) / K, y: (r.right - e.clientX) / K };

@@ -7,13 +7,19 @@ import { GlBlur } from './glblur';
 import { TndeSkin, type PlateStyle } from '../render/tnde';
 import { applyMods } from '../chart/mods';
 import { BUILD_ID } from '../update';
-import { isRotated } from '../orient';
+import { forgetRects, isRotated } from '../orient';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
 import { Broadcast, type PlayInfo } from './broadcast';
 import { TndeOverlay } from './tndeflow';
 
 /** Expo Go のアプリ（expo/App.js）の中で動いているか */
+/**
+ * Expo Go のアプリで打音を鳴らすか（アプリ v14 から）。true: 指に触れた瞬間にアプリが鳴らす（遅れが少ない）。
+ * false: Web 版が鳴らす（アプリで鳴らすと調子が悪いとき、こちらを公開し直すだけで戻せる）
+ */
+const NATIVE_HIT = true;
+
 export function isNativeHost() {
   return !!(window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView;
 }
@@ -160,7 +166,7 @@ export class PlayMode {
     this.canvasEl = canvas;
     this.bc = new Broadcast(root);
     // 画面の大きさ・向きが変わったら動画を置き直す（レーンの位置が決まってから）
-    new ResizeObserver(() => requestAnimationFrame(() => { this.placeVideo(); this.bc.place(this.renderer.frame); })).observe(root);
+    new ResizeObserver(() => requestAnimationFrame(() => { forgetRects(); this.placeVideo(); this.bc.place(this.renderer.frame); })).observe(root);
     this.input = bindInput(
       root,
       canvas,
@@ -391,6 +397,8 @@ export class PlayMode {
     const geo = on
       ? {
           on: true,
+          // アプリで打音を鳴らすか（false ならアプリは鳴らさず、こちらで鳴らす。アプリを更新しなくても切り替えられる）
+          native: NATIVE_HIT,
           x: q((r.left + L.drumX) / W),
           half: q(L.drumHalf / W),
           y: q((r.top + L.drumY) / H),
@@ -514,6 +522,7 @@ export class PlayMode {
     }
     // スキンの用意ができて最初のコマを描くまでは、ゲーム画面を隠しておく（前のコマやいつもの見た目が一瞬見えないように）
     this.canvasEl.style.visibility = 'hidden';
+    forgetRects();
     this.firstFrame = true;
     this.root.classList.remove('hidden');
     // プレイ中は後ろのエディタを描かない・重ねて表示しない（プレイ画面に全部の力を使う）

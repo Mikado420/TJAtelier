@@ -36,10 +36,12 @@ try {
 }
 /** 同じ音を重ねて鳴らせるように、1 つの音につき何個の再生器を順に使うか */
 /**
- * 打音をアプリで鳴らすか。false: Web 版だけで鳴らす
- * （アプリで鳴らすと、たまに鳴らない・遅れる・フェードインすることがあったため、Web 版に任せる）
+ * 打音をアプリで鳴らすか。false: Web 版だけで鳴らす。
+ * true でも、Web 版が native: false を送ってきたら鳴らさない（Web 版を公開し直すだけで切り替えられる）
  */
-const NATIVE_HIT = false;
+const NATIVE_HIT = true;
+/** プレイ中にほぼ無音を鳴らし続けるか（試したが効き目が確かめられていないので使わない） */
+const KEEP_ALIVE = false;
 const HIT_VOICES = 8;
 /** 鳴らした打音が鳴り始めたかを確かめるまでの時間（ms） */
 const HIT_CHECK_MS = 80;
@@ -182,7 +184,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
@@ -219,7 +221,7 @@ export default function App() {
   /** プレイ中だけ、ほぼ無音を鳴らし続ける（音の出口を起こしたままにして、打音が遅れたり小さく始まったり鳴らなかったりしないように） */
   const keepAlive = useRef(null);
   useEffect(() => {
-    if (!NATIVE_HIT || !EA || typeof EA.createAudioPlayer !== 'function') return;
+    if (!KEEP_ALIVE || !NATIVE_HIT || !EA || typeof EA.createAudioPlayer !== 'function') return;
     if (!playing) {
       try { keepAlive.current?.pause(); } catch { /* 止められない */ }
       return;
@@ -283,7 +285,7 @@ export default function App() {
   /** その位置（画面に対する割合）を叩いたときの音（ドン・カッ）。鳴らさない所なら null */
   const kindAt = useCallback((nx, ny) => {
     const g = hitGeo.current;
-    if (!g || !g.on) return null;
+    if (!g || !g.on || g.native === false) return null;
     for (const b of g.btn || []) if (nx >= b[0] && nx <= b[2] && ny >= b[1] && ny <= b[3]) return null;
     if (g.pause && ny < g.pause.bottom && Math.abs(nx - g.x) < g.pause.half) return null;
     if (g.rest && ny < g.rest) return null;
