@@ -1609,7 +1609,6 @@ export class PlayMode {
       [
         ['もう一度', () => { this.closeTnde(); document.getElementById('retry')?.click(); }],
         [back?.textContent || 'エディタへ', () => { this.closeTnde(); back?.click(); }],
-        ['くわしく', () => { this.closeTnde(); this.showResultCard(g, acc, rec); }],
       ],
       {
         acc: this.auto ? undefined : `${acc.toFixed(2)}%`,

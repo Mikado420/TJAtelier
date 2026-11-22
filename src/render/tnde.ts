@@ -250,6 +250,9 @@ export class TndeSkin {
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
   async prepare(title: string, need?: { balloon: boolean; gogo: boolean }) {
     this.dormant = false;
+    // エディタのプレビュー（レーンだけ）で決めた「背景は要らない」をプレイ用に戻す（読み込み画面の間に背景・踊り子も読む）
+    this.played = true;
+    if (this.view === 'lane') this.view = '';
     this.clearWant = false;
     this.maxWant = false;
     if (need) this.need = need;
