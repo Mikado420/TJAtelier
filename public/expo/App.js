@@ -35,6 +35,11 @@ try {
   EA = null;
 }
 /** 同じ音を重ねて鳴らせるように、1 つの音につき何個の再生器を順に使うか */
+/**
+ * 打音をアプリで鳴らすか。false: Web 版だけで鳴らす
+ * （アプリで鳴らすと、たまに鳴らない・遅れる・フェードインすることがあったため、Web 版に任せる）
+ */
+const NATIVE_HIT = false;
 const HIT_VOICES = 8;
 /** 鳴らした打音が鳴り始めたかを確かめるまでの時間（ms） */
 const HIT_CHECK_MS = 80;
@@ -214,7 +219,7 @@ export default function App() {
   /** プレイ中だけ、ほぼ無音を鳴らし続ける（音の出口を起こしたままにして、打音が遅れたり小さく始まったり鳴らなかったりしないように） */
   const keepAlive = useRef(null);
   useEffect(() => {
-    if (!EA || typeof EA.createAudioPlayer !== 'function') return;
+    if (!NATIVE_HIT || !EA || typeof EA.createAudioPlayer !== 'function') return;
     if (!playing) {
       try { keepAlive.current?.pause(); } catch { /* 止められない */ }
       return;
@@ -512,7 +517,7 @@ export default function App() {
         return;
       }
       if (m.type === 'hitsound') {
-        loadHits(m);
+        if (NATIVE_HIT) loadHits(m);
         return;
       }
       if (m.type === 'hitgeo') {
@@ -546,9 +551,9 @@ export default function App() {
   const onDown = useCallback(
     (touches) => {
       const now = Date.now();
-      // 先に打音を鳴らしてから、Web 版へ渡す
+      // （NATIVE_HIT のときは、先に打音を鳴らしてから Web 版へ渡す。そうでなければ Web 版が鳴らす）
       const pts = touches.map((t) => {
-        const k = kindAt(t.absoluteX / width, t.absoluteY / height);
+        const k = NATIVE_HIT ? kindAt(t.absoluteX / width, t.absoluteY / height) : null;
         return { x: t.absoluteX, y: t.absoluteY, ts: now, played: k ? playHit(k) : false };
       });
       send(pts, 'gh');
