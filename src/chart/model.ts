@@ -585,11 +585,14 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
     if (last.time === p.time) params[params.length - 1] = p;
     else params.push(p);
   }
+  // 譜面分岐の始まり（直前で決める分岐の前のとても短い小節も）の小節線は黄色
+  const brStarts = new Set((course.branches ?? []).map((b) => b.start));
   for (const m of measures(course, cEnd)) {
     if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
     const im = t.scrollImAt(m.start);
-    bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}) });
+    const br = brStarts.has(m.start) || (m.num / m.den <= 1 / 1000 && brStarts.has(m.start + m.length));
+    bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}), ...(br ? { branch: true as const } : {}) });
   }
   // ゴーゴー区間は「直前に通過したノーツ」ではなくイベントの時刻で決める
   // （#GOGOEND の後しばらくノーツがなくても、その時刻で解除されるように）

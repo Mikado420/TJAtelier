@@ -1132,8 +1132,10 @@ export class EditorView {
           ctx.fillStyle = C.text;
           ctx.fillText(String(m.index + 1), x + 6 * s, L.waveY + 6 * s);
         }
+        // 譜面分岐の始まり（直前で決める分岐の前のとても短い小節も）は黄色
+        const brBar = this.branches.some((b) => b.a === m.start || (m.num / m.den <= 1 / 1000 && b.a === m.start + m.length));
         laneClip(() => {
-          ctx.fillStyle = C.measure;
+          ctx.fillStyle = brBar ? '#ffd400' : C.measure;
           ctx.fillRect(x - lw / 2, g.y, lw, g.h);
           if (row !== 0) {
             ctx.fillStyle = C.text;

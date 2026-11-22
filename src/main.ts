@@ -487,6 +487,7 @@ function tickPlayback() {
 // ---------- プレビュー（エディタの上: プレイ画面のレーンの帯を、そのまま縮小して出す） ----------
 const pvBox = $('edPreview');
 const pvRenderer = new Renderer($<HTMLCanvasElement>('edPreviewCv'));
+let pvPlateKey = '';
 pvRenderer.preview = true;
 pvRenderer.touch = false;
 /** プレビューの譜面とオートの状態（譜面が変わったら・前へ戻ったら作り直す） */
@@ -549,6 +550,12 @@ function pvFrame(force: boolean) {
   if (pvResized) { force = true; pvResized = false; }
   if (!force && performance.now() > pvActiveUntil) return;
   pvRenderer.speed = settings.speed;
+  // ネームプレートはプロフィールのとおり（変わったときだけ入れ直す）
+  const pfKey = JSON.stringify(settings.profile);
+  if (pfKey !== pvPlateKey) {
+    pvPlateKey = pfKey;
+    pvRenderer.plate = { name: settings.profile.name || 'プレイヤー', title: settings.profile.title, profile: { ...settings.profile } };
+  }
   pvRenderer.draw(pv!.game, pv!.course, now, { title: ed.chart.title, course: ed.course.name, level: ed.course.level });
 }
 ed.onChange(() => { pvDirty = true; });

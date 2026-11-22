@@ -178,6 +178,9 @@ export interface PlayMods { speed: number; doron: boolean; mirror: boolean; rand
 /** はやさの印がある値（mode/speed の並び。1.0 は印なし） */
 const MOD_SPEEDS = [0.5, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4, 2.5, 3, 3.5, 4];
 
+/** 譜面分岐の始まりの小節線の色 */
+const BRANCH_BAR = '#ffd400';
+
 export class TndeSkin {
   /** 読み込んだ絵（ImageBitmap にして、描くたびに読み直されないようにする。作れなかったときだけ img） */
   private imgs = new Map<string, ImageBitmap | HTMLImageElement>();
@@ -1750,7 +1753,10 @@ export class TndeSkin {
     for (const b of F.course.bars) {
       const x = X(b.time, b.beat, b);
       if (x < LANE_X || x > TW) continue;
-      this.put(c, 'bar', x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 0, 0, 3, 130);
+      if (b.branch) {
+        c.fillStyle = BRANCH_BAR;
+        c.fillRect(x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 3, 130);
+      } else this.put(c, 'bar', x - 1.5, FIELD_Y + Y(b.time, b.beat, b), 0, 0, 3, 130);
     }
     const row = this.faceRow(game.stats.combo, beat, wall) * 130;
     const states = game.states;

@@ -52,6 +52,8 @@ export interface BarLine {
   scroll: number;
   scrollY?: number;
   beat?: number;
+  /** 譜面分岐の始まりの小節線（黄色で出す） */
+  branch?: true;
 }
 
 /** 時刻 → 拍の位置（#HBSCROLL / #BMSCROLL 用）。time 以降は 1 秒に rate 拍ずつ進む（#DELAY の間は 0） */

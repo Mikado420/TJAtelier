@@ -285,11 +285,7 @@ export class Renderer {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.dpr = Math.min(this.opponents.length ? 2 : 3, this.dprCap, pixelRatio());
-    // TNDE スキンの絵は 1920×1080 まで。画面の 16:9 の枠がそれより細かくなる分は、描いても見た目が変わらないので塗らない
-    if (this.tnde && !this.preview) {
-      const fh = Math.min(w / REF_W, h / REF_H) * REF_H;
-      if (fh > 0) this.dpr = Math.max(1, Math.min(this.dpr, 1080 / fh));
-    }
+    // （TNDE スキンでも、字（曲名・ジャンル・ネームプレート）がぼやけないように、端末の細かさのまま描く。重いときは自動調整で下げる）
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
 
@@ -1358,7 +1354,12 @@ export class Renderer {
         if (share) this.visBars.push(x);
         const dy = this.yOf(b.time, b.beat, b, now);
         const lt = this.laneTop;
-        if (x <= right && LANE_BOTTOM + dy > V.y0 && lt + dy < V.y1) ctx.fillRect(x - 1.5, lt + dy, 3, LANE_BOTTOM - lt);
+        if (x <= right && LANE_BOTTOM + dy > V.y0 && lt + dy < V.y1) {
+          // 譜面分岐の始まりの小節線は黄色
+          if (b.branch) ctx.fillStyle = '#ffd400';
+          ctx.fillRect(x - 1.5, lt + dy, 3, LANE_BOTTOM - lt);
+          if (b.branch) ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        }
       }
       if (this.hasY) ctx.restore();
     }
