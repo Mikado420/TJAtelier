@@ -36,6 +36,8 @@ try {
 }
 /** 同じ音を重ねて鳴らせるように、1 つの音につき何個の再生器を順に使うか */
 const HIT_VOICES = 8;
+/** 鳴らした打音が鳴り始めたかを確かめるまでの時間（ms） */
+const HIT_CHECK_MS = 80;
 /** gesture-handler 3 系の書き方（useManualGesture）が使えるか。なければ 2 系の Gesture.Manual() */
 const HAS_V3 = typeof GH.useManualGesture === 'function';
 const HAS_V2 = !!(GH.Gesture && typeof GH.Gesture.Manual === 'function');
@@ -240,13 +242,46 @@ export default function App() {
     return ring <= 1 ? 'don' : 'ka';
   }, []);
 
+  /**
+   * 鳴らした打音が本当に鳴り始めたかを少し後に確かめる。
+   * 端末が重いと（TNDE スキンなど）、再生器が鳴り始めないまま止まっていることがある。
+   * 鳴っていなければ Web 版に鳴らしてもらい（少し遅れても鳴らないよりよい）、その再生器は頭に戻して使い直す
+   */
+  const hitCheck = useRef({ n: 0, miss: 0, off: false });
+  const verifyHit = useCallback((v, kind, at) => {
+    if (hitCheck.current.off) return;
+    setTimeout(() => {
+      try {
+        if (v.at !== at) return; // もう次の打音に使われた
+        const t = v.p.currentTime;
+        const ok = v.p.isLoaded !== false && typeof t === 'number' && t > 0.001;
+        // 再生位置がいつも 0 のままに見える端末では確かめられないので、確かめるのをやめる（ほとんどが「鳴っていない」になったら）
+        const h = hitCheck.current;
+        h.n += 1;
+        if (!ok) h.miss += 1;
+        if (h.n >= 20) {
+          if (h.miss / h.n > 0.6) h.off = true;
+          h.n = 0;
+          h.miss = 0;
+        }
+        if (ok || h.off) return;
+        web.current?.injectJavaScript(`window.__nativeHitMiss&&window.__nativeHitMiss(${JSON.stringify(kind)});true;`);
+        v.ready = false;
+        try { v.p.pause(); } catch { /* 止められない */ }
+        Promise.resolve()
+          .then(() => v.p.seekTo(0))
+          .then(() => { if (v.at === at) v.ready = true; }, () => { if (v.at === at) v.ready = true; });
+      } catch { /* 確かめられない */ }
+    }, HIT_CHECK_MS);
+  }, []);
+
   /** 打音を鳴らす（鳴らせたら true。false なら Web 版が鳴らす） */
   const playHit = useCallback((kind) => {
     const pool = hitPool.current[kind];
     if (!pool || !pool.length) return false;
     const n = pool.length;
     const start = hitIdx.current[kind];
-    const now = Date.now();
+    const now = Date.now() + Math.random();
     try {
       // 頭にいて、すぐ鳴らせる再生器を順に探す
       for (let k = 0; k < n; k++) {
@@ -256,28 +291,24 @@ export default function App() {
         v.ready = false;
         v.at = now;
         v.p.play();
+        verifyHit(v, kind, now);
         return true;
       }
-      // どれも鳴っている・戻っている途中（とても速い連打）: いちばん前に鳴らし始めたものを頭から鳴らし直す
-      let o = null;
-      for (const v of pool) if (v.p.isLoaded !== false && (!o || v.at < o.at)) o = v;
-      if (!o) return false;
-      o.at = now;
-      o.ready = false;
-      if (o.p.playing) {
-        // 鳴っている途中なら、頭に戻すだけで鳴り続ける
-        o.p.seekTo(0);
-      } else {
-        // 止まっている（終わりの位置かもしれない）なら、頭に戻り終わってから鳴らす
+      // 鳴り終わった知らせが来ないまま止まっている再生器は、頭に戻して次から使えるようにする
+      for (const v of pool) {
+        if (v.ready || v.rewinding || now - v.at < 2000 || v.p.playing) continue;
+        v.rewinding = true;
+        const at = v.at;
         Promise.resolve()
-          .then(() => o.p.seekTo(0))
-          .then(() => o.p.play(), () => o.p.play());
+          .then(() => v.p.seekTo(0))
+          .then(() => { v.rewinding = false; if (v.at === at) v.ready = true; }, () => { v.rewinding = false; if (v.at === at) v.ready = true; });
       }
-      return true;
+      // すぐ鳴らせる再生器が無い（とても速い連打・端末が重い）: Web 版に鳴らしてもらう
+      return false;
     } catch {
       return false;
     }
-  }, []);
+  }, [verifyHit]);
 
   /** 分けて届くファイル（id ごと） */
   const files = useRef({});

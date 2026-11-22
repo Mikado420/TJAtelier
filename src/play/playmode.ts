@@ -197,6 +197,11 @@ export class PlayMode {
       () => {},
       () => !!this.settings.passiveTouch,
     );
+    // Expo Go のアプリ: アプリで鳴らした打音が鳴り始めなかったとき（端末が重いときなど）は、こちらで鳴らす
+    (window as unknown as { __nativeHitMiss?: (k: string) => void }).__nativeHitMiss = (k) => {
+      if (!this.active || this.paused || this.auto || this.spectating || !this.hitOn) return;
+      if (k === 'don' || k === 'ka') this.audio.playHit(k);
+    };
     window.addEventListener('keydown', (e) => {
       if (this.active && e.code === 'Escape' && !this.online) {
         if (this.paused) void this.resume();
