@@ -15,25 +15,44 @@ export class AudioEngine {
   private readonly metroGain = this.ctx.createGain();
   /** 画面の音（タップ・フォルダ・結果・曲名） */
   private readonly uiGain = this.ctx.createGain();
-  /** 音量を上げたときに音が割れないように、最後に通す（強い音だけ抑える） */
-  private readonly limiter: DynamicsCompressorNode | null =
-    typeof this.ctx.createDynamicsCompressor === 'function' ? this.ctx.createDynamicsCompressor() : null;
+  /**
+   * 音量を上げたときに音が割れないように、最後に通す（大きすぎる所だけ丸める）。
+   * ブラウザのコンプレッサー（DynamicsCompressor）は、音を約 6ms 遅らせ、音量を勝手に上げ下げする（打音の遅れ・フェードインのように聞こえる原因）ので使わない。
+   * 波の形を変えるだけの仕組み（WaveShaper）なので、遅れも上げ下げもない
+   */
+  private readonly limiter: AudioNode = this.ctx.createGain();
 
   constructor() {
-    const out: AudioNode = this.limiter ?? this.ctx.destination;
-    if (this.limiter) {
-      this.limiter.threshold.value = -3;
-      this.limiter.knee.value = 3;
-      this.limiter.ratio.value = 20;
-      this.limiter.attack.value = 0.002;
-      this.limiter.release.value = 0.1;
-      this.limiter.connect(this.ctx.destination);
-    }
+    const out: AudioNode = this.limiter;
+    // 前のコンプレッサーが足していた分（+1.2dB）を足して、曲・打音・画面の音の聞こえる大きさを前と同じにする
+    // 丸める仕組みは ±1 までしか受け取れないので、いったん 1/CLIP_RANGE にしてから通す
+    (this.limiter as GainNode).gain.value = AudioEngine.MAKEUP / AudioEngine.CLIP_RANGE;
+    const ws = this.ctx.createWaveShaper();
+    ws.curve = AudioEngine.clipCurve();
+    ws.oversample = 'none';
+    this.limiter.connect(ws).connect(this.ctx.destination);
     this.musicGain.connect(out);
     this.sfxGain.connect(out);
     this.metroGain.connect(out);
     this.uiGain.connect(out);
     this.applyMix();
+  }
+
+  /** 前のコンプレッサーが足していた音量（+1.2dB。同じ音で測った） */
+  private static readonly MAKEUP = 1.148;
+  /** 丸める仕組みが受け取る大きさの範囲（±4 まで。これより大きい所は ±1 に張り付く） */
+  private static readonly CLIP_RANGE = 4;
+  /** 0.85 まではそのまま、それより大きい所はなめらかに 1 へ近づける形（±CLIP_RANGE の範囲を ±1 に縮めて受け取る） */
+  private static clipCurve() {
+    const T = 0.85;
+    const n = 65537;
+    const c = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const u = ((i / (n - 1)) * 2 - 1) * AudioEngine.CLIP_RANGE;
+      const a = Math.abs(u);
+      c[i] = Math.sign(u) * (a <= T ? a : T + (1 - T) * Math.tanh((a - T) / (1 - T)));
+    }
+    return c;
   }
 
   // ---------- 音量（自動で揃える） ----------
@@ -519,7 +538,7 @@ export class AudioEngine {
     // 頭を少しずつ大きくする（いきなり大きな音にならないように）
     g.gain.setValueAtTime(0, at);
     g.gain.linearRampToValueAtTime(vol, at + 0.4);
-    src.connect(g).connect(this.limiter ?? this.ctx.destination);
+    src.connect(g).connect(this.limiter);
     const off = Math.min(Math.max(0, from), Math.max(0, c.buf.duration - 0.1));
     src.start(at, off);
     this.pv = { src, g, at, from: off, dur: c.buf.duration };

@@ -39,6 +39,7 @@ function install(c: Cond) {
       return { contextTime: ctxT + noise, performanceTime: (ctxT + L) * 1000 };
     }
     createGain() { return node(); }
+    createWaveShaper() { return { ...node(), curve: null, oversample: "none" }; }
     async resume() {}
   };
   return lat;
