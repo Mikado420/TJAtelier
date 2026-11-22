@@ -182,7 +182,7 @@ function openStream(name) {
 }
 
 /** アプリ本体の版（Web 版が「古いアプリか」を見分ける。変えたら 1 つ上げる） */
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 const INJECT_BEFORE = `window.__nativeApp=${APP_VERSION};true;`;
 
 const URL = 'https://mikado420.github.io/TJAtelier/';
