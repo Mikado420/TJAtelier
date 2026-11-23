@@ -687,6 +687,7 @@ const BASE_URL = new URL('./', document.baseURI).href;
 function applyEdSkin() {
   const on = settings.skin === 'tnde';
   $('app').classList.toggle('tnde-ed', on);
+  document.body.classList.toggle('tnde-ui', on);
   const swap = (el: Element | null, html: string) => {
     if (!el) return;
     if (!edOrig.has(el)) edOrig.set(el, el.innerHTML);
@@ -1855,6 +1856,7 @@ function renderSheet() {
   $('sheet').classList.toggle('tnde-set', sheet === 'settings' && settings.skin === 'tnde');
   $('sheet').classList.toggle('tnde-an', sheet === 'analysis' && settings.skin === 'tnde');
   $('sheet').classList.toggle('tnde-gr', (sheet === 'grad' || sheet === 'sim' || sheet === 'fill' || sheet === 'branch') && settings.skin === 'tnde');
+  $('sheet').classList.toggle('tnde-b', settings.skin === 'tnde' && !!sheet && !['settings', 'analysis', 'grad', 'sim', 'fill', 'branch'].includes(sheet));
   if (sheet === 'info') {
     $('sheetTitle').textContent = '曲・難易度の情報';
     const c = ed.chart;

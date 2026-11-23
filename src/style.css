@@ -3587,3 +3587,106 @@ body:has(#home:not(.hidden)):not(:has(#homeDiff.on)) .toast.show { transform: tr
 .ol.tnde:not(.in-room) .ol-rs, .ol.tnde:not(.in-room) .ol-rm { color: #9aa6ba; }
 .ol.tnde:not(.in-room) .ol-rm b { color: #4d9fbe; }
 .ol.tnde:not(.in-room) .ol-empty { color: #9aa6ba; }
+
+/* ===== TNDE: いつもの見た目のまま残っていた画面（浮かぶ紺の箱） ===== */
+.sheet.tnde-b, body.tnde-ui .pause-menu, body.tnde-ui .play .pause, body.tnde-ui .res.res-calib, body.tnde-ui .home-ask, .ol.tnde .ol-modal, #app.tnde-ed .div-menu, #app.tnde-ed .hits-pop, body.tnde-ui .toast, body.tnde-ui .busy {
+  --bg: #161a24; --bar: #161a24; --panel: #1f2433; --deep: #11141c; --inp: #11141c; --line: #323a50; --text: #f2ead8; --sub: #9aa6ba;
+  --accent: #4d9fbe; --accent-hi: #8fd0e8; --accent-tint: #2b4a5c; --btn: #262c3d; --btn-on: #2b7290;
+  --fd: 'TNDE Seurat', 'Makinas 4 Flat', sans-serif; --ff: 'TNDE Seurat', 'Makinas 4 Flat', sans-serif;
+  font-family: var(--ff); font-synthesis: none; color: #f2ead8;
+}
+.sheet.tnde-b *, body.tnde-ui .pause-menu *, body.tnde-ui .res.res-calib *, body.tnde-ui .home-ask *, .ol.tnde .ol-modal *, #app.tnde-ed .div-menu *, #app.tnde-ed .hits-pop *, body.tnde-ui .toast, body.tnde-ui .busy * { font-weight: 400; font-style: normal; }
+
+/* シート（曲の情報・TJA・命令・イベント一覧・グラデの選択・BPM 測定・切り貼り） */
+.sheet.tnde-b { background: rgba(6, 8, 14, 0.62); }
+.sheet.tnde-b .sheet-panel { background: #1f2433; border: 2px solid #323a50; border-radius: 16px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); }
+.sheet.tnde-b.tja .sheet-panel, .sheet.tnde-b.tempo .sheet-panel, .sheet.tnde-b.grad .sheet-panel { border-radius: 0; border: 0; background: #161a24; box-shadow: none; }
+.sheet.tnde-b .sheet-head { background: transparent; clip-path: none; justify-content: flex-start; gap: 12px; padding: 10px 14px 8px; align-items: center; border-bottom: 2px solid #323a50; }
+.sheet.tnde-b .sheet-head::after { display: none; }
+.sheet.tnde-b .sheet-title { order: 2; }
+.sheet.tnde-b #sheetTitle { font: 400 22px/1.1 var(--fd); color: #f2ead8; text-shadow: none; border-left: 6px solid #4d9fbe; padding-left: 10px; }
+.sheet.tnde-b #sheetClose { order: 1; flex: none; width: 40px; min-width: 40px; height: 40px; padding: 0; font-size: 0; color: transparent; border: 0; border-radius: 8px; background: var(--tnde-back) 0 0 / 457.6px 123.1px; box-shadow: none; clip-path: none; }
+.sheet.tnde-b #sheetClose svg { display: none; }
+.sheet.tnde-b .sheet-body { padding: 10px 14px 14px; }
+.sheet.tnde-b.tja .sheet-body, .sheet.tnde-b.tempo .sheet-body { padding: 0; }
+.sheet.tnde-b .sheet-body h3 { margin: 10px 0 0; padding-left: 10px; border-left: 5px solid #4d9fbe; color: #f2ead8; font-size: 15px; }
+.sheet.tnde-b .field > span { color: #9aa6ba; }
+.sheet.tnde-b .field input:not([type='range']):not([type='checkbox']), .sheet.tnde-b .field select { background: #11141c; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; -webkit-text-fill-color: #f2ead8; box-shadow: none; }
+.sheet.tnde-b .sheet-body button:not(.daw *) { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; color: #f2ead8; clip-path: none; box-shadow: none; transform: none; }
+.sheet.tnde-b .sheet-body button.primary:not(.daw *), .sheet.tnde-b .sheet-body button.on:not(.daw *) { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+.sheet.tnde-b .sheet-body button.danger:not(.daw *) { color: #ff8a7a; }
+.sheet.tnde-b .list .item, .sheet.tnde-b .ev-row { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; color: #f2ead8; clip-path: none; box-shadow: none; }
+.sheet.tnde-b .list .item.current { outline: 0; border-color: #4d9fbe; }
+.sheet.tnde-b .list .item .pos, .sheet.tnde-b .ev-row small { color: #9aa6ba; }
+.sheet.tnde-b .tja-wrap, .sheet.tnde-b .tja-hl, .sheet.tnde-b .tja-gutter { background: #11141c; border-color: #323a50; }
+.sheet.tnde-b .tja-status { color: #9aa6ba; }
+.sheet.tnde-b .bold-toggle { background: #262c3d; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; clip-path: none; box-shadow: none; }
+.sheet.tnde-b .bold-toggle.on, .sheet.tnde-b.tja-bold .bold-toggle { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+/* BPM 測定・切り貼り */
+.sheet.tnde-b .daw { background: #161a24; }
+.sheet.tnde-b .daw-top { background: #1f2433; border-bottom: 2px solid #323a50; }
+.sheet.tnde-b .daw-sep { background: #323a50; }
+.sheet.tnde-b .daw-lcd { background: #11141c; border: 2px solid #323a50; border-radius: 8px; }
+.sheet.tnde-b .daw-btn, .sheet.tnde-b .daw-tg { border: 2px solid #323a50; border-radius: 10px; background: #262c3d; }
+.sheet.tnde-b .daw-tg.on, .sheet.tnde-b .daw-ok { border: 2px solid #2b7290; border-radius: 10px; background: #4d9fbe; color: #fff; }
+.sheet.tnde-b .daw-tools { background: #1f2433; border-right: 2px solid #323a50; }
+.sheet.tnde-b .daw-tools button { border-radius: 8px; }
+.sheet.tnde-b .daw-stage { background: #11141c; }
+.sheet.tnde-b .daw-insp { background: #1f2433; border-top: 2px solid #323a50; }
+.sheet.tnde-b .dv { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; }
+.sheet.tnde-b .dv-v, .sheet.tnde-b .dv select { background: #11141c; border-radius: 6px; }
+.sheet.tnde-b .daw .dv-x button, .sheet.tnde-b .daw-acts button { border: 2px solid #323a50; border-radius: 8px; background: #262c3d; }
+.sheet.tnde-b .daw-acts button.on { background: #4d9fbe; border-color: #2b7290; }
+
+/* ポーズ */
+body.tnde-ui .pause-menu { background: rgba(6, 8, 14, 0.62); }
+body.tnde-ui .pause-menu .panel.pm { background: #161a24; border: 2px solid #323a50; border-radius: 16px; padding: calc(14px + var(--safe-t)) calc(14px + var(--safe-r)) calc(14px + var(--safe-b)) calc(14px + var(--safe-l)); box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); clip-path: none; }
+body.tnde-ui .pause-menu .pm-main { border-left: 0; gap: 8px; padding: 0; background: transparent; }
+body.tnde-ui #pauseMenu .pm-main > button, body.tnde-ui #pauseMenu .pm-main > button:hover { height: 50px; margin: 0; padding: 0 18px; text-align: left; font-size: 22px; background: #262c3d; border: 2px solid #323a50; border-radius: 12px; color: #f2ead8; clip-path: none; box-shadow: none; transform: none; }
+body.tnde-ui #pauseMenu .pm-main > button.primary { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+body.tnde-ui .pause-menu .pm-main > button::before, body.tnde-ui .pause-menu .pm-main > button::after { display: none; }
+body.tnde-ui .pause-menu .pm-side { background: #1f2433; border: 2px solid #323a50; border-radius: 14px; overflow: hidden; }
+body.tnde-ui .pause-menu .pm-tabs { background: #161a24; border-bottom: 2px solid #323a50; }
+body.tnde-ui .pause-menu .pm-tabs button { background: transparent; color: #9aa6ba; border: 0; border-radius: 0; clip-path: none; box-shadow: none; }
+body.tnde-ui .pause-menu .pm-tabs button.on { background: #4d9fbe; color: #fff; }
+body.tnde-ui .pause-menu .st-row { border-color: #2c3346; color: #f2ead8; }
+body.tnde-ui .pause-menu .st-seg { gap: 4px; background: transparent; }
+body.tnde-ui .pause-menu .st-seg button, body.tnde-ui .pause-menu .st-auto { background: #262c3d; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; clip-path: none; }
+body.tnde-ui .pause-menu .st-seg button.on { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+body.tnde-ui .pause-menu .st-num input { background: #11141c; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; }
+body.tnde-ui .play .pause { background: #1f2433; border: 2px solid #4d9fbe; border-radius: 10px; clip-path: none; box-shadow: none; }
+
+/* タイミング調整の結果 */
+body.tnde-ui .res.res-calib { background: #161a24; }
+body.tnde-ui .res.res-calib .res-bg, body.tnde-ui .res.res-calib canvas.grid-bg, body.tnde-ui .res.res-calib .grid-streaks { display: none; }
+body.tnde-ui .res.res-calib .res-top { background: #1f2433; box-shadow: 0 2px 0 #4d9fbe; color: #f2ead8; font-family: var(--fd); }
+body.tnde-ui .res.res-calib .res-top * { font-family: var(--fd); }
+body.tnde-ui .res.res-calib .res-side { background: #1f2433; border: 2px solid #323a50; border-radius: 16px; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); }
+body.tnde-ui .res.res-calib button { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; color: #f2ead8; clip-path: none; box-shadow: none; }
+body.tnde-ui .res.res-calib button.primary { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+
+/* 小さな箱（フォルダの名前・オンライン） */
+body.tnde-ui .home-ask, .ol.tnde .ol-modal { background: rgba(6, 8, 14, 0.62); align-items: center; }
+body.tnde-ui .ha-box, .ol.tnde .ol-mbox { background: #1f2433; border: 2px solid #323a50; border-radius: 16px; padding: 0 16px 16px; color: #f2ead8; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); clip-path: none; }
+body.tnde-ui .ha-box h3, .ol.tnde .ol-mbox h3 { position: relative; margin: 0 -16px 6px; padding: 12px 16px 10px 26px; border-bottom: 2px solid #323a50; color: #f2ead8; font-size: 20px; }
+body.tnde-ui .ha-box h3::before, .ol.tnde .ol-mbox h3::before { content: ''; position: absolute; left: 14px; top: 12px; bottom: 10px; width: 6px; background: #4d9fbe; }
+body.tnde-ui .ha-in, .ol.tnde .ol-mbox input:not([type='range']):not([type='checkbox']), .ol.tnde .ol-mbox select { background: #11141c; border: 2px solid #323a50; border-radius: 8px; color: #f2ead8; -webkit-text-fill-color: #f2ead8; box-shadow: none; }
+body.tnde-ui .ha-box button, .ol.tnde .ol-mbox button { background: #262c3d; border: 2px solid #323a50; border-radius: 10px; color: #f2ead8; clip-path: none; box-shadow: none; transform: none; }
+body.tnde-ui .ha-box .ha-ok, .ol.tnde .ol-mbox button.primary, .ol.tnde .ol-mbox button.on { background: #4d9fbe; border-color: #2b7290; color: #fff; }
+.ol.tnde .ol-mbox .ol-field span, .ol.tnde .ol-mbox small { color: #9aa6ba; }
+.ol.tnde .ol-modal .ol-mbox, .ol.tnde .ol-modal .ol-mbox * { font-family: var(--fd); -webkit-text-stroke: 0; text-shadow: none; }
+
+/* エディタのメニュー・風船の打数・お知らせ・処理中 */
+#app.tnde-ed .div-menu { background: #1f2433; border: 2px solid #4d9fbe; border-radius: 10px; padding: 5px; gap: 4px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6); }
+#app.tnde-ed .div-menu button { border-radius: 7px; font: 400 15px var(--fd); color: #f2ead8; }
+#app.tnde-ed .div-menu button.on { background: #4d9fbe; color: #fff; }
+#app.tnde-ed .div-menu h4 { color: #9aa6ba; font: 400 12px var(--fd); }
+#app.tnde-ed .hits-pop { background: #1f2433; border-radius: 12px; box-shadow: 0 0 0 2px #4d9fbe, 0 8px 24px rgba(0, 0, 0, 0.55); }
+#app.tnde-ed .hits-pop button { border: 2px solid #323a50; border-radius: 8px; background: #262c3d; font: 400 20px var(--fd); color: #f2ead8; }
+#app.tnde-ed .hits-pop .hp-v { border: 0; background: transparent; font-size: 26px; }
+#app.tnde-ed .hits-pop .hp-in { border-radius: 8px; background: #11141c; font: 400 24px var(--fd); }
+body.tnde-ui .toast { background: #1f2433; border: 2px solid #323a50; border-left: 6px solid #4d9fbe; border-radius: 10px; color: #f2ead8; }
+body.tnde-ui .busy { background: rgba(6, 8, 14, 0.72); }
+body.tnde-ui .busy-panel { background: #1f2433; border: 2px solid #323a50; border-radius: 16px; clip-path: none; }
+body.tnde-ui .busy-bar { background: #11141c; border-radius: 3px; }
+body.tnde-ui .busy-bar i { background: #4d9fbe; }
