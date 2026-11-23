@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTJA } from './tja';
 import { writeTJA } from './tjaWrite';
-import { measures, TICK_VER, TINY_TICKS, toPlayable, TPB, upgradeTicks, type EChart } from './model';
+import { measures, TICK_VER, TINY_TICKS, toPlayable, TPB, upgradeTicks, type EChart, type ENote } from './model';
 
 const tja = (body: string) => `TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n${body}\n#END\n`;
 const GIMMICK = '1111,\n#MEASURE 1/9999\n#SCROLL 2\n1\n#SCROLL 3\n2\n#SCROLL 4\n1\n#SCROLL 5\n2,\n1000200010002000,\n#SCROLL 1\n1,\n#MEASURE 4/4\n1111,';
@@ -46,9 +46,11 @@ describe('#MEASURE 1/9999 のとても短い小節', () => {
       ...now, tv: undefined,
       courses: [{
         ...now.courses[0],
-        notes: [0, 1, 2, 3].map((k) => ({ tick: (k * M) / 4, type: 'don' as const }))
-          .concat([{ tick: M, type: 'don' }, { tick: M + 3, type: 'ka' }])
-          .concat([0, 1, 2, 3].map((k) => ({ tick: M + 6 + (k * M) / 4, type: k % 2 ? 'ka' as const : 'don' as const }))),
+        notes: ([] as ENote[]).concat(
+          [0, 1, 2, 3].map((k) => ({ tick: (k * M) / 4, type: 'don' })),
+          [{ tick: M, type: 'don' }, { tick: M + 3, type: 'ka' }],
+          [0, 1, 2, 3].map((k) => ({ tick: M + 6 + (k * M) / 4, type: k % 2 ? 'ka' : 'don' })),
+        ),
         events: [{ tick: M, kind: 'measure', num: 1, den: 9999 }, { tick: M + 6, kind: 'measure', num: 4, den: 4 }],
       }],
     };
