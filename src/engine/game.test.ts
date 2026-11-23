@@ -58,3 +58,21 @@ describe('点数とゲージ', () => {
     expect(b.stats.gauge).toBe(a.stats.gauge);
   });
 });
+
+describe('オートで連打・風船のすぐ後のドン', () => {
+  for (const gap of [0, 0.02, 0.05, 0.08, 0.1]) {
+    it(`連打の終わりの ${gap * 1000}ms 後のドンも「良」`, () => {
+      const g = play([note('roll', 1, { endTime: 2 }), note('don', 2 + gap), note('bigRoll', 3, { endTime: 3.5 }), note('bigDon', 3.5 + gap)]);
+      expect(g.stats.good).toBe(2);
+      expect(g.stats.ok).toBe(0);
+      expect(g.stats.bad).toBe(0);
+    });
+    it(`風船の終わりの ${gap * 1000}ms 後のドンも「良」（風船は割れる）`, () => {
+      const g = play([note('balloon', 1, { endTime: 2, hits: 10 }), note('don', 2 + gap)]);
+      expect(g.stats.good).toBe(1);
+      expect(g.stats.ok).toBe(0);
+      expect(g.stats.score).toBe(g.base + 10 * 100);
+    });
+  }
+});
+
