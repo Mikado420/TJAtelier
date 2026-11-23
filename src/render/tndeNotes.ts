@@ -6,13 +6,15 @@ import type { NoteType } from '../chart/types';
  */
 let img: HTMLImageElement | null = null;
 let ready = false;
+/** 絵が元の大きさ（横 1690 px）の何倍の細かさで入っているか */
+let q = 1;
 
 /** 音符の絵を読み込む（一度だけ） */
 export function loadTndeNotes(base: string, done?: () => void) {
   if (img) return;
   img = new Image();
   img.decoding = 'async';
-  img.onload = () => { ready = true; done?.(); };
+  img.onload = () => { q = img!.naturalWidth / 1690 || 1; ready = true; done?.(); };
   img.src = `${base}skins/tnde/notes.webp`;
 }
 
@@ -41,7 +43,7 @@ export function drawTndeNote(
   const h = HEAD[type];
   if (h) {
     const k = r / h[2];
-    ctx.drawImage(img, h[0], h[1], 130, 130, x - 65 * k, y - 65 * k, 130 * k, 130 * k);
+    ctx.drawImage(img, h[0] * q, h[1] * q, 130 * q, 130 * q, x - 65 * k, y - 65 * k, 130 * k, 130 * k);
     return true;
   }
   if (type === 'roll' || type === 'bigRoll') {
@@ -54,15 +56,15 @@ export function drawTndeNote(
     // 体: まっすぐな所を伸ばして、先の丸みを終わりに付ける
     const capW = cap * k;
     const mid = Math.max(0, ex - x);
-    if (mid > 0) ctx.drawImage(img, bx0 + 4, by0, 8, by1 - by0, x, top, mid + 1, bh);
-    ctx.drawImage(img, bx1 - cap, by0, cap, by1 - by0, ex, top, capW, bh);
-    ctx.drawImage(img, hx, hy, 130, 130, x - 65 * k, y - 65 * k, 130 * k, 130 * k);
+    if (mid > 0) ctx.drawImage(img, (bx0 + 4) * q, by0 * q, 8 * q, (by1 - by0) * q, x, top, mid + 1, bh);
+    ctx.drawImage(img, (bx1 - cap) * q, by0 * q, cap * q, (by1 - by0) * q, ex, top, capW, bh);
+    ctx.drawImage(img, hx * q, hy * q, 130 * q, 130 * q, x - 65 * k, y - 65 * k, 130 * k, 130 * k);
     return true;
   }
   if (type === 'balloon') {
     const k = r / 36;
     // 顔の中心が 1493（左端 1430 から 63）
-    ctx.drawImage(img, 1430, 0, 260, 130, x - 63 * k, y - 65 * k, 260 * k, 130 * k);
+    ctx.drawImage(img, 1430 * q, 0, 260 * q, 130 * q, x - 63 * k, y - 65 * k, 260 * k, 130 * k);
     return true;
   }
   return false;

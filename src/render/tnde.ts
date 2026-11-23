@@ -1708,7 +1708,8 @@ export class TndeSkin {
   }
 
   private imgW(name: string) {
-    return this.img(name)?.width ?? 1;
+    const im = this.img(name);
+    return im ? this.lw(im) : 1;
   }
 
   // ---------- 判定枠・ゴーゴーの炎・判定の光 ----------
@@ -1837,22 +1838,24 @@ export class TndeSkin {
         old.width = old.height = 0;
         this.tinted.delete(k0);
       }
+      // 細かくしてある絵は、その細かさのまま色を変える
+      const q = this.qOf(im);
       cv = document.createElement('canvas');
-      cv.width = sw;
-      cv.height = sh;
+      cv.width = Math.round(sw * q);
+      cv.height = Math.round(sh * q);
       const t = cv.getContext('2d');
       if (!t) { this.di(c, im, sx, sy, sw, sh, x, y, dw, dh); return; }
       const gg = Math.round(255 * (1 - lv / 20));
-      this.di(t, im, sx, sy, sw, sh, 0, 0, sw, sh);
+      this.di(t, im, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
       t.globalCompositeOperation = 'multiply';
       t.fillStyle = `rgb(255,${gg},${gg})`;
-      t.fillRect(0, 0, sw, sh);
+      t.fillRect(0, 0, cv.width, cv.height);
       t.globalCompositeOperation = 'destination-in';
-      this.di(t, im, sx, sy, sw, sh, 0, 0, sw, sh);
+      this.di(t, im, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
       if (this.tinted.size > 200) { for (const o of this.tinted.values()) o.width = o.height = 0; this.tinted.clear(); }
       this.tinted.set(key, cv);
     }
-    c.drawImage(cv, 0, 0, sw, sh, x, y, dw, dh);
+    c.drawImage(cv, 0, 0, cv.width, cv.height, x, y, dw, dh);
   }
 
   /** TNDE の「コ」: ド・コ・ドン と続くときだけ（それ以外の 16 分の続きはみな「ド」） */
