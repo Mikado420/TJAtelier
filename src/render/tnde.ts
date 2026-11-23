@@ -173,6 +173,13 @@ function prio(n: string) {
   return 1;
 }
 
+/** 風船・ゴーゴーの動きの絵を、何秒前から持つか・何秒先まで無ければ手放すか */
+const EV_AHEAD = 12;
+const EV_KEEP = 20;
+
+/** 譜面に風船・ゴーゴーがあるか（balloonAt・gogoAt: 遊び始めてから最初の風船・ゴーゴーまでの秒数） */
+export interface SkinNeed { balloon: boolean; gogo: boolean; balloonAt?: number; gogoAt?: number }
+
 /** 演奏オプション */
 export interface PlayMods { speed: number; doron: boolean; mirror: boolean; random: 'off' | 'kimagure' | 'detarame'; auto: boolean }
 /** はやさの印がある値（mode/speed の並び。1.0 は印なし） */
@@ -234,6 +241,7 @@ export class TndeSkin {
     this.dormant = true;
     this.pick = { ...this.pick, key: '' };
     this.maxWant = false;
+    this.inWant = false;
     this.clearWant = false;
     this.endWant.clear();
     // （どの曲でも使う絵は持ったまま。次の曲がすぐ始まるように）
@@ -248,8 +256,12 @@ export class TndeSkin {
   private dormant = false;
 
   /** 曲を始める前に、その曲で使う絵を読み込んでおく */
-  async prepare(title: string, need?: { balloon: boolean; gogo: boolean }) {
+  async prepare(title: string, need?: SkinNeed) {
     this.dormant = false;
+    // 曲の始めから少しの間に風船・ゴーゴーが無ければ、その動きの絵はあとで読む
+    this.inWant = false;
+    this.evBalloon = (need?.balloonAt ?? 0) < EV_AHEAD;
+    this.evGogo = (need?.gogoAt ?? 0) < EV_AHEAD;
     // エディタのプレビュー（レーンだけ）で決めた「背景は要らない」をプレイ用に戻す（読み込み画面の間に背景・踊り子も読む）
     this.played = true;
     if (this.view === 'lane') this.view = '';
@@ -277,13 +289,14 @@ export class TndeSkin {
     if (/^gauge\/(base|fill|rainbow)\d$/.test(name)) return name.endsWith('3');
     if (/^footer\d$/.test(name)) return name === 'footer1';
     if (name === 'dancer/In1') return false;
+    if (name.startsWith('dancer/In')) return this.inWant;
     if (name === 'dancer/Normal1') return p.dancer === 1;
     if (name === 'mob') return p.down !== 5;
     if (name.startsWith('end/')) return this.endWant.has(endGroup(name));
     if (/^(load|res)\//.test(name)) return this.screenWant.has(name.slice(0, name.indexOf('/')));
     // 譜面に無い動き（風船・ゴーゴー）の絵は読まない。クリアの動きは魂ゲージが半分を超えてから
-    if (/^chara\/Balloon_/.test(name)) return this.need.balloon;
-    if (/^(chara\/GoGo|fx\/GoGoSplash$)/.test(name) && !this.need.gogo) return false;
+    if (/^chara\/Balloon_/.test(name)) return this.need.balloon && this.evBalloon;
+    if (/^(chara\/GoGo|fx\/GoGoSplash$)/.test(name) && !(this.need.gogo && this.evGogo)) return false;
     if (/^chara\/(Clear|Clearin|Soulin)$/.test(name)) return this.clearWant;
     if (name.startsWith('chara/') && name.endsWith('_Max')) return this.maxWant;
     return true;
@@ -291,7 +304,7 @@ export class TndeSkin {
 
   /** 読む絵の組の名前（変わったら読み直す） */
   private setKey() {
-    return `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}|${+this.need.balloon}${+this.need.gogo}${+this.clearWant}${+this.maxWant}|${this.view}`;
+    return `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}|${+(this.need.balloon && this.evBalloon)}${+(this.need.gogo && this.evGogo)}${+this.clearWant}${+this.maxWant}${+this.inWant}|${this.view}`;
   }
   /** 隠れていて描かない所（full: 上下の背景・踊り子、bottom: 下の背景・踊り子、lane: レーンと左のパネルだけ） */
   private view: '' | 'full' | 'bottom' | 'lane' = '';
@@ -299,7 +312,28 @@ export class TndeSkin {
   private played = false;
 
   /** 譜面に風船・ゴーゴーがあるか（無ければその動きの絵を読まない） */
-  private need = { balloon: true, gogo: true };
+  private need: SkinNeed = { balloon: true, gogo: true };
+  /**
+   * 風船・ゴーゴーの大きな動きの絵（どんちゃん・ゴーゴーの光）を持つか。
+   * その少し前（EV_AHEAD 秒）から持ち、しばらく（EV_KEEP 秒先まで）無ければ手放す（iPhone でメモリが足りずに落ちないように）
+   */
+  /** 踊り子の出てくる動き（魂ゲージが 3 割を超えてから読む。出てくるのは 4 割から） */
+  private inWant = false;
+  private evBalloon = true;
+  private evGogo = true;
+  private evTimes = new WeakMap<Course, { balloon: [number, number][]; gogo: [number, number][] }>();
+  private eventWants(course: Course, now: number, wall: number) {
+    let t = this.evTimes.get(course);
+    if (!t) {
+      t = { balloon: course.notes.filter((n) => n.type === 'balloon').map((n) => [n.time, n.endTime ?? n.time] as [number, number]), gogo: course.gogo };
+      this.evTimes.set(course, t);
+    }
+    const near = (list: [number, number][], ahead: number) => list.some(([a, b]) => a - ahead <= now && now <= b + 3);
+    // 風船のどんちゃんが動いている間は手放さない
+    const busy = this.charaOnce?.name.startsWith('chara/Balloon') || wall < this.balloonUntil;
+    this.evBalloon = busy || near(t.balloon, this.evBalloon ? EV_KEEP : EV_AHEAD);
+    this.evGogo = near(t.gogo, this.evGogo ? EV_KEEP : EV_AHEAD);
+  }
   /** クリアの動きの絵（魂ゲージが半分を超えてから読み込む） */
   private clearWant = false;
   private wantClear() {
@@ -951,6 +985,7 @@ export class TndeSkin {
     // 動画を全面・下に出すとき、動画用の画面のときは、隠れる背景・踊り子・どんちゃんの絵を読まない（手放す）
     const view = F.preview ? (this.played ? this.view : 'lane') : F.laneOnly ? 'lane' : F.bgMode === 'full' ? 'full' : F.bgMode ? 'bottom' : '';
     if (view !== this.view) this.view = view;
+    if (!F.preview) this.eventWants(course, now, wall);
     if (this.setKey() !== this.loadedSet) void this.sync();
     // 曲の半分を過ぎたら、終わりの演出の絵を読み込み始める（フルコンボの連番はフルコンボできそうなときだけ）
     if (!F.preview) {
@@ -1592,6 +1627,7 @@ export class TndeSkin {
     const { wall } = F;
     if (st.gauge >= 80) this.wantMax();
     if (st.gauge >= 50) this.wantClear();
+    if (st.gauge >= 30) this.inWant = true;
     const once = this.charaOnce;
     if (once?.name === 'chara/Balloon_Breaking' || wall < this.balloonUntil) return; // 風船のどんちゃんは手前に描く
     if (once && !once.name.startsWith('chara/Balloon')) {

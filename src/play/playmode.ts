@@ -4,7 +4,7 @@ import { CLEAR_LINE, Game } from '../engine/game';
 import { bindInput, resetTouchStats, touchStats } from '../input';
 import { Renderer, type Opponent } from '../render/renderer';
 import { GlBlur } from './glblur';
-import { TndeSkin, type PlateStyle } from '../render/tnde';
+import { TndeSkin, type PlateStyle, type SkinNeed } from '../render/tnde';
 import { applyMods } from '../chart/mods';
 import { BUILD_ID } from '../update';
 import { forgetRects, isRotated } from '../orient';
@@ -505,7 +505,13 @@ export class PlayMode {
     this.renderer.prevBest = this.auto || clicks || fromTime > 0 ? null : this.bestScore();
     // スキンの読み込みは 8 秒まで待つ（読み込めない絵があっても遊べるように）
     // 譜面に風船・ゴーゴーが無ければ、その動きの絵は読まない（メモリを抑える）
-    const need = { balloon: course.notes.some((n) => n.type === 'balloon'), gogo: course.notes.some((n) => n.gogo) };
+    // 風船・ゴーゴーの大きな動きの絵は、その少し前に読む（最初の風船・ゴーゴーがすぐなら読み込み画面の間に読む）
+    const firstBalloon = course.notes.find((n) => n.type === 'balloon' && (n.endTime ?? n.time) >= fromTime);
+    const firstGogo = course.gogo.find(([, b]) => b >= fromTime);
+    const need = {
+      balloon: course.notes.some((n) => n.type === 'balloon'), gogo: course.notes.some((n) => n.gogo),
+      balloonAt: (firstBalloon?.time ?? Infinity) - fromTime, gogoAt: (firstGogo?.[0] ?? Infinity) - fromTime,
+    };
     const prep = Promise.race([this.applySkin(info.title, need).catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
     // TNDE スキンで曲の最初から遊ぶとき: 本家と同じ読み込み画面（幕が閉じて曲名 → 用意ができたら幕が開く）
     let curtain: { open(): Promise<void> } | null = null;
@@ -812,7 +818,7 @@ export class PlayMode {
     if (this.settings.skin === 'tnde') void this.applySkin().catch(() => {});
   }
 
-  private applySkin(title?: string, need?: { balloon: boolean; gogo: boolean }) {
+  private applySkin(title?: string, need?: SkinNeed) {
     const R = this.renderer;
     const want = this.settings.skin === 'tnde';
     if (!want) {
