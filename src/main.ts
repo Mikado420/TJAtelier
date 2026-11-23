@@ -6,7 +6,7 @@ import { loadBest, saveBest } from './home/home';
 import { canNativeSave, nativeAppVersion, nativeSave, onNativeSaveError } from './io/nativeSave';
 import './style.css';
 import { AudioEngine, type HitSound } from './audio/audio';
-import { branchPath, COURSE_NAMES, contentEnd, FORCE_COND, forcedOf, preMeasureOf, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
+import { beatTicks, branchPath, COURSE_NAMES, contentEnd, FORCE_COND, forcedOf, preMeasureOf, newChart, parseScroll, type BranchNo, type EBranch, scrollText, sortCourse, toPlayable, TPB, type EChart, type ECourse, type EEvent, type ENote } from './chart/model';
 import { parseTJA } from './chart/tja';
 import { tjaText } from './chart/tjaPatch';
 import { tjaGutterHtml, tjaLinesHtml, tjaMarks } from './editor/tjaHighlight';
@@ -412,7 +412,7 @@ async function startPlayback() {
   for (const m of [...lead, ...ed.measuresUntil(endTick)]) {
     if (m.start + m.length <= fromTick - 1) continue;
     if (m.start > endTick) break;
-    const beat = (TPB * 4) / m.den;
+    const beat = beatTicks(m);
     for (let k = 0; k < m.num - 1e-9; k++) {
       const tick = m.start + Math.round(k * beat);
       if (tick < fromTick - 1) continue;
@@ -3721,7 +3721,7 @@ $('sheetBody').addEventListener('change', (e) => {
 /** 位置の表示（小節・拍） */
 function posText(tick: number) {
   const m = ed.measureOf(tick);
-  const beat = (tick - m.start) / ((TPB * 4) / m.den) + 1;
+  const beat = (tick - m.start) / beatTicks(m) + 1;
   return `小節 ${m.index + 1}・${Number(beat.toFixed(3))} 拍目`;
 }
 
@@ -4946,7 +4946,7 @@ function arrGrid(t0: number, t1: number, div: number): { t: number; bar: boolean
     const h0 = tm.tickToTime(0) + sh;
     const st = div > 0 ? step : m0.length;
     const dt = tm.tickToTime(st) - tm.tickToTime(0);
-    const beat0 = (TPB * 4) / m0.den;
+    const beat0 = beatTicks(m0);
     const pre: { t: number; bar: boolean; beat: boolean; n: number }[] = [];
     for (let k = 1; dt > 0 && h0 - k * dt >= t0 - 0.5 && k < 100000; k++) {
       const t = h0 - k * dt;
@@ -4961,7 +4961,7 @@ function arrGrid(t0: number, t1: number, div: number): { t: number; bar: boolean
     const head = tm.tickToTime(m.start) + sh;
     if (head > t1 + 0.5) break;
     if (tm.tickToTime(m.start + m.length) + sh < t0 - 0.5) continue;
-    const beat = (TPB * 4) / m.den;
+    const beat = beatTicks(m);
     for (let k = 0; k * step < m.length - 1e-6 || k === 0; k++) {
       const tick = k * (div > 0 ? step : 0);
       const t = tm.tickToTime(m.start + tick) + sh;

@@ -1,5 +1,5 @@
 import type { NoteType } from './types';
-import { measureTicks, newCourse, parseScroll, SHARED_KINDS, sortCourse, TPB, type BranchPart, type EBranch, type EChart, type ECourse, type EEvent } from './model';
+import { measureTicks, TICK_VER, newCourse, parseScroll, SHARED_KINDS, sortCourse, TPB, type BranchPart, type EBranch, type EChart, type ECourse, type EEvent } from './model';
 
 /**
  * TJA → 編集用モデル（tick ベース）
@@ -73,7 +73,7 @@ function takeBalloon(bl: Balloons, key: Key | null): number {
 
 export function parseTJA(text: string): EChart {
   const chart: EChart = {
-    title: '', subtitle: '', wave: '', bpm: 120, offset: 0, demoStart: 0, extra: [], courses: [],
+    title: '', subtitle: '', wave: '', bpm: 120, offset: 0, demoStart: 0, extra: [], courses: [], tv: TICK_VER,
   };
 
   let header = { name: 'Oni', level: 0, balloons: [] as number[], extra: [] as [string, string][], scrollMode: undefined as 'hb' | 'bm' | undefined };

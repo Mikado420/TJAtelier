@@ -6,7 +6,7 @@
  *   → 違う位置を触っている限り、変更がぶつからない。同じ所はサーバーに後から届いた方が残る
  * - 変更（Op）は「その値にする（null なら消す）」だけなので、何度当てても同じ結果になる（入り直しで送り直しても大丈夫）
  */
-import { TPB } from '../chart/model';
+import { measureTicks } from '../chart/model';
 
 /** レーンに置く音符（tick は鍵の方に持つ） */
 export interface NoteVal {
@@ -235,7 +235,7 @@ export function opTicks(op: Op): number[] | null {
 }
 
 /** 1 小節の tick（エディタの measureTicks と同じ） */
-const barTicks = (num: number, den: number) => Math.max(1, Math.round((TPB * 4 * num) / den));
+const barTicks = measureTicks;
 
 /** 小節の頭の tick の表（n 小節目の頭 = starts[n - 1]）。#MEASURE で長さが変わっても合う */
 export function barStarts(lane: Lane, upto: number): number[] {

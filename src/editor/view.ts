@@ -1,4 +1,4 @@
-import { measures, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type ENote, type Measure } from '../chart/model';
+import { measures, measureTicks, scrollText, Timing, TPB, type EChart, type EEvent, type ECourse, type ENote, type Measure } from '../chart/model';
 import { drawAny, drawRoll, hexPath, noteSkin } from '../render/notes';
 import { drawTndeNote } from '../render/tndeNotes';
 import { localPoint, pixelRatio } from '../orient';
@@ -1141,7 +1141,7 @@ export class EditorView {
         }
         // 譜面分岐を決める小節（分岐の 1 小節前。直前で決める分岐はその前のとても短い小節）の線は黄色（#BARLINEOFF の所は除く）
         // （とても短い小節のすぐ後の線はほぼ同じ所に重なるので、短い小節の線が黄色ならそれも黄色）
-        const tinyBefore = course.events.find((e) => e.kind === 'measure' && e.num / e.den <= 1 / 1000 && e.tick < m.start && e.tick + Math.max(1, Math.round((TPB * 4 * e.num) / e.den)) === m.start);
+        const tinyBefore = course.events.find((e) => e.kind === 'measure' && e.num / e.den <= 1 / 1000 && e.tick < m.start && e.tick + measureTicks(e.num, e.den) === m.start);
         const brBar = (this.branches.some((b) => b.a === m.start + m.length || (m.start === 0 && b.a === 0)) && barShown(m.start))
           || (!!tinyBefore && this.branches.some((b) => b.a === m.start) && barShown(tinyBefore.tick));
         laneClip(() => {
@@ -1174,7 +1174,7 @@ export class EditorView {
     const preTicks = new Set<number>();
     for (const e of course.events) {
       if (e.kind !== 'measure' || e.num / e.den > 1 / 1000) continue;
-      const after = e.tick + Math.max(1, Math.round((TPB * 4 * e.num) / e.den));
+      const after = e.tick + measureTicks(e.num, e.den);
       if (!this.branches.some((b) => b.a === after)) continue;
       preTicks.add(e.tick);
       preTicks.add(after);

@@ -1,4 +1,4 @@
-import type { EChart } from '../chart/model';
+import { TICK_VER, upgradeTicks, type EChart } from '../chart/model';
 import type { AudioFile } from './load';
 
 /**
@@ -86,9 +86,13 @@ export interface SavedChart {
   savedAt: number;
 }
 
-export const saveChart = (v: SavedChart) => dbPut('chart', v);
+export const saveChart = (v: SavedChart) => dbPut('chart', { ...v, chart: { ...v.chart, tv: TICK_VER } });
 export const saveAudio = (v: AudioFile | null) => dbPut('audio', v);
-export const loadChart = () => dbGet<SavedChart>('chart');
+export const loadChart = async () => {
+  const v = await dbGet<SavedChart>('chart');
+  if (v) upgradeTicks(v.chart);
+  return v;
+};
 export const loadAudio = () => dbGet<AudioFile>('audio');
 
 /** 自分で読み込んだ打音（ドン / カッ） */

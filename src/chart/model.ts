@@ -213,6 +213,8 @@ export interface EChart {
    * 書き出すときは、これに譜面の変更だけを書き込む（tjaPatch.ts の tjaText）
    */
   source?: string;
+  /** tick の決め方の版（TICK_VER。無ければ 1） */
+  tv?: number;
 }
 
 export const COURSE_NAMES = ['Easy', 'Normal', 'Hard', 'Oni', 'Edit'] as const;
@@ -231,6 +233,7 @@ export function newChart(title = '新しい譜面', bpm = 120): EChart {
     demoStart: 0,
     extra: [],
     courses: [newCourse('Oni', 1)],
+    tv: TICK_VER,
   };
 }
 
@@ -287,12 +290,85 @@ export interface Measure {
   den: number;
 }
 
-/** #MEASURE num/den の 1 小節の tick（整数。とても短い小節でも 1 tick） */
-export const measureTicks = (num: number, den: number) => Math.max(1, Math.round((TPB * 4 * num) / den));
+/**
+ * とても短い小節（1/192 拍子より短い。#MEASURE 1/9999 など）の tick。
+ * 本来の長さ（1/9999 なら 2.7 tick）では、小節の中の音符・命令が同じ tick に重なってしまうので、この長さで持つ
+ */
+export const TINY_TICKS = (TPB * 4) / 192;
+
+/** #MEASURE num/den の 1 小節の tick（整数。とても短い小節は TINY_TICKS） */
+export const measureTicks = (num: number, den: number) => {
+  const len = (TPB * 4 * num) / den;
+  return len < TINY_TICKS ? TINY_TICKS : Math.round(len);
+};
+
+/** 小節の中の 1 拍の tick（とても短い小節では、本来の長さではなく持っている tick で数える） */
+export const beatTicks = (m: Pick<Measure, 'length' | 'num'>) => m.length / m.num;
+
+/** tick の決め方の版（2 = とても短い小節を TINY_TICKS で持つ） */
+export const TICK_VER = 2;
 
 /**
- * #MEASURE num/den の小節の中で、1 tick が本当は何 tick ぶんの長さか（本来の長さ ÷ 整数にした長さ）。
- * tick は整数で持つので、#MEASURE 1/40000 のような短い小節（本来 0.672 tick）は 1 tick に丸められる。
+ * 前の版（とても短い小節を本来の長さの数 tick で持っていた）の譜面を、今の tick に直す。
+ * 保存してあった譜面を読み込むときに使う
+ */
+export function upgradeTicks<T extends EChart | null | undefined>(chart: T): T {
+  if (!chart || (chart.tv ?? 1) >= TICK_VER) return chart;
+  for (const c of chart.courses ?? []) upgradeCourse(c);
+  chart.tv = TICK_VER;
+  return chart;
+}
+
+function upgradeCourse(c: ECourse) {
+  const oldTicks = (num: number, den: number) => Math.max(1, Math.round((TPB * 4 * num) / den));
+  const ms = (c.events.filter((e) => e.kind === 'measure') as Extract<EEvent, { kind: 'measure' }>[]).sort((a, b) => a.tick - b.tick);
+  if (!ms.some((e) => oldTicks(e.num, e.den) !== measureTicks(e.num, e.den))) return;
+  let end = contentEnd(c);
+  for (const g of c.grads ?? []) end = Math.max(end, g.end);
+  if (c.endTick !== undefined) end = Math.max(end, c.endTick);
+  // 前の版の小節の並び（頭・長さ）と、今の版の頭・長さ
+  const os: number[] = [];
+  const ol: number[] = [];
+  const ns: number[] = [];
+  const nl: number[] = [];
+  let num = 4;
+  let den = 4;
+  let o = 0;
+  let n = 0;
+  let mi = 0;
+  for (let i = 0; i < 1000000; i++) {
+    while (mi < ms.length && ms[mi].tick <= o) { num = ms[mi].num; den = ms[mi].den; mi++; }
+    os.push(o); ol.push(oldTicks(num, den)); ns.push(n); nl.push(measureTicks(num, den));
+    o += ol[i];
+    n += nl[i];
+    if (o > end) break;
+  }
+  const mv = (t: number) => {
+    if (!(t > 0) || !Number.isFinite(t)) return t;
+    let lo = 0;
+    let hi = os.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (os[mid] <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    return ns[lo] + Math.round(((t - os[lo]) * nl[lo]) / ol[lo]);
+  };
+  const notes = (xs: ENote[]) => { for (const x of xs) { x.tick = mv(x.tick); if (x.endTick !== undefined) x.endTick = mv(x.endTick); } };
+  notes(c.notes);
+  for (const e of c.events) e.tick = mv(e.tick);
+  for (const b of c.branches ?? []) {
+    b.start = mv(b.start);
+    b.end = mv(b.end);
+    for (const part of [b.e, b.m]) { notes(part.notes); for (const e of part.events) e.tick = mv(e.tick); }
+  }
+  for (const g of c.grads ?? []) { g.start = mv(g.start); g.end = mv(g.end); }
+  if (c.endTick !== undefined) c.endTick = mv(c.endTick);
+}
+
+/**
+ * #MEASURE num/den の小節の中で、1 tick が本当は何 tick ぶんの長さか（本来の長さ ÷ 持っている長さ）。
+ * tick は整数で持ち、とても短い小節は TINY_TICKS で持つので、#MEASURE 1/9999（本来 2.7 tick）は 140 tick になる。
  * 秒に直すときにこれを掛けて、本来の長さで計算する（極端に遅い・速い BPM でもずれないように）
  */
 export const measureScale = (num: number, den: number) => (TPB * 4 * num) / den / measureTicks(num, den);

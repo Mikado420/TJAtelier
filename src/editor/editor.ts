@@ -1,5 +1,5 @@
 import {
-  alignMeasures, branchPath, forcedOf, measureAt, measureTicks, preMeasureOf, PRE_MEASURE, shiftCourse, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
+  alignMeasures, branchPath, forcedOf, measureAt, measureTicks, TINY_TICKS, preMeasureOf, PRE_MEASURE, shiftCourse, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
   type BranchNo, type BranchPart, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
@@ -908,7 +908,13 @@ export class Editor {
   addEvent(ev: EEvent) {
     // 小節の途中に置いた #MEASURE: そこから新しい小節が始まるように、前の小節の長さ（#MEASURE）をそこまでにする
     if (ev.kind === 'measure') {
-      const m = this.measureOf(ev.tick);
+      let m = this.measureOf(ev.tick);
+      // 小節の長さは TINY_TICKS より短くできないので、頭・終わりの近くなら頭・終わりに置く
+      const end = m.start + m.length;
+      if (ev.tick > m.start && (ev.tick - m.start < TINY_TICKS || end - ev.tick < TINY_TICKS)) {
+        ev = { ...ev, tick: ev.tick - m.start < end - ev.tick ? m.start : end };
+        m = this.measureOf(ev.tick);
+      }
       if (ev.tick > m.start) {
         const head = { tick: m.start, kind: 'measure' as const, ...measureFrac(ev.tick - m.start, m.den) };
         const ev2 = ev;

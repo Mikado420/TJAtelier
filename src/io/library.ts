@@ -1,4 +1,4 @@
-import type { EChart } from '../chart/model';
+import { TICK_VER, upgradeTicks, type EChart } from '../chart/model';
 import type { AudioFile } from './load';
 import { oggDuration } from '../audio/duration';
 import { dbDel, dbGet, dbKeys, dbPut } from './storage';
@@ -84,7 +84,13 @@ export function setFolderColors(colors: Record<string, string | null>, fonts: Re
     }
   });
 }
-export const loadSongData = (id: string) => dbGet<SongData>(kChart(id));
+export const loadSongData = async (id: string) => {
+  const d = await dbGet<SongData>(kChart(id));
+  if (d) upgradeTicks(d.chart);
+  return d;
+};
+/** 保存する譜面に、今の tick の決め方の版を付ける */
+const stamp = (data: SongData): SongData => (data.chart ? { ...data, chart: { ...data.chart, tv: TICK_VER } } : data);
 export const loadSongAudio = (id: string) => dbGet<AudioFile>(kAudio(id));
 export const getCurrentId = () => dbGet<string>('lib-current');
 export const setCurrentId = (id: string | null) => (id ? dbPut('lib-current', id) : dbDel('lib-current'));
@@ -171,7 +177,7 @@ export async function repairLibrary(): Promise<number> {
 
 /** 曲を保存する（audio は undefined なら音源はそのまま、null なら消す。folder は新しい曲を入れるフォルダ） */
 export async function saveSong(id: string, data: SongData, audio?: AudioFile | null, length?: number, folder?: string) {
-  await dbPut(kChart(id), data);
+  await dbPut(kChart(id), stamp(data));
   if (audio !== undefined) {
     if (audio) await dbPut(kAudio(id), audio);
     else await dbDel(kAudio(id));
@@ -292,7 +298,8 @@ export async function deleteFolder(name: string) {
 
 /** バックアップから戻す: 曲を、同じ id のまま入れる（同じ id の曲があれば置き換える） */
 export async function restoreSong(entry: SongEntry, data: SongData, audio: AudioFile | null) {
-  await dbPut(kChart(entry.id), data);
+  upgradeTicks(data.chart);
+  await dbPut(kChart(entry.id), stamp(data));
   if (audio) await dbPut(kAudio(entry.id), audio);
   else await dbDel(kAudio(entry.id));
   await writeIndex((list) => [...list.filter((x) => x.id !== entry.id), norm(entry)]);
