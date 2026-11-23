@@ -5,6 +5,7 @@ import {
 import type { NoteType } from '../chart/types';
 import type { AudioFile } from '../io/load';
 import { applyGrad, gradMatches, markPins, type Grad } from './grad';
+import { DelayLanes } from './delayLanes';
 import { applySim, flipNotes, tileClip } from './gimmick';
 
 /** scroll = #SCROLL（1 か所をタップ×2 でその位置だけ、2 か所でグラデ）、bpm = #BPMCHANGE、measure = #MEASURE */
@@ -373,8 +374,14 @@ export class Editor {
     for (const c of this.chart.courses) {
       if (!c.grads?.length) continue;
       sortCourse(c);
+      setGradHoles(this.chart, c);
       for (const g of c.grads) applyGrad(c, g, this.chart.bpm);
     }
+  }
+
+  /** 範囲 [start, end) のうち、#DELAY で重なって始点・終点とは別の段に出ている所 */
+  rowHoles(start: number, end: number): [number, number][] {
+    return new DelayLanes(this.course, this.timing).holes(start, end);
   }
 
   /**
@@ -389,7 +396,9 @@ export class Editor {
         const old = this.chart.courses.find((o) => o.name === c.name);
         if (!old?.grads?.length) continue;
         sortCourse(c);
-        const keep = old.grads.filter((g) => gradMatches(c, g, chart.bpm, !old.grads!.some((o) => o !== g && o.start === g.end)));
+        const lanes = new DelayLanes(c, new Timing(chart, c));
+        const holed = old.grads.map((g) => withHoles(g, lanes));
+        const keep = holed.filter((g) => gradMatches(c, g, chart.bpm, !holed.some((o) => o !== g && o.start === g.end)));
         if (keep.length) c.grads = keep.map((g) => ({ ...g }));
         for (const g of c.grads ?? []) markPins(c, g, chart.bpm, !c.grads!.some((o) => o !== g && o.start === g.end));
       }
@@ -802,9 +811,16 @@ export class Editor {
         end = Math.max(end, b === Infinity ? end : b);
       }
     }
+    // #DELAY で重なって別の段に出ている所はゴーゴーにしない（そこで止めて、戻ったらまた始める）
+    const holes = this.rowHoles(start, end);
     this.mutate(() => {
       this.course.events = this.course.events.filter((e) => !(e.kind === 'gogo' && e.tick >= start && e.tick <= end));
-      this.course.events.push({ tick: start, kind: 'gogo', on: true }, { tick: end, kind: 'gogo', on: false });
+      this.course.events.push({ tick: start, kind: 'gogo', on: true });
+      for (const [a, b] of holes) {
+        this.course.events.push({ tick: a, kind: 'gogo', on: false });
+        if (b < end) this.course.events.push({ tick: b, kind: 'gogo', on: true });
+      }
+      this.course.events.push({ tick: end, kind: 'gogo', on: false });
     });
     return {};
   }
@@ -1016,4 +1032,23 @@ export function measureFrac(len: number, den: number): { num: number; den: numbe
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
   const g = gcd(Math.round(len), whole);
   return { num: Math.round(len) / g, den: whole / g };
+}
+
+/** グラデに、#DELAY で重なって別の段に出ている所（holes）を付けたもの */
+function withHoles(g: Grad, lanes: DelayLanes): Grad {
+  const h = lanes.holes(g.start, g.end);
+  const out = { ...g };
+  if (h.length) out.holes = h;
+  else delete out.holes;
+  return out;
+}
+
+/** 譜面 c のグラデに、今の段の並びでの holes を付け直す */
+function setGradHoles(chart: EChart, c: ECourse) {
+  const lanes = new DelayLanes(c, new Timing(chart, c));
+  for (const g of c.grads ?? []) {
+    const h = lanes.holes(g.start, g.end);
+    if (h.length) g.holes = h;
+    else delete g.holes;
+  }
 }

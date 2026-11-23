@@ -168,6 +168,40 @@ export class DelayLanes {
     return fs[0];
   }
 
+  /** 段ごとの tick の範囲（区間ごとに、その段に出る所） */
+  rowTicks(): { row: number; t0: number; t1: number }[] {
+    return this.pieces.map((p) => {
+      const s = this.segs[p.seg];
+      const t0 = p.a === -Infinity ? s.t0 : Math.max(s.t0, Math.round(this.segTick(p.seg, this.timeOfDisp(p.a))));
+      const t1 = p.b === Infinity ? s.t1 : Math.min(s.t1, Math.round(this.segTick(p.seg, this.timeOfDisp(p.b))));
+      return { row: p.row, t0, t1 };
+    });
+  }
+
+  /**
+   * 範囲 [start, end) のうち、#DELAY で重なって始点・終点とは別の段に出ている所の tick の区間。
+   * 1 つの段の上で作った範囲（グラデ・ゴーゴーなど）を、ほかの段の音符にかけないために使う
+   */
+  holes(start: number, end: number): [number, number][] {
+    if (this.rows === 1 || !(end > start)) return [];
+    const rows = new Set([this.rowOf(start), this.rowOf(end)]);
+    const out: [number, number][] = [];
+    for (const r of this.rowTicks()) {
+      if (rows.has(r.row)) continue;
+      const a = Math.max(start, r.t0);
+      const b = Math.min(end, r.t1);
+      if (b > a) out.push([a, b]);
+    }
+    out.sort((x, y) => x[0] - y[0]);
+    const merged: [number, number][] = [];
+    for (const h of out) {
+      const last = merged[merged.length - 1];
+      if (last && h[0] <= last[1]) last[1] = Math.max(last[1], h[1]);
+      else merged.push([...h]);
+    }
+    return merged;
+  }
+
   /** tick がどの段にあるか */
   rowOf(tick: number) {
     if (this.rows === 1) return 0;

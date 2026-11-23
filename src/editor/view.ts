@@ -3,7 +3,7 @@ import { drawAny, drawRoll, hexPath, noteSkin } from '../render/notes';
 import { drawTndeNote } from '../render/tndeNotes';
 import { localPoint, pixelRatio } from '../orient';
 import type { Editor } from './editor';
-import type { Grad } from './grad';
+import { gradParts, inGradHole, type Grad } from './grad';
 import { DelayLanes } from './delayLanes';
 
 /**
@@ -1013,7 +1013,8 @@ export class EditorView {
         grd.addColorStop(0, 'rgba(199,146,234,0.25)');
         grd.addColorStop(1, 'rgba(199,146,234,0.9)');
         ctx.fillStyle = grd;
-        for (const sp of spansX(g.start, g.end)) ctx.fillRect(sp.x1, sp.g.y + sp.g.h - bh, sp.x2 - sp.x1, bh);
+        // #DELAY で重なって別の段に出ている所（グラデをかけない所）には出さない
+        for (const [a, b] of gradParts(g)) for (const sp of spansX(a, b)) ctx.fillRect(sp.x1, sp.g.y + sp.g.h - bh, sp.x2 - sp.x1, bh);
       }
     });
 
@@ -1198,7 +1199,7 @@ export class EditorView {
       }
       // グラデの中の #SCROLL は、グラデの始点の 1 つにまとめる
       // （グラデの中に単体で置いた #SCROLL は、ふつうの命令と同じく出す）
-      const g = e.kind === 'scroll' ? grads.find((x) => e.tick >= x.start && e.tick < x.end && !(e.pin && e.tick !== x.start)) : undefined;
+      const g = e.kind === 'scroll' ? grads.find((x) => e.tick >= x.start && e.tick < x.end && !(e.pin && e.tick !== x.start) && !inGradHole(x, e.tick)) : undefined;
       if (g) {
         const it = evItems.find((x) => x.grad === g);
         if (it) it.events.push(e);

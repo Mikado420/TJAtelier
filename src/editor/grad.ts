@@ -39,6 +39,26 @@ export interface Grad {
   speed?: 'scroll' | 'visual' | 'visualBase';
   /** （使わない。小節線はいつも対象。前に保存したデータとの互換のため残す） */
   barlines?: boolean;
+  /**
+   * 範囲のうち、#DELAY で重なって別の段に出ている所（tick の区間 [a, b)）。ここの音符にはグラデをかけず、
+   * 区間の頭にグラデの前の #SCROLL を置き直す（エディタが段の並びから毎回決める）
+   */
+  holes?: [number, number][];
+}
+
+/** グラデの範囲のうち、別の段に出ている所（holes）か */
+export const inGradHole = (g: Pick<Grad, 'holes'>, tick: number) => !!g.holes?.some(([a, b]) => tick >= a && tick < b);
+
+/** グラデの範囲を、別の段に出ている所（holes）で分けた区間 [a, b) */
+export function gradParts(g: Pick<Grad, 'start' | 'end' | 'holes'>): [number, number][] {
+  const out: [number, number][] = [];
+  let a = g.start;
+  for (const [h0, h1] of g.holes ?? []) {
+    if (h0 > a) out.push([a, Math.min(h0, g.end)]);
+    a = Math.max(a, h1);
+  }
+  if (g.end > a) out.push([a, g.end]);
+  return out;
 }
 
 /** その位置の BPM を返す関数（譜面の最初の BPM と、難易度の #BPMCHANGE から） */
@@ -92,13 +112,13 @@ function gradProgress(c: ECourse, g: Grad, ts: number[], baseBpm: number): numbe
 }
 
 /** 値を置く位置（tick、重なりなし・昇順） */
-export function gradTargets(c: ECourse, g: Pick<Grad, 'start' | 'end' | 'speed' | 'barlines'>): number[] {
+export function gradTargets(c: ECourse, g: Pick<Grad, 'start' | 'end' | 'speed' | 'barlines' | 'holes'>): number[] {
   const { start, end } = g;
   const set = new Set<number>();
   for (const n of c.notes) if (n.tick >= start && n.tick < end) set.add(n.tick);
   for (const m of measures(c, end)) if (m.start >= start && m.start < end) set.add(m.start);
   if (g.speed === 'visual' || g.speed === 'visualBase') for (const e of c.events) if (e.kind === 'bpm' && e.tick > start && e.tick < end) set.add(e.tick);
-  return [...set].sort((a, b) => a - b);
+  return [...set].filter((t) => !inGradHole(g, t)).sort((a, b) => a - b);
 }
 
 export function gradValid(g: Pick<Grad, 'from' | 'to' | 'mode'>): string | null {
@@ -131,6 +151,15 @@ export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: numbe
     ts.forEach((tick, k) => out.push({ tick, value: round(interp(g.mode, g.from, g.to, p[k]), g.digits) }));
     out.push({ tick: g.end, value: round(g.to, g.digits) });
   }
+  // 別の段に出ている所の頭には、グラデの前の #SCROLL を置き直す（そこの音符にグラデがかからないように）
+  const holes = (g.holes ?? []).filter(([a]) => a > g.start && a < g.end);
+  if (holes.length) {
+    let before = 1;
+    let at = -Infinity;
+    for (const e of c.events) if (e.kind === 'scroll' && e.tick < g.start && e.tick >= at) { before = e.value; at = e.tick; }
+    for (const [a] of holes) out.push({ tick: a, value: before });
+    out.sort((x, y) => x.tick - y.tick);
+  }
   return out;
 }
 
@@ -142,7 +171,9 @@ export const isPin = (e: EEvent, g: Grad) => e.kind === 'scroll' && !!e.pin && e
  * 範囲の中に単体で置いた #SCROLL（pin）はそのまま残し、その位置にはグラデの値を置かない
  */
 export function applyGrad(c: ECourse, g: Grad, baseBpm: number) {
-  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= g.start && e.tick <= g.end) || isPin(e, g));
+  // 別の段に出ている所の #SCROLL はそのまま（その頭にグラデが置き直した #SCROLL は置き直す）
+  const keepInHole = (e: EEvent) => inGradHole(g, e.tick) && !(g.holes ?? []).some(([a]) => a === e.tick);
+  c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= g.start && e.tick <= g.end) || isPin(e, g) || keepInHole(e));
   const pinned = new Set(c.events.filter((e) => isPin(e, g)).map((e) => e.tick));
   for (const s of gradScrolls(c, g, baseBpm)) if (!pinned.has(s.tick)) c.events.push({ tick: s.tick, kind: 'scroll', value: s.value });
 }
