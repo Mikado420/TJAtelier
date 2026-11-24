@@ -873,7 +873,11 @@ export class TndeSelect {
       while (Math.abs(wheelAcc) >= 60) { const d = Math.sign(wheelAcc); wheelAcc -= d * 60; this.move(d); }
     }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if (!this.on || e.isComposing) return;
+      if (!this.on || e.isComposing || e.keyCode === 229) return;
+      // 文字を入れている所（フォルダの名前など）のキーは、そこに任せる（消す・決めるなどが裏の一覧に効かないように）
+      const t = e.target;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return;
+      if (document.querySelector('.home-ask')) return;
       // 設定などの面が開いているときは動かさない
       if (document.getElementById('sheet')?.classList.contains('hidden') === false) return;
       const k = e.key;

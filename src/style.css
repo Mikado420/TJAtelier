@@ -3666,7 +3666,8 @@ body.tnde-ui .res.res-calib button { background: #262c3d; border: 2px solid #323
 body.tnde-ui .res.res-calib button.primary { background: #4d9fbe; border-color: #2b7290; color: #fff; }
 
 /* 小さな箱（フォルダの名前・オンライン） */
-body.tnde-ui .home-ask, .ol.tnde .ol-modal { background: rgba(6, 8, 14, 0.62); align-items: center; }
+body.tnde-ui .home-ask { background: rgba(6, 8, 14, 0.62); }
+.ol.tnde .ol-modal { background: rgba(6, 8, 14, 0.62); align-items: center; }
 body.tnde-ui .ha-box, .ol.tnde .ol-mbox { background: #1f2433; border: 2px solid #323a50; border-radius: 16px; padding: 0 16px 16px; color: #f2ead8; box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6); clip-path: none; }
 body.tnde-ui .ha-box h3, .ol.tnde .ol-mbox h3 { position: relative; margin: 0 -16px 6px; padding: 12px 16px 10px 26px; border-bottom: 2px solid #323a50; color: #f2ead8; font-size: 20px; }
 body.tnde-ui .ha-box h3::before, .ol.tnde .ol-mbox h3::before { content: ''; position: absolute; left: 14px; top: 12px; bottom: 10px; width: 6px; background: #4d9fbe; }
