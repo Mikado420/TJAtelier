@@ -364,6 +364,8 @@ export class Home {
       this.focus = 'song';
     }
     this.render(true);
+    // TNDE スキンの選曲画面: 一覧を作り直して、読み込んだ曲を選ぶ
+    if (this.host.tndeSkin()) this.tsel?.added(id);
   }
 
   /** 今のフォルダを開いて、その曲を選んだ状態にする */

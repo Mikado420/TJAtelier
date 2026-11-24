@@ -3,7 +3,7 @@
  * 位置・大きさは本家の画面録画に素材を重ねて測った値（1920×1080）。動きの時間と式は TJAPlayer3（OpenTaiko の元）と同じ。
  */
 import type { AudioEngine } from '../audio/audio';
-import type { SongEntry } from '../io/library';
+import { folderParents, type SongEntry } from '../io/library';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
 import { songPill } from '../render/tndescreens';
 import { nameColor } from './folderColor';
@@ -320,6 +320,33 @@ export class TndeSelect {
     this.diffT = -1;
     this.diffOut = -1;
     this.startT = -1;
+    this.still = 0;
+  }
+
+  /**
+   * 曲を読み込んだとき: 一覧を作り直して、その曲を選ぶ（ほかのフォルダに入ったら、そのフォルダを開く）。
+   * 難易度えらび・メニューなどを出している間は、一覧だけ作り直す
+   */
+  added(id: string) {
+    if (!this.on) return;
+    const s = this.host.songs().find((x) => x.id === id);
+    const free = !this.pop && this.diffT < 0 && this.diffOut < 0 && !this.opt.open && !this.busy();
+    if (!s || !free) {
+      const keep = this.center.kind === 'song' ? this.center.s.id : undefined;
+      const key = this.center.kind === 'folder' ? this.center.key : undefined;
+      this.rebuild(keep);
+      if (key) { const i = this.items.findIndex((x) => x.kind === 'folder' && x.key === key); if (i >= 0) this.cur = i; }
+      return;
+    }
+    const seen = (items: Item[]) => items.some((x) => x.kind === 'song' && x.s.id === id);
+    this.rebuild(id);
+    if (seen(this.items)) return;
+    // 今のフォルダに無ければ、検索をやめて、その曲のフォルダを開く
+    if (this.query) { this.query = ''; this.qEl.value = ''; this.qEl.classList.add('hidden'); }
+    const f = s.folders.find((x) => !x.includes('/')) ?? s.folders[0];
+    this.path = this.topFolders().length ? (f ? [...folderParents(f), f] : [UNCAT]) : [];
+    this.rebuild(id);
+    this.fadeIn = 0;
     this.still = 0;
   }
 
