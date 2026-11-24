@@ -50,10 +50,13 @@ export interface TselHost {
   info(id: string, course: string): void;
   /** ジャケットの絵の URL（無ければ undefined） */
   jacket(s: SongEntry): Promise<string | undefined>;
-  /** 曲をフォルダに入れる・外す（入っていれば外す）・新しいフォルダを作って入れる・曲を消す（どれも済んだら一覧を読み直してある） */
-  toggleFolder(id: string, folder: string): Promise<void>;
-  newFolder(id: string): Promise<void>;
-  deleteSong(id: string): Promise<void>;
+  /**
+   * 曲（いくつでも）をフォルダに入れる・外す（どれも入っていれば外す）・新しいフォルダ（parent の中）を作って入れる・曲を消す
+   * （どれも済んだら一覧を読み直してある）
+   */
+  setFolder(ids: string[], folder: string): Promise<void>;
+  newFolder(ids: string[], parent?: string): Promise<void>;
+  deleteSongs(ids: string[]): Promise<void>;
 }
 
 export interface PlayOpts {
@@ -127,10 +130,17 @@ function lookOf(name: string, color?: string, key = name): Look {
 }
 const BACK_LOOK: Look = { bar: -1, rim: [0, 0, 0], edge: '#2e2e36', chara: -1 };
 
+/** 一覧の帯。depth: 字下げの段（開いたフォルダの中身は 1 段下げて続ける）。parent: 曲が並んでいるフォルダ */
 type Item =
-  | { kind: 'folder'; key: string; name: string; look: Look; count: number }
-  | { kind: 'back'; look: Look }
-  | { kind: 'song'; s: SongEntry; look: Look };
+  | { kind: 'folder'; key: string; name: string; look: Look; count: number; depth: number; open: boolean }
+  | { kind: 'back'; look: Look; depth?: number }
+  | { kind: 'song'; s: SongEntry; look: Look; depth?: number; parent?: string };
+
+/** 字下げ 1 段の幅 */
+const INDENT = 60;
+/** 曲を選んでいるときの右の板・ボタン */
+const TRAY = { x: 1490, y: 150, w: 410, h: 800 };
+const PNK = '#ef5a8f';
 
 type Img = { im: ImageBitmap | HTMLCanvasElement; k: number; x: number; y: number; w: number; h: number };
 type Anim = { pages: ImageBitmap[]; k: number; x: number; y: number; w: number; h: number; n: number; cols: number; per: number };
@@ -197,7 +207,10 @@ export class TndeSelect {
   private wall = 0;
 
   // 一覧
-  private path: string[] = [];
+  /** 開いているフォルダ（開いたフォルダの中身は、その帯の下に字下げして続ける） */
+  private opened = new Set<string>();
+  /** まとめて選んでいる曲（選んでいなければ null） */
+  private picked: Set<string> | null = null;
   private items: Item[] = [];
   private cur = 0;
   /** スクロールの残り（段。+ は下から来る） */
@@ -206,7 +219,6 @@ export class TndeSelect {
   private still = 0;
   /** フォルダを開く・閉じる動き（ms。-1 = していない） */
   private boxT = -1;
-  private boxTo: string[] | null = null;
   /** フォルダを入れ替えたあと、ほかの帯が出てくる（ms） */
   private fadeIn = 1e9;
   // 難易度えらび
@@ -275,10 +287,7 @@ export class TndeSelect {
     this.pop = null;
     this.qEl.classList.toggle('hidden', !this.query);
     const s = select ? this.host.songs().find((x) => x.id === select) : undefined;
-    if (s) {
-      const f = s.folders.find((x) => !x.includes('/')) ?? s.folders[0];
-      this.path = this.topFolders().length ? [f ?? UNCAT] : [];
-    }
+    if (s) this.openTo(s);
     this.rebuild(s?.id);
     this.still = 0;
     // オンライン対戦の難易度えらびを出していたら、出し直す
@@ -343,8 +352,7 @@ export class TndeSelect {
     if (seen(this.items)) return;
     // 今のフォルダに無ければ、検索をやめて、その曲のフォルダを開く
     if (this.query) { this.query = ''; this.qEl.value = ''; this.qEl.classList.add('hidden'); }
-    const f = s.folders.find((x) => !x.includes('/')) ?? s.folders[0];
-    this.path = this.topFolders().length ? (f ? [...folderParents(f), f] : [UNCAT]) : [];
+    this.openTo(s);
     this.rebuild(id);
     this.fadeIn = 0;
     this.still = 0;
@@ -595,13 +603,29 @@ export class TndeSelect {
     return songs.some((s) => !s.folders.length) ? [...fs, UNCAT] : fs;
   }
 
-  private rebuild(selectId?: string) {
+  /** 曲が見えるように、その曲のフォルダ（上のフォルダも）を開く */
+  private openTo(s: SongEntry) {
+    if (!this.topFolders().length) return;
+    const f = s.folders[0];
+    for (const k of f ? [...folderParents(f), f] : [UNCAT]) this.opened.add(k);
+  }
+  /** フォルダを閉じる（中のフォルダも） */
+  private closeFolder(key: string) {
+    for (const k of [...this.opened]) if (k === key || k.startsWith(`${key}/`)) this.opened.delete(k);
+  }
+  /** 中のフォルダ（1 段下だけ） */
+  private childFolders(key: string) {
+    if (key === UNCAT) return [];
+    return this.host.folders().filter((f) => f.startsWith(`${key}/`) && !f.slice(key.length + 1).includes('/')).sort((a, b) => a.localeCompare(b, 'ja'));
+  }
+
+  private rebuild(selectId?: string, folderKey?: string) {
     const songs = this.host.songs();
     const colors = this.host.colors();
-    const folderItem = (key: string): Item => {
+    const folderItem = (key: string, depth = 0): Item & { kind: 'folder' } => {
       const name = key === UNCAT ? '未分類' : key.split('/').pop()!;
       const count = key === UNCAT ? songs.filter((s) => !s.folders.length).length : songs.filter((s) => s.folders.some((f) => f === key || f.startsWith(`${key}/`))).length;
-      return { kind: 'folder', key, name, look: lookOf(name, colors[key], key), count };
+      return { kind: 'folder', key, name, look: lookOf(name, colors[key], key), count, depth, open: this.opened.has(key) };
     };
     const byTitle = this.sort === 'updated' ? (a: SongEntry, b: SongEntry) => b.updatedAt - a.updatedAt
       : this.sort === 'bpm' ? (a: SongEntry, b: SongEntry) => a.bpm - b.bpm || a.title.localeCompare(b.title, 'ja')
@@ -613,19 +637,28 @@ export class TndeSelect {
       const q = this.query.toLowerCase();
       items = songs.filter((s) => `${s.title} ${s.subtitle}`.toLowerCase().includes(q)).sort(byTitle)
         .map((s) => ({ kind: 'song' as const, s, look: lookOf(s.folders[0]?.split('/').pop() ?? '', colors[s.folders[0] ?? ''], s.folders[0] ?? UNCAT) }));
-    } else if (!this.path.length) {
-      items = top.length ? top.map(folderItem) : [...songs].sort(byTitle).map((s) => ({ kind: 'song' as const, s, look: lookOf('') }));
+    } else if (!top.length) {
+      items = [...songs].sort(byTitle).map((s) => ({ kind: 'song' as const, s, look: lookOf('') }));
     } else {
-      const key = this.path[this.path.length - 1];
-      const look = folderItem(key).look;
-      const subs = key === UNCAT ? [] : this.host.folders().filter((f) => f.startsWith(`${key}/`) && !f.slice(key.length + 1).includes('/')).sort((a, b) => a.localeCompare(b, 'ja'));
-      const inside = songs.filter((s) => (key === UNCAT ? !s.folders.length : s.folders.includes(key))).sort(byTitle);
-      items = [{ kind: 'back', look: BACK_LOOK }, ...subs.map(folderItem), ...inside.map((s) => ({ kind: 'song' as const, s, look }))];
+      // フォルダの帯。開いたフォルダは、その下に中のフォルダと曲を 1 段下げて続ける（中のフォルダもその場で開ける）
+      items = [];
+      const emit = (key: string, depth: number) => {
+        const fi = folderItem(key, depth);
+        items.push(fi);
+        if (!fi.open) return;
+        for (const c of this.childFolders(key)) emit(c, depth + 1);
+        const inside = songs.filter((s) => (key === UNCAT ? !s.folders.length : s.folders.includes(key))).sort(byTitle);
+        for (const s of inside) items.push({ kind: 'song', s, look: fi.look, depth: depth + 1, parent: key });
+      };
+      for (const k of top) emit(k, 0);
     }
     if (!items.length) items = [{ kind: 'back', look: BACK_LOOK }];
-    const keep = selectId ?? (this.items.length && this.center.kind === 'song' ? this.center.s.id : undefined);
+    const c = this.items.length ? this.center : null;
+    const keep = selectId ?? (c?.kind === 'song' ? c.s.id : undefined);
+    const keepKey = folderKey ?? (selectId === undefined && c?.kind === 'folder' ? c.key : undefined);
     this.items = items;
     let i = keep ? items.findIndex((x) => x.kind === 'song' && x.s.id === keep) : -1;
+    if (i < 0 && keepKey) i = items.findIndex((x) => x.kind === 'folder' && x.key === keepKey);
     if (i < 0) i = items.findIndex((x) => x.kind !== 'back');
     this.cur = Math.max(0, i);
     this.scroll = 0;
@@ -662,6 +695,13 @@ export class TndeSelect {
     // 開ききる前に決めたときは、開いた所から
     this.still = Math.max(this.still, OPEN_AT + OPEN_MS);
     const it = this.center;
+    if (it.kind === 'song' && this.picked) {
+      // まとめて選んでいるとき: 選ぶ・外す
+      if (this.picked.has(it.s.id)) this.picked.delete(it.s.id);
+      else this.picked.add(it.s.id);
+      this.se(this.picked.has(it.s.id) ? 'Don' : 'Ka');
+      return;
+    }
     if (it.kind === 'song') {
       this.se('Don');
       this.se('Diff');
@@ -673,10 +713,20 @@ export class TndeSelect {
       this.dsel = want === 'Edit' ? 5 : 2 + COURSES.indexOf(want);
       this.lastCard = this.dsel;
       this.cursorT = 1e9;
-    } else {
-      this.se('Don');
-      this.boxT = 0;
-      this.boxTo = it.kind === 'back' ? this.path.slice(0, -1) : [...this.path, it.key];
+    } else if (it.kind === 'folder') {
+      // フォルダ: その場で開く（中身が下に続く。最初の中身へ動く）・開いていれば閉じる
+      if (it.open) {
+        this.se('Cancel');
+        this.closeFolder(it.key);
+        this.rebuild(undefined, it.key);
+      } else {
+        this.se('Don');
+        this.opened.add(it.key);
+        this.rebuild(undefined, it.key);
+        const nx = this.items[this.cur + 1];
+        if (nx && (nx.depth ?? 0) > it.depth) { this.cur++; this.scroll = 1; }
+      }
+      this.still = 0;
     }
   }
 
@@ -687,7 +737,16 @@ export class TndeSelect {
     if (this.diffT >= 0 && this.online) { if (this.online.canBack()) { this.se('Cancel'); this.online.back(); } return; }
     if (this.diffT >= 0) { this.se('Cancel'); this.diffOut = 0; return; }
     if (this.query || !this.qEl.classList.contains('hidden')) { this.se('Cancel'); this.closeSearch(); return; }
-    if (this.path.length) { this.se('Cancel'); this.boxT = 0; this.boxTo = this.path.slice(0, -1); }
+    if (this.picked) { this.se('Cancel'); this.picked = null; return; }
+    // 開いているフォルダの帯なら閉じる。中身なら、それが入っているフォルダを閉じてそこへ
+    const c = this.center;
+    const parent = c.kind === 'song' ? c.parent : c.kind === 'folder' && c.depth > 0 ? c.key.split('/').slice(0, -1).join('/') : undefined;
+    const key = c.kind === 'folder' && c.open ? c.key : parent;
+    if (!key) return;
+    this.se('Cancel');
+    this.closeFolder(key);
+    this.rebuild(undefined, key);
+    this.still = 0;
   }
 
   /** 難易度えらびの並び: 0 もどる・1 設定・2〜5 かんたん〜おに（5 は裏にもなる） */
@@ -819,6 +878,7 @@ export class TndeSelect {
       if (document.getElementById('sheet')?.classList.contains('hidden') === false) return;
       const k = e.key;
       if (this.opt.open && !this.busy() && (k === 'ArrowLeft' || k === 'ArrowRight')) { this.optChange(k === 'ArrowLeft' ? -1 : 1); e.preventDefault(); return; }
+      if (this.pop?.kind === 'folder' && (k === 'ArrowLeft' || k === 'ArrowRight')) { this.popExpand(k === 'ArrowRight'); e.preventDefault(); return; }
       if (k === 'ArrowUp' || k === 'ArrowLeft' || k === 'd' || k === 'D') this.move(-1);
       else if (k === 'ArrowDown' || k === 'ArrowRight' || k === 'k' || k === 'K') this.move(1);
       else if (k === 'Enter' || k === ' ' || k === 'f' || k === 'F' || k === 'j' || k === 'J') this.decide();
@@ -831,6 +891,7 @@ export class TndeSelect {
   private tap(p: { x: number; y: number }) {
     if (this.pop) { this.popTap(p); return; }
     if (this.busy()) return;
+    if (this.picked && this.diffT < 0 && p.x >= TRAY.x && p.x <= TRAY.x + TRAY.w && p.y >= TRAY.y && p.y <= TRAY.y + TRAY.h) { this.trayTap(p); return; }
     if (this.opt.open) { this.optTap(p); return; }
     if (this.diffT >= 0) {
       const hit = [[382, 405, 115, 114], [514, 405, 115, 114], ...[647, 861, 1077, 1292].map((x) => [x, 405, 196, 355]), [382, 537, 115, 114], [514, 537, 115, 114]];
@@ -847,7 +908,8 @@ export class TndeSelect {
     if (p.y >= 383 && p.y <= 697 && p.x >= 470 && p.x <= 1450) { this.decide(); return; }
     for (let k = 1; k <= 3; k++) {
       for (const sgn of [-1, 1]) {
-        const q = slotPos(sgn * k);
+        const q0 = slotPos(sgn * k);
+        const q = { x: q0.x + (this.at(this.cur + sgn * k).depth ?? 0) * INDENT, y: q0.y };
         if (p.x >= q.x && p.x <= q.x + BW && p.y >= q.y && p.y <= q.y + BH) { for (let n = 0; n < k; n++) this.move(sgn); return; }
       }
     }
@@ -902,17 +964,7 @@ export class TndeSelect {
     if (this.boxT >= 0) {
       this.boxT += dt;
       // ctBoxOpen: 200 から 1.3ms ごと。1940 で中を入れ替える
-      if (this.boxT >= BOX_END && this.boxTo) {
-        const from = this.path[this.path.length - 1];
-        const up = this.boxTo.length < this.path.length;
-        this.path = this.boxTo;
-        this.boxTo = null;
-        this.rebuild();
-        // 閉じて戻ったときは、出てきたフォルダを選ぶ
-        if (up) {
-          const i = this.items.findIndex((x) => x.kind === 'folder' && x.key === from);
-          if (i >= 0) this.cur = i;
-        }
+      if (this.boxT >= BOX_END) {
         this.boxT = -1;
         this.fadeIn = 0;
         this.still = 0;
@@ -1000,7 +1052,56 @@ export class TndeSelect {
       this.sk.plate(g, { name: pl.name, title: pl.title, profile: pl.profile, wall: this.wall } as never, 60, 476);
     }
     this.optPanel();
+    this.drawTray();
     this.drawPop();
+  }
+
+  /** まとめて選んでいるときの右の板（選んだ曲・フォルダに入れる・消す・完了） */
+  private trayRects(): [number, number, number, number, string][] {
+    const B = TRAY;
+    return [
+      [B.x + 26, B.y + B.h - 262, B.w - 52, 72, 'folder'],
+      [B.x + 26, B.y + B.h - 178, B.w - 52, 72, 'del'],
+      [B.x + 26, B.y + B.h - 94, B.w - 52, 72, 'done'],
+    ];
+  }
+  private drawTray() {
+    const pk = this.picked;
+    if (!pk || this.diffT >= 0) return;
+    const g = this.g;
+    const B = TRAY;
+    this.boardAt(B.x, B.y, B.w, B.h, 30, '#fff6e0');
+    rrect(g, B.x + 20, B.y + 20, B.w - 40, 80, 24);
+    g.fillStyle = PNK;
+    g.fill();
+    g.lineWidth = 6;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    this.put(this.text(`${pk.size}曲`, 46, 11, '#000', { font: SEURAT }), B.x + B.w / 2, B.y + 60, B.w - 80);
+    const songs = this.host.songs().filter((x) => pk.has(x.id));
+    const max = 6;
+    const rows = songs.length > max ? [...songs.slice(0, max - 1).map((x) => x.title), '…'] : songs.map((x) => x.title);
+    rows.forEach((t, i) => {
+      const y = B.y + 122 + i * 66;
+      rrect(g, B.x + 26, y, B.w - 52, 56, 14);
+      g.fillStyle = '#ffd0e4';
+      g.fill();
+      g.lineWidth = 5;
+      g.strokeStyle = '#1a1410';
+      g.stroke();
+      this.put(this.text(t, 30, 8, '#7a2048'), B.x + B.w / 2, y + 29, B.w - 90);
+    });
+    const label: Record<string, [string, string]> = { folder: ['フォルダに入れる', GRN], del: ['消す', RED], done: ['完了', GRY] };
+    for (const [x, y, w, h, a] of this.trayRects()) this.tag(x, y, w, h, label[a][1], label[a][0], 34);
+  }
+  private trayTap(p: { x: number; y: number }) {
+    const pk = this.picked!;
+    const hit = this.trayRects().find(([x, y, w, h]) => p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h);
+    if (!hit) return;
+    const ids = [...pk];
+    if (hit[4] === 'done') { this.se('Cancel'); this.picked = null; return; }
+    if (!ids.length) return;
+    this.openPop(hit[4] === 'folder' ? 'folder' : 'del', ids[0], ids);
   }
 
   private pat: CanvasPattern | null = null;
@@ -1160,8 +1261,25 @@ export class TndeSelect {
     this.openBox(this.center, bac, boxV);
   }
 
+  /** フォルダの開け閉めの三角（開いていれば下向き） */
+  private tri(cx: number, cy: number, open: boolean, k = 1) {
+    const g = this.g;
+    g.beginPath();
+    if (open) { g.moveTo(cx - 13 * k, cy - 8 * k); g.lineTo(cx + 13 * k, cy - 8 * k); g.lineTo(cx, cy + 12 * k); }
+    else { g.moveTo(cx - 8 * k, cy - 13 * k); g.lineTo(cx - 8 * k, cy + 13 * k); g.lineTo(cx + 12 * k, cy); }
+    g.closePath();
+    g.lineJoin = 'round';
+    g.lineWidth = 6 * k;
+    g.strokeStyle = '#1a1410';
+    g.stroke();
+    g.fillStyle = '#fff';
+    g.fill();
+  }
+
   /** 閉じた帯 */
-  private bar(it: Item, p: { x: number; y: number }) {
+  private bar(it: Item, p0: { x: number; y: number }) {
+    const p = { x: p0.x + (it.depth ?? 0) * INDENT, y: p0.y };
+    if (it.kind === 'song' && this.picked) this.check(p.x - 34, p.y + BH / 2, this.picked.has(it.s.id));
     const im = this.barImg(it.look);
     const g = this.g;
     if (im) g.drawImage(im.im, p.x, p.y, BW, BH);
@@ -1173,6 +1291,7 @@ export class TndeSelect {
     } else {
       const name = it.kind === 'back' ? 'とじる' : it.name;
       this.put(this.text(name, 51, 16, it.look.edge, { kx: 0.96 }), cx, p.y + BH / 2 + 2, 820);
+      if (it.kind === 'folder') this.tri(p.x + 40, p.y + BH / 2, it.open);
     }
   }
 
@@ -1220,6 +1339,8 @@ export class TndeSelect {
     const ih = lerp(84, kind === 'song' ? 283 : 177, t);
     if (ov) this.nine(ov, [51, 18, 531, 56], [x + (562.5 - 486) * sx, iy, w - (562.5 - 486 + 1434 - 1359) * sx, ih], 10, 10);
     if (sx < 0.98) return;
+    if (it.kind === 'folder') this.tri(x + 44, lerp(y + h / 2, y + 58, t), it.open, 1.2);
+    if (it.kind === 'song' && this.picked) this.check(x - 40, y + h / 2, this.picked.has(it.s.id));
     // 中身（開くと出る。フォルダを開くときは 1200〜1620 で消える）
     const ca = boxV >= 0 ? clamp(1 - (boxV - 1200) / 420, 0, 1) : 1;
     const ga = g.globalAlpha;
@@ -1232,7 +1353,7 @@ export class TndeSelect {
       const k = 0.8 + bac / 620;
       this.songIcons(s, lerp(486 + 22, 501, t), lerp(491, 398, t), k * 1.65 / 0.9, lerp(486 + 20, 496, t), lerp(542, 464, t), k * 1.65 / 0.9);
       this.levels(s);
-      this.songInfo(s, 1460, 395, 190, 1460, 600);
+      if (!this.picked) this.songInfo(s, 1460, 395, 190, 1460, 600);
     } else {
       const name = it.kind === 'back' ? 'とじる' : it.name;
       this.put(this.text(name, 51, 16, it.look.edge, { kx: 0.96 }), 960, lerp(542, 436, t), 820);
@@ -1704,7 +1825,11 @@ export class TndeSelect {
   }
   // ---------- 曲の長押しのメニュー・フォルダに入れる・消す ----------
 
-  private pop: { kind: 'song' | 'folder' | 'del'; id: string; sel: number; scroll: number } | null = null;
+  /** ids: まとめて選んだ曲（無ければ id の 1 曲） */
+  private pop: { kind: 'song' | 'folder' | 'del'; id: string; ids?: string[]; sel: number; scroll: number } | null = null;
+  /** フォルダに入れる: 開いているフォルダ（開いたフォルダの下に中のフォルダが続く） */
+  private popOpen = new Set<string>();
+  private popIds() { const p = this.pop; return p ? p.ids ?? [p.id] : []; }
 
   /** その場所の曲の帯（曲でなければ null） */
   private songAt(p: { x: number; y: number }): SongEntry | null {
@@ -1713,16 +1838,24 @@ export class TndeSelect {
     if (c.kind === 'song' && p.y >= 383 && p.y <= 697 && p.x >= 470 && p.x <= 1450) return c.s;
     for (let k = 1; k <= 4; k++) {
       for (const sgn of [-1, 1]) {
-        const s = hitBar(this.at(this.cur + sgn * k), slotPos(sgn * k));
+        const it = this.at(this.cur + sgn * k);
+        const q = slotPos(sgn * k);
+        const s = hitBar(it, { x: q.x + (it.depth ?? 0) * INDENT, y: q.y });
         if (s) return s;
       }
     }
     return null;
   }
 
-  private openPop(kind: 'song' | 'folder' | 'del', s: SongEntry | string) {
+  private openPop(kind: 'song' | 'folder' | 'del', s: SongEntry | string, ids?: string[]) {
     const id = typeof s === 'string' ? s : s.id;
-    this.pop = { kind, id, sel: kind === 'del' ? 1 : 0, scroll: 0 };
+    this.pop = { kind, id, ids, sel: kind === 'del' ? 1 : 0, scroll: 0 };
+    if (kind === 'folder') {
+      // 曲が入っているフォルダが見えるように、その上のフォルダを開いておく
+      this.popOpen = new Set();
+      const want = new Set(ids ?? [id]);
+      for (const x of this.host.songs()) if (want.has(x.id)) for (const f of x.folders) for (const q of folderParents(f)) this.popOpen.add(q);
+    }
     this.se(kind === 'song' ? 'Don' : 'Ka');
   }
   private closePop() {
@@ -1733,7 +1866,8 @@ export class TndeSelect {
   private popSong() { return this.host.songs().find((x) => x.id === this.pop?.id) ?? null; }
   /** 今いるフォルダ（入っていれば「〜から外す」を出す） */
   private hereFolder() {
-    const k = this.path[this.path.length - 1];
+    const c = this.center;
+    const k = c.kind === 'song' ? c.parent : undefined;
     return k && k !== UNCAT && !this.query ? k : null;
   }
 
@@ -1745,6 +1879,7 @@ export class TndeSelect {
       const s = this.popSong();
       const here = this.hereFolder();
       return [
+        ['選ぶ', PNK, 'pick'],
         ['フォルダに入れる', BLUE, 'folder'],
         ...(here && s?.folders.includes(here) ? [[`「${here.split('/').pop()}」から外す`, BLUE, 'remove'] as [string, string, string]] : []),
         ['この曲を消す', RED, 'del'],
@@ -1753,7 +1888,16 @@ export class TndeSelect {
     }
     if (p.kind === 'del') return [['消す', RED, 'delete'], ['やめる', GRY, 'close']];
     const colors = this.host.colors();
-    const rows: [string, string, string][] = this.folderTree().map((f) => [f, toHex(lookOf(f.split('/').pop()!, colors[f], f).rim), `f:${f}`]);
+    const all = this.folderTree();
+    const rows: [string, string, string][] = [];
+    // 開いたフォルダの下に、中のフォルダと「新しいフォルダ」（その中に作る）を続ける
+    const emit = (f: string) => {
+      rows.push([f, toHex(lookOf(f.split('/').pop()!, colors[f], f).rim), `f:${f}`]);
+      if (!this.popOpen.has(f)) return;
+      for (const c of all.filter((x) => x.startsWith(`${f}/`) && !x.slice(f.length + 1).includes('/'))) emit(c);
+      rows.push(['新しいフォルダ', '#9aa0a8', `new:${f}`]);
+    };
+    for (const f of all.filter((x) => !x.includes('/'))) emit(f);
     return [...rows, ['新しいフォルダ', '#9aa0a8', 'new'], ['もどる', GRY, 'close']];
   }
   /** フォルダを、親の次にその下の階層が来る順に */
@@ -1767,6 +1911,28 @@ export class TndeSelect {
       for (let i = 0; i < Math.min(A.length, B.length); i++) { const c = A[i].localeCompare(B[i], 'ja'); if (c) return c; }
       return A.length - B.length;
     });
+  }
+
+  /** フォルダの一覧の行の字下げの段 */
+  private popDepth(act: string) {
+    if (act.startsWith('f:')) return act.slice(2).split('/').length - 1;
+    if (act.startsWith('new:')) return act.slice(4).split('/').length;
+    return 0;
+  }
+  /** フォルダの一覧: 選んでいる行のフォルダを開く・閉じる */
+  private popExpand(open?: boolean) {
+    const p = this.pop;
+    if (!p || p.kind !== 'folder') return;
+    const it = this.popItems()[p.sel];
+    if (!it || !it[2].startsWith('f:')) return;
+    const f = it[2].slice(2);
+    const was = this.popOpen.has(f);
+    const to = open ?? !was;
+    if (to === was) return;
+    if (to) this.popOpen.add(f);
+    else for (const k of [...this.popOpen]) if (k === f || k.startsWith(`${f}/`)) this.popOpen.delete(k);
+    this.se(to ? 'Don' : 'Cancel');
+    p.scroll = this.clampScroll(p.scroll);
   }
 
   private popMove(d: number) {
@@ -1783,25 +1949,31 @@ export class TndeSelect {
     const it = this.popItems()[i];
     if (!it) return;
     const a = it[2];
-    if (a === 'close') { if (p.kind === 'folder') { this.se('Cancel'); this.pop = { ...p, kind: 'song', sel: 0 }; } else this.closePop(); return; }
+    const ids = this.popIds();
+    if (a === 'close') { if (p.kind === 'folder' && !p.ids) { this.se('Cancel'); this.pop = { ...p, kind: 'song', sel: 0 }; } else this.closePop(); return; }
     if (a === 'folder') { this.openPop('folder', p.id); return; }
     if (a === 'del') { this.openPop('del', p.id); return; }
+    if (a === 'pick') { this.se('Don'); this.pop = null; this.picked = new Set([p.id]); return; }
     this.se('Don');
+    const keep = () => this.rebuild(this.center.kind === 'song' ? this.center.s.id : undefined);
     if (a === 'remove') {
       const here = this.hereFolder();
-      if (here) await this.host.toggleFolder(p.id, here);
+      if (here) await this.host.setFolder([p.id], here);
       this.pop = null;
       this.rebuild();
     } else if (a === 'delete') {
       this.pop = null;
-      await this.host.deleteSong(p.id);
+      await this.host.deleteSongs(ids);
+      if (this.picked) this.picked = null;
       this.rebuild();
-    } else if (a === 'new') {
-      await this.host.newFolder(p.id);
-      this.rebuild(this.center.kind === 'song' ? this.center.s.id : undefined);
+    } else if (a === 'new' || a.startsWith('new:')) {
+      const parent = a.startsWith('new:') ? a.slice(4) : undefined;
+      await this.host.newFolder(ids, parent);
+      if (parent) this.popOpen.add(parent);
+      keep();
     } else if (a.startsWith('f:')) {
-      await this.host.toggleFolder(p.id, a.slice(2));
-      this.rebuild(this.center.kind === 'song' ? this.center.s.id : undefined);
+      await this.host.setFolder(ids, a.slice(2));
+      keep();
     }
   }
 
@@ -1844,7 +2016,7 @@ export class TndeSelect {
     const B = TndeSelect.FB, n = items.length - 2;
     const out: [number, number, number, number, number][] = [];
     for (let i = 0; i < n; i++) {
-      const dep = items[i][0].split('/').length - 1;
+      const dep = this.popDepth(items[i][2]);
       const y = this.listTop() + i * TndeSelect.ROW - p.scroll;
       if (y + TndeSelect.ROW < this.listTop() || y > this.listTop() + this.listH()) continue;
       out.push([B.x + 40 + dep * 70, y, B.w - 80 - dep * 70, TndeSelect.ROW - 12, i]);
@@ -1865,6 +2037,7 @@ export class TndeSelect {
       return;
     }
     p.sel = hit[4];
+    if (p.kind === 'folder' && this.popItems()[hit[4]]?.[2].startsWith('f:') && q.x < hit[0] + 56) { this.popExpand(); return; }
     void this.popAct(hit[4]);
   }
 
@@ -1942,7 +2115,7 @@ export class TndeSelect {
         g.lineTo(1440, 540);
         g.lineTo(b.x + 1, 568);
         g.stroke();
-      } else this.put(this.text('この曲を消す？', 38, 9, '#000'), b.x + b.w / 2, b.y + 64, b.w - 40);
+      } else this.put(this.text(p.ids && p.ids.length > 1 ? `${p.ids.length}曲を消す？` : 'この曲を消す？', 38, 9, '#000'), b.x + b.w / 2, b.y + 64, b.w - 40);
       for (const [x, y, w, h, i] of rects) {
         if (i === p.sel) this.selRing(x, y, w, h, h / 2);
         this.tag(x, y, w, h, items[i][1], items[i][0], items[i][0].length > 7 ? 32 : 36);
@@ -1961,7 +2134,8 @@ export class TndeSelect {
     g.strokeStyle = '#1a1410';
     g.stroke();
     this.put(this.text('フォルダに入れる', 48, 11, '#000'), B.x + B.w / 2, B.y + 64, B.w - 80);
-    const s = this.popSong();
+    const ids = this.popIds();
+    const songs = this.host.songs().filter((x) => ids.includes(x.id));
     const n = items.length - 2;
     g.save();
     g.beginPath();
@@ -1969,8 +2143,8 @@ export class TndeSelect {
     g.clip();
     for (const [x, y, w, h, i] of rects) {
       if (i >= n) continue;
-      const [f, col] = items[i];
-      const dep = f.split('/').length - 1;
+      const [f, col, act] = items[i];
+      const dep = this.popDepth(act);
       // 親とつなぐ線
       if (dep) {
         const px = x - 70 + 34;
@@ -1998,8 +2172,14 @@ export class TndeSelect {
       rrect(g, x + 44, y + 13, w - 140, h - 26, 12);
       g.fillStyle = 'rgba(255,255,255,0.47)';
       g.fill();
-      this.put(this.text(f.split('/').pop()!, dep ? 38 : 42, 12, col), x + 44 + (w - 140) / 2, y + h / 2 + 1, w - 170);
-      this.check(x + w - 52, y + h / 2, !!s?.folders.includes(f));
+      if (!act.startsWith('f:')) {
+        this.put(this.text(f, dep ? 34 : 38, 10, '#3a3f47'), x + 44 + (w - 140) / 2, y + h / 2 + 1, w - 170);
+        continue;
+      }
+      const key = act.slice(2);
+      this.put(this.text(key.split('/').pop()!, dep ? 38 : 42, 12, col), x + 44 + (w - 140) / 2, y + h / 2 + 1, w - 170);
+      this.tri(x + 24, y + h / 2, this.popOpen.has(key), 0.8);
+      this.check(x + w - 52, y + h / 2, songs.length > 0 && songs.every((x2) => x2.folders.includes(key)));
     }
     g.restore();
     for (const [x, y, w, h, i] of rects) {

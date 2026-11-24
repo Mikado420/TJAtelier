@@ -285,22 +285,22 @@ export class Home {
       edit: (id, course) => { this.stopPreview(); void this.host.open(id, 'edit', course); },
       info: (id, course) => this.host.analyze(id, course),
       jacket: (s) => this.jacketUrl(s),
-      toggleFolder: async (id, f) => {
-        const s = this.songs.find((x) => x.id === id);
-        if (s?.folders.includes(f)) await removeFromFolder([id], f);
-        else await addToFolder([id], f);
+      setFolder: async (ids, f) => {
+        const all = ids.every((id) => this.songs.find((x) => x.id === id)?.folders.includes(f));
+        if (all) await removeFromFolder(ids, f);
+        else await addToFolder(ids, f);
         await this.reload();
       },
-      newFolder: async (id) => {
+      newFolder: async (ids, parent) => {
         const name = await this.askName('新しいフォルダ', '', '作って入れる');
         if (!name) return;
-        await addToFolder([id], name);
+        await addToFolder(ids, parent ? `${parent}/${name}` : name);
         await this.reload();
       },
-      deleteSong: async (id) => {
+      deleteSongs: async (ids) => {
         this.stopPreview();
-        await deleteSong(id);
-        if (this.sel === id) this.sel = null;
+        for (const id of ids) await deleteSong(id);
+        if (this.sel && ids.includes(this.sel)) this.sel = null;
         await this.reload();
       },
     }, this.el);
