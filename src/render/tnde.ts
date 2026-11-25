@@ -174,8 +174,8 @@ function prio(n: string) {
 }
 
 /** 風船・ゴーゴーの動きの絵を、何秒前から持つか・何秒先まで無ければ手放すか */
-const EV_AHEAD = 12;
-const EV_KEEP = 20;
+const EV_AHEAD = 25;
+const EV_KEEP = 40;
 
 /** 譜面に風船・ゴーゴーがあるか（balloonAt・gogoAt: 遊び始めてから最初の風船・ゴーゴーまでの秒数） */
 export interface SkinNeed { balloon: boolean; gogo: boolean; balloonAt?: number; gogoAt?: number }
@@ -270,6 +270,10 @@ export class TndeSkin {
     if (need) this.need = need;
     this.choose(title);
     await this.sync();
+    // 大きな動きの絵（どんちゃんの 10 コンボ・すぐ来るゴーゴーや風船など）も、読み込み画面の間に読み終えておく
+    // （スマホでは後から読むと、使うときに間に合わず出なかったり遅れたりする。長くても 8 秒まで待つ）
+    const heavy = [...Object.keys(this.man.img), ...Object.keys(this.man.anim)].filter((n) => prio(n) === 2 && this.wants(n)).map((n) => this.fetchImg(n));
+    await Promise.race([Promise.all(heavy), new Promise((r) => setTimeout(r, 8000))]);
   }
 
   /** 今の曲で使う絵か（背景・踊り子・ゲージは曲や難易度ごとに 1 組だけ使う） */
@@ -317,7 +321,7 @@ export class TndeSkin {
    * 風船・ゴーゴーの大きな動きの絵（どんちゃん・ゴーゴーの光）を持つか。
    * その少し前（EV_AHEAD 秒）から持ち、しばらく（EV_KEEP 秒先まで）無ければ手放す（iPhone でメモリが足りずに落ちないように）
    */
-  /** 踊り子の出てくる動き（魂ゲージが 3 割を超えてから読む。出てくるのは 4 割から） */
+  /** 踊り子の出てくる動き（魂ゲージが 15% を超えてから読む。出てくるのは 4 割から） */
   private inWant = false;
   private evBalloon = true;
   private evGogo = true;
@@ -1627,7 +1631,7 @@ export class TndeSkin {
     const { wall } = F;
     if (st.gauge >= 80) this.wantMax();
     if (st.gauge >= 50) this.wantClear();
-    if (st.gauge >= 30) this.inWant = true;
+    if (st.gauge >= 15) this.inWant = true;
     const once = this.charaOnce;
     if (once?.name === 'chara/Balloon_Breaking' || wall < this.balloonUntil) return; // 風船のどんちゃんは手前に描く
     if (once && !once.name.startsWith('chara/Balloon')) {
