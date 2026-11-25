@@ -1020,28 +1020,84 @@ export class PlayMode {
     if (this.active) this.applySettings();
   }
 
+  /** 背景の画像（読み込んだ絵と、16:9 の枠にぼかして暗くして描いた canvas） */
   private bgImg: HTMLImageElement | null = null;
-  private bgDim: HTMLElement | null = null;
+  private bgCv: HTMLCanvasElement | null = null;
   private bgImgUrl = '';
+  /** bgCv に描いた絵の大きさ・暗さ（同じなら描き直さない） */
+  private bgKey = '';
 
-  /** 背景の画像を決める（null で無し）。動画を流さないときに、全面に出す */
+  /** 背景の画像を決める（null で無し）。動画を流さないときに、16:9 の枠に出す */
   setBgImage(src: Blob | null) {
     if (this.bgImgUrl) URL.revokeObjectURL(this.bgImgUrl);
     this.bgImgUrl = src ? URL.createObjectURL(src) : '';
-    if (src && !this.bgImg) {
-      const im = document.createElement('img');
-      im.className = 'play-bgimg hidden';
-      im.alt = '';
-      im.setAttribute('aria-hidden', 'true');
-      const dim = document.createElement('div');
-      dim.className = 'play-vdim hidden';
-      this.root.prepend(dim);
-      this.root.prepend(im);
+    this.bgKey = '';
+    if (src && !this.bgCv) {
+      const cv = document.createElement('canvas');
+      cv.className = 'play-bgimg hidden';
+      cv.setAttribute('aria-hidden', 'true');
+      this.root.prepend(cv);
+      this.bgCv = cv;
+      const im = new Image();
+      im.onload = () => { this.bgKey = ''; this.paintBgImg(); };
       this.bgImg = im;
-      this.bgDim = dim;
     }
-    if (this.bgImg) this.bgImg.src = this.bgImgUrl || '';
+    if (this.bgImg) {
+      if (this.bgImgUrl) this.bgImg.src = this.bgImgUrl;
+      else this.bgImg.removeAttribute('src');
+    }
     if (this.active) this.applySettings();
+  }
+
+  /**
+   * 背景の画像を、16:9 の枠（左右は黒帯）に、全面+下の動画の後ろと同じぼかしと暗さ（動画の明るさの設定）で描く。
+   * 画面の大きさ・明るさの設定・絵が変わったときだけ描き直す
+   */
+  private paintBgImg() {
+    const cv = this.bgCv;
+    const im = this.bgImg;
+    if (!cv || cv.classList.contains('hidden')) return;
+    const r = fit169({ x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight });
+    Object.assign(cv.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+    if (!im || !im.complete || !im.naturalWidth) return;
+    const w = Math.max(8, Math.round(r.w / BLUR_Q));
+    const h = Math.max(8, Math.round(r.h / BLUR_Q));
+    const dim = 1 - this.dimOf(false);
+    const key = `${this.bgImgUrl}|${w}x${h}|${dim}`;
+    if (key === this.bgKey) return;
+    this.bgKey = key;
+    cv.width = w;
+    cv.height = h;
+    const g = cv.getContext('2d');
+    if (!g) return;
+    if (this.canFilter === null) {
+      g.filter = 'blur(1px)';
+      this.canFilter = g.filter === 'blur(1px)';
+      g.filter = 'none';
+    }
+    // 枠より BLUR_PAD 広く描く（端がぼけて薄くならないように）。枠いっぱいに切り抜く
+    const pad = BLUR_PAD / BLUR_Q;
+    const k = Math.max((w + pad * 2) / im.naturalWidth, (h + pad * 2) / im.naturalHeight);
+    const dw = im.naturalWidth * k;
+    const dh = im.naturalHeight * k;
+    try {
+      if (this.canFilter) {
+        g.filter = `blur(${BLUR / BLUR_Q}px)`;
+        g.drawImage(im, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        g.filter = 'none';
+      } else {
+        const t = (this.blurTmp ??= document.createElement('canvas'));
+        const tw = Math.max(4, Math.round(w / 2));
+        const th = Math.max(4, Math.round(h / 2));
+        if (t.width !== tw || t.height !== th) { t.width = tw; t.height = th; }
+        t.getContext('2d')?.drawImage(im, (tw - dw / 2) / 2, (th - dh / 2) / 2, dw / 2, dh / 2);
+        g.drawImage(t, 0, 0, w, h);
+      }
+    } catch { /* 描けない絵 */ }
+    if (dim > 0) {
+      g.fillStyle = `rgba(0,0,0,${dim})`;
+      g.fillRect(0, 0, w, h);
+    }
   }
 
   setVideoOffset(sec: number) {
@@ -1059,12 +1115,12 @@ export class PlayMode {
   /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */
   private applyVideo(resize = true) {
     const vmode = this.videoMode;
-    // 背景の画像（動画を流さないとき。動画と同じく全面に、同じ暗さで）
+    // 背景の画像（動画を流さないとき。16:9 の枠に、動画の明るさの設定で暗くしてぼかす）
     const img = !vmode && !!this.bgImgUrl && !this.calibrating;
-    if (this.bgImg) {
-      this.bgImg.classList.toggle('hidden', !img);
-      this.bgDim!.classList.toggle('hidden', !img);
-      this.bgDim!.style.opacity = String(1 - Math.max(0.1, Math.min(1, this.settings.videoDim ?? 0.5)));
+    if (this.bgCv) {
+      this.bgCv.classList.toggle('hidden', !img);
+      if (!img) { this.bgCv.width = this.bgCv.height = 0; this.bgKey = ''; }
+      else this.paintBgImg();
     }
     // 全面+下: 後ろは全面にうすくぼかした動画を出すので、絵は全面のときと同じく背景を塗らない
     const mode = vmode === 'both' ? 'full' : vmode || (img ? 'full' : '');
@@ -1205,6 +1261,7 @@ export class PlayMode {
    * 16:9 のときは、その範囲の縦をいっぱいに使う 16:9 の枠を真ん中に置き（左右は黒帯）、動画は枠に合わせて切り抜く
    */
   private placeVideo() {
+    this.paintBgImg();
     const v = this.video;
     if (!v) return;
     const m = this.videoMode;

@@ -1531,7 +1531,9 @@ export class TndeSkin {
       const name = k < this.count(`dancer/In${set}`) ? `dancer/In${set}` : `dancer/Normal${set}`;
       const a = this.man.anim[name];
       if (!a) return;
-      this.frame(c, name, name.includes('/In') ? k : fr, P(x) - (a.w * S) / 2, 842.5 - (a.h * S) / 2);
+      // 赤と黒の犬（Normal3）は、絵の中の位置が白い犬（Normal2）より 5px 右・9px 上にあるので、白い犬にそろえる
+      const [dx, dy] = name === 'dancer/Normal3' ? [-5, 9] : [0, 0];
+      this.frame(c, name, name.includes('/In') ? k : fr, P(x + dx) - (a.w * S) / 2, 842.5 + P(dy) - (a.h * S) / 2);
     });
   }
   private inAt = [-1, -1, -1, -1, -1];
