@@ -1671,22 +1671,53 @@ export class TndeSkin {
 
   // ---------- レーン ----------
 
+  /** 背景に動画・画像があるときの、音符が流れる所（レーンの地・分岐の色・ゴーゴー）の不透明度 */
+  private static readonly LANE_ALPHA = 0.75;
+  /** 透かすレーンを一度まとめて描く canvas（重ねた絵どうしが透けないように、まとめてから薄く貼る） */
+  private laneLayer: HTMLCanvasElement | null = null;
+
   private drawLane(c: CanvasRenderingContext2D, F: TndeFrame, gogo: boolean) {
     const { wall } = F;
-    this.putLane(c, 'lane/Background_Main', FIELD_Y);
-    // 譜面分岐のある譜面: 分岐ごとのレーンの色（切り替わるときは、前の色の上に新しい色を重ねていく）
+    const body = (g: CanvasRenderingContext2D) => {
+      this.putLane(g, 'lane/Background_Main', FIELD_Y);
+      // 譜面分岐のある譜面: 分岐ごとのレーンの色（切り替わるときは、前の色の上に新しい色を重ねていく）
+      const br = F.branch;
+      const BASE = ['lane/Base_Normal', 'lane/Base_Expert', 'lane/Base_Master'];
+      if (br) {
+        if (br.p < 1) this.putLane(g, BASE[br.from], FIELD_Y);
+        if (br.p > 0) this.alpha(g, br.p, () => this.putLane(g, BASE[br.cur], FIELD_Y));
+      }
+      if (gogo) {
+        // ゴーゴーのレーンは縦にひらいて出てくる（18 ms ごと）
+        const v = step(wall, this.gogoAt, 18);
+        const [ky, dy] = v <= 4 ? [0.2, 54] : v <= 5 ? [0.4, 40] : v <= 6 ? [0.6, 26] : v <= 8 ? [0.8, 13] : [1, 0];
+        this.putLane(g, 'lane/Background_GoGo', FIELD_Y + P(dy), ky);
+      }
+    };
+    const m = c.getTransform();
+    const lw = Math.ceil((TW - LANE_X) * m.a);
+    const lh = Math.ceil(P(130) * m.d);
+    if (F.bgMode === 'full' && lw > 0 && lh > 0) {
+      // 後ろの動画・画像が少し見えるように、音符が流れる所だけ薄く貼る（下の音符の文字の帯は今のまま）
+      const L = (this.laneLayer ??= document.createElement('canvas'));
+      if (L.width !== lw || L.height !== lh) { L.width = lw; L.height = lh; }
+      const g = L.getContext('2d');
+      if (g) {
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.clearRect(0, 0, lw, lh);
+        g.setTransform(m.a, 0, 0, m.d, -LANE_X * m.a, -FIELD_Y * m.d);
+        body(g);
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.globalAlpha *= TndeSkin.LANE_ALPHA;
+        c.drawImage(L, m.e + LANE_X * m.a, m.f + FIELD_Y * m.d);
+        c.restore();
+      }
+    } else {
+      if (this.laneLayer) { this.laneLayer.width = this.laneLayer.height = 0; this.laneLayer = null; }
+      body(c);
+    }
     const br = F.branch;
-    const BASE = ['lane/Base_Normal', 'lane/Base_Expert', 'lane/Base_Master'];
-    if (br) {
-      if (br.p < 1) this.putLane(c, BASE[br.from], FIELD_Y);
-      if (br.p > 0) this.alpha(c, br.p, () => this.putLane(c, BASE[br.cur], FIELD_Y));
-    }
-    if (gogo) {
-      // ゴーゴーのレーンは縦にひらいて出てくる（18 ms ごと）
-      const v = step(wall, this.gogoAt, 18);
-      const [ky, dy] = v <= 4 ? [0.2, 54] : v <= 5 ? [0.4, 40] : v <= 6 ? [0.6, 26] : v <= 8 ? [0.8, 13] : [1, 0];
-      this.putLane(c, 'lane/Background_GoGo', FIELD_Y + P(dy), ky);
-    }
     this.putLane(c, 'lane/Background_Sub', P(326));
     // 分岐の名前（普通譜面・玄人譜面・達人譜面）: 前の名前は上へ抜けて消え、新しい名前は下から入ってくる
     if (br) {

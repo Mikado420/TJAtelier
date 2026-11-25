@@ -182,6 +182,9 @@ const RAINBOW_RGB = (() => {
 
 const ease = (x: number) => 1 - (1 - x) * (1 - x);
 
+/** 後ろに動画・画像があるときの、音符が流れる所の不透明度 */
+const LANE_SEE_ALPHA = 0.75;
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   layout!: Layout;
@@ -481,16 +484,28 @@ export class Renderer {
 
   /** レーンの動かない部分（黒い枠・濃い灰色の本体・音符文字の帯） */
   private paintLaneBase(c: CanvasRenderingContext2D, right: number, own = false) {
-    c.fillStyle = '#000';
-    c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, TEXT_BOTTOM - LANE_TOP + 12);
-    c.fillStyle = '#1b2025';
     const top = own ? this.laneTop : LANE_TOP;
-    c.fillRect(LANE_X, top, right - LANE_X, LANE_BOTTOM - top);
+    c.fillStyle = '#000';
+    if (this.laneSeeThrough) {
+      // 後ろに動画・画像があるとき: 音符が流れる所は毎フレーム薄く塗る（drawLane）ので、ここでは縁だけ
+      c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, top - LANE_TOP + 8);
+      c.fillRect(LANE_X - 6, top, 6, TEXT_BOTTOM - top + 4);
+      c.fillRect(LANE_X, TEXT_BOTTOM, right - LANE_X, 4);
+    } else {
+      c.fillRect(LANE_X - 6, LANE_TOP - 8, right - LANE_X + 6, TEXT_BOTTOM - LANE_TOP + 12);
+      c.fillStyle = '#1b2025';
+      c.fillRect(LANE_X, top, right - LANE_X, LANE_BOTTOM - top);
+    }
     // エディタの見本では、音符文字の帯を目立たない暗い色にする
     c.fillStyle = this.preview ? '#242a30' : '#5d6f7a';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, TEXT_BOTTOM - LANE_BOTTOM);
     c.fillStyle = '#000';
     c.fillRect(LANE_X, LANE_BOTTOM, right - LANE_X, 4);
+  }
+
+  /** 後ろに動画・画像があるとき、音符が流れる所を薄くする（不透明度） */
+  private get laneSeeThrough() {
+    return this.videoMode === 'full' && !this.preview;
   }
 
   /** 自分のレーンの上端。動画用の画面では上にゲージが無いので、左のパネルの上端まで伸ばす */
@@ -1206,6 +1221,16 @@ export class Renderer {
 
     // 枠・レーン本体（平らな濃い灰色）・音符文字の帯は背景の canvas に描いてある（paintLaneBase）。
     // ゴーゴータイムだけ、レーンを赤紫に塗り直す
+    // 後ろに動画・画像があるとき: レーン本体（ゴーゴーの色も）はここで薄く塗る
+    const see = this.laneSeeThrough;
+    if (see && !gogo) {
+      ctx.save();
+      ctx.globalAlpha *= LANE_SEE_ALPHA;
+      ctx.fillStyle = '#1b2025';
+      const gt = opp ? LANE_TOP : this.laneTop;
+      ctx.fillRect(LANE_X, gt, right - LANE_X, LANE_BOTTOM - gt);
+      ctx.restore();
+    }
     if (gogo) {
       // 参考動画: 左（判定枠側）は暗い赤茶、右へ行くほど赤紫（グラデーションは一度だけ作って使い回す）
       const cached = this.gogoGrads.get(right);
@@ -1226,7 +1251,9 @@ export class Renderer {
       }
       ctx.fillStyle = this.gogoGrad;
       const gt = opp ? LANE_TOP : this.laneTop;
+      if (see) { ctx.save(); ctx.globalAlpha *= LANE_SEE_ALPHA; }
       ctx.fillRect(LANE_X, gt, right - LANE_X, LANE_BOTTOM - gt);
+      if (see) ctx.restore();
     }
 
     // 譜面分岐: 玄人は青、達人は紫にレーンを染める
