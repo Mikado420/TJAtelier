@@ -125,6 +125,18 @@ export function shiftCourse(c: ECourse, at: number, d: number) {
 /** 分岐しても全部の譜面で同じにする命令（時間の流れ） */
 export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay']);
 
+/** start が tick 以上の、いちばん前の小節の番号（無ければ -1。小節は start の順に並んでいる） */
+function measureFrom(ms: Measure[], tick: number): number {
+  let lo = 0;
+  let hi = ms.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (ms[mid].start >= tick) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo < ms.length ? lo : -1;
+}
+
 /** その tick がどの区間か（区間は時刻の順に並んでいる。無ければ -1） */
 function secOf(bs: EBranch[], tick: number): number {
   let lo = 0;
@@ -519,13 +531,51 @@ export class Timing {
     return this.pointAtTick(tick).bpm;
   }
 
+  /**
+   * #SCROLL・ゴーゴー・小節線の値を引く表（命令の並びが変わったら作り直す）。
+   * pm: 頭からその命令までの tick のいちばん大きい値。idx: 種類ごとの命令の番号（並び順）
+   */
+  private vals?: { ev: EEvent[]; n: number; pm: Float64Array; idx: Record<string, number[]> };
+  private valTable() {
+    const ev = this.course.events;
+    const v = this.vals;
+    if (v && v.ev === ev && v.n === ev.length) return v;
+    const pm = new Float64Array(ev.length);
+    const idx: Record<string, number[]> = { scroll: [], gogo: [], barline: [] };
+    let m = -Infinity;
+    ev.forEach((e, i) => {
+      m = Math.max(m, e.tick);
+      pm[i] = m;
+      idx[e.kind]?.push(i);
+    });
+    return (this.vals = { ev, n: ev.length, pm, idx });
+  }
+
+  /**
+   * tick の所で効いている命令（頭から順に見て、tick を越える命令の手前までで、その種類の最後のもの）。
+   * 命令を 1 つずつ数えると、音符ごとに引くので長い譜面でとても重くなる。表を二分探索して引く
+   */
   private lastValue<K extends 'scroll' | 'gogo' | 'barline'>(kind: K, tick: number) {
-    let v: EEvent | undefined;
-    for (const e of this.course.events) {
-      if (e.tick > tick) break;
-      if (e.kind === kind) v = e;
+    const { ev, pm, idx } = this.valTable();
+    // 頭から見て、初めて tick を越える命令の番号
+    let lo = 0;
+    let hi = pm.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pm[mid] > tick) hi = mid;
+      else lo = mid + 1;
     }
-    return v as Extract<EEvent, { kind: K }> | undefined;
+    const stop = lo;
+    // その手前の、この種類の最後の命令
+    const xs = idx[kind];
+    lo = 0;
+    hi = xs.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid] < stop) lo = mid + 1;
+      else hi = mid;
+    }
+    return (lo > 0 ? ev[xs[lo - 1]] : undefined) as Extract<EEvent, { kind: K }> | undefined;
   }
 
   scrollAt(tick: number) {
@@ -600,7 +650,7 @@ export function toPlayable(chart: EChart, course: ECourse): Course {
   const t = new Timing(chart, course);
   const ms = measures(course, Math.max(0, ...bs.map((b) => b.start)));
   const branches = bs.map((b) => {
-    const i = ms.findIndex((m) => m.start >= b.start);
+    const i = measureFrom(ms, b.start);
     const judgeTick = i > 0 ? ms[i - 1].start : b.start;
     // （直前で決める分岐は、前のとても短い小節の頭 = ほぼ #BRANCHSTART の位置で決まる）
     return { start: t.tickToTime(b.start), end: Number.isFinite(b.end) ? t.tickToTime(b.end) : Infinity, judge: t.tickToTime(judgeTick), type: b.type, x: b.x, y: b.y };
@@ -665,15 +715,18 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
   const msAll = measures(course, cEnd);
   const brJudge = new Set<number>();
   for (const b of course.branches ?? []) {
-    const i = msAll.findIndex((m) => m.start >= b.start);
+    const i = measureFrom(msAll, b.start);
     brJudge.add(i > 0 ? msAll[i - 1].start : b.start);
   }
+  // 分岐を決める、とても短い小節のすぐ後の位置
+  const afterTiny = new Set<number>();
+  for (const p of msAll) if (p.num / p.den <= 1 / 1000 && brJudge.has(p.start)) afterTiny.add(p.start + p.length);
   for (const m of msAll) {
     if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
     const im = t.scrollImAt(m.start);
     // （とても短い小節のすぐ後の小節線はほぼ同じ所に重なるので、それも黄色にする）
-    const br = brJudge.has(m.start) || (bars.length > 0 && !!bars[bars.length - 1].branch && msAll.some((p) => p.start + p.length === m.start && p.num / p.den <= 1 / 1000 && brJudge.has(p.start)));
+    const br = brJudge.has(m.start) || (bars.length > 0 && !!bars[bars.length - 1].branch && afterTiny.has(m.start));
     bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}), ...(br ? { branch: true as const } : {}) });
   }
   // ゴーゴー区間は「直前に通過したノーツ」ではなくイベントの時刻で決める
