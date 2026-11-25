@@ -122,10 +122,12 @@ export class TndeOverlay {
     const L = new TndeLoading(sk, title, subtitle, jacket);
     let phase: 'close' | 'wait' | 'open' = 'close';
     let t = 0;
-    this.band = 0;
+    // 曲えらび（左右が黒い帯）から来たときは、帯は初めから黒
+    const banded = document.body.classList.contains('fr169');
+    this.band = banded ? 1 : 0;
     this.run((c, dt) => {
       t += dt;
-      if (phase === 'close') this.band = Math.min(1, t / 500);
+      if (phase === 'close') this.band = banded ? 1 : Math.min(1, t / 500);
       L.draw(c, phase, t);
     });
     const t0 = performance.now();

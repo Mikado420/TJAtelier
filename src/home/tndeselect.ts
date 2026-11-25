@@ -1661,7 +1661,7 @@ export class TndeSelect {
 
   private jacketImg(s: SongEntry) {
     if (!s.jacket) return null;
-    const key = `${s.id}:${s.jacket}`;
+    const key = `${s.id}:${s.jacket}:${s.jv ?? 0}`;
     if (this.jackets.has(key)) return this.jackets.get(key) ?? null;
     // ジャケットは最近の 6 枚だけ持つ（大きな絵を次々に読むとメモリが足りなくなる）
     while (this.jackets.size >= 6) this.jackets.delete(this.jackets.keys().next().value!);

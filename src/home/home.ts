@@ -615,7 +615,7 @@ export class Home {
   /** ジャケットの画像の URL（無ければ undefined。まだ読んでいなければ読む） */
   private async jacketUrl(s: SongEntry): Promise<string | undefined> {
     if (!s.jacket) return undefined;
-    const key = `${s.id}:${s.jacket}`;
+    const key = `${s.id}:${s.jacket}:${s.jv ?? 0}`;
     const have = this.jkUrls.get(key);
     if (have) return have;
     try {
@@ -809,7 +809,7 @@ export class Home {
     const info = this.diffInfoHtml(s, sel);
     const el = document.getElementById('homeDiff')!;
     el.classList.toggle('ura', this.diffUra && slots.some((x) => x.name === 'Edit'));
-    const jk = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}`) : undefined;
+    const jk = s.jacket ? this.jkUrls.get(`${s.id}:${s.jacket}:${s.jv ?? 0}`) : undefined;
     if (s.jacket && !jk) {
       void this.jacketUrl(s).then((url) => {
         const box = el.querySelector('.hdf-jk');

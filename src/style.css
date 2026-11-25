@@ -448,6 +448,22 @@ body.desk #root { transform-origin: 0 0; transform: scale(var(--rs, 1)); }
   #app { padding: 0; }
 }
 
+/* エディタ・起動のロゴ・プレイ（自分で黒帯を描く）以外の画面は 16:9 の枠に入れ、左右を黒い帯にする（main.ts の fr169）。
+   --fw: 枠の幅、--fo: 左右の帯の幅（どちらも横画面としての論理 px。src/orient.ts の fitRoot） */
+html:has(body.fr169), body.fr169, html:has(body.pre-play), body.pre-play { background: #000; }
+body.pre-play #app { visibility: hidden; }
+body.fr169 #root { width: var(--fw, 100%); left: calc(var(--fo, 0px) * var(--rs, 1)); }
+@media (orientation: portrait) {
+  body.fr169 #root { width: var(--fw, 100%); left: 0; top: var(--fo, 0px); }
+}
+/* 帯の幅のぶん、ノッチなどの余白は要らない */
+body.fr169 { --safe-l: max(0px, calc(env(safe-area-inset-left, 0px) - var(--fo, 0px))); --safe-r: max(0px, calc(env(safe-area-inset-right, 0px) - var(--fo, 0px))); }
+/* 結果・読み込みの幕は、プレイ画面（枠に入れない）の上に出るときも 16:9 の枠に入れ、外は黒くする */
+body:not(.fr169) #result, body:not(.fr169) .curtain { left: var(--fo, 0px); right: var(--fo, 0px); box-shadow: 0 0 0 100vmax #000; }
+/* 起動のロゴは枠の外まで（画面いっぱい）。消えるまで #root の外にはみ出して描く */
+body.fr169 #root:has(> .splash) { overflow: visible; }
+body.fr169 .splash { left: calc(-1 * var(--fo, 0px)); right: calc(-1 * var(--fo, 0px)); }
+
 .calib { display: flex; flex-direction: column; gap: 8px; }
 .calib .note { color: var(--sub); font-size: 12px; line-height: 1.6; margin: 0; }
 .calib button { background: var(--btn-on); color: var(--accent); font-weight: 700; padding: 10px; white-space: normal; }
@@ -1542,7 +1558,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   position: absolute; inset: 0; z-index: 12; background: var(--bg);
   background-image: var(--stripes);
   display: flex; flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: env(safe-area-inset-top) var(--safe-r) env(safe-area-inset-bottom) var(--safe-l);
   color: #fff;
 }
 .ol.hidden { display: none; }
@@ -1690,7 +1706,7 @@ html:has(body.tja-open), body.tja-open { background: var(--deep); }
   background: linear-gradient(var(--sky1), var(--sky2));
   transition: background 0.6s;
   display: flex; flex-direction: column;
-  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: 0 var(--safe-r) env(safe-area-inset-bottom) var(--safe-l);
   animation: resIn 0.45s ease-out;
 }
 @keyframes resIn { from { filter: brightness(0); } }

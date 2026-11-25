@@ -30,6 +30,8 @@ export interface SongEntry {
   videoOffset?: number;
   /** ジャケットの画像のファイル名（無ければ undefined） */
   jacket?: string;
+  /** ジャケットを入れ直した時刻（同じ名前の絵に替えたときも、読み直すため） */
+  jv?: number;
   /** 背景の画像のファイル名（無ければ undefined） */
   bgImage?: string;
   demoStart: number;
@@ -112,7 +114,7 @@ export function entryOf(id: string, chart: EChart, prev: Partial<SongEntry> = {}
     courses: chart.courses.map((c) => ({ name: c.name, level: c.level })),
     folders: prev.folders ?? (prev.folder ? [prev.folder] : []),
     ...(prev.video ? { video: prev.video, videoOffset: prev.videoOffset } : {}),
-    ...(prev.jacket ? { jacket: prev.jacket } : {}),
+    ...(prev.jacket ? { jacket: prev.jacket, ...(prev.jv ? { jv: prev.jv } : {}) } : {}),
     ...(prev.bgImage ? { bgImage: prev.bgImage } : {}),
     audioName: chart.wave,
     demoStart: chart.demoStart,
@@ -221,7 +223,7 @@ export async function loadSongVideo(id: string): Promise<{ name: string; data: A
 export async function saveSongJacket(id: string, j: JacketFile | null) {
   if (j) await dbPut(kJacket(id), j);
   else await dbDel(kJacket(id));
-  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, jacket: j?.name } : x)));
+  await writeIndex((list) => list.map((x) => (x.id === id ? { ...x, jacket: j?.name, jv: Date.now() } : x)));
 }
 
 export const loadSongJacket = (id: string) => dbGet<JacketFile>(kJacket(id));

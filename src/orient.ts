@@ -96,6 +96,12 @@ export function fitRoot() {
     st.setProperty('--rs', String(K));
     st.setProperty('--vw', `${W / K}px`);
     st.setProperty('--vh', `${H / K}px`);
+    // 16:9 の枠（エディタ・起動のロゴ以外の画面）: 横画面としての幅・高さから、枠の幅と左右の帯の幅
+    const lw = (portrait.matches ? H : W) / K;
+    const lh = (portrait.matches ? W : H) / K;
+    const fw = Math.min(lw, (lh * 16) / 9);
+    st.setProperty('--fw', `${fw}px`);
+    st.setProperty('--fo', `${(lw - fw) / 2}px`);
     // TJA の画面（縦向き）の高さ。ホーム画面から開いたとき（standalone）は innerHeight が上の帯のぶん短いことがあるので、
     // 画面そのものの高さを使う（iPhone の screen.height は向きに関係なく長い辺）
     const standalone = (navigator as Navigator & { standalone?: boolean }).standalone || matchMedia('(display-mode: standalone)').matches;

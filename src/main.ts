@@ -2921,6 +2921,38 @@ async function saveZipOf(chart: EChart) {
   download(await writeZip(files), `${name}.zip`);
 }
 
+/**
+ * ファイルを 1 つ選ぶ。iPhone では、ページに入っていない input は選んだ後に change が来ないことがあるので、
+ * 選び終わるまでページに入れておく（見えない所に。sheetBody の外）
+ */
+let pickingInput: HTMLInputElement | null = null;
+function pickOneFile(accept: string, use: (f: File) => Promise<void> | void) {
+  pickingInput?.remove();
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = accept;
+  inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+  document.body.appendChild(inp);
+  pickingInput = inp;
+  let done = false;
+  const got = async () => {
+    const f = inp.files?.[0];
+    if (done || !f) return;
+    done = true;
+    inp.remove();
+    if (pickingInput === inp) pickingInput = null;
+    try {
+      await use(f);
+    } catch (err) {
+      busyEnd();
+      toast(`「${f.name}」を入れられませんでした: ${(err as Error).message}`);
+    }
+  };
+  inp.addEventListener('change', () => void got());
+  inp.addEventListener('input', () => void got());
+  inp.click();
+}
+
 async function fileAction(act: string) {
   if (act === 'open') pickFiles('any');
   else if (act === 'audio') { if (collab.canChangeAudio()) pickFiles('audio'); }
@@ -2950,19 +2982,15 @@ async function fileAction(act: string) {
     toast(`${name} を${act === 'dupCourse' ? '複製して' : ''}追加しました`);
   } else if (act === 'pickBg') {
     if (!currentSongId) return;
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
-    inp.addEventListener('change', async () => {
-      const f = inp.files?.[0];
-      if (!f || !currentSongId) return;
+    pickOneFile('image/*', async (f) => {
+      const id = currentSongId;
+      if (!id) return;
       const name = f.name.replace(/[\\/:*?"<>|]+/g, '_') || 'bg.png';
-      await saveSongBgImage(currentSongId, { name, data: await f.arrayBuffer() });
+      await saveSongBgImage(id, { name, data: await f.arrayBuffer() });
       ed.mutate(() => setHdr(ed.chart, 'BGIMAGE', name));
-      await refreshJacket(currentSongId);
+      await refreshJacket(id);
       if (sheet === 'info') renderSheet();
     });
-    inp.click();
   } else if (act === 'rmBg') {
     if (!currentSongId) return;
     await saveSongBgImage(currentSongId, null);
@@ -2971,19 +2999,15 @@ async function fileAction(act: string) {
     renderSheet();
   } else if (act === 'pickJacket') {
     if (!currentSongId) return;
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.accept = 'image/*';
-    inp.addEventListener('change', async () => {
-      const f = inp.files?.[0];
-      if (!f || !currentSongId) return;
+    pickOneFile('image/*', async (f) => {
+      const id = currentSongId;
+      if (!id) return;
       const name = f.name.replace(/[\\/:*?"<>|]+/g, '_') || 'jacket.png';
-      await saveSongJacket(currentSongId, { name, data: await f.arrayBuffer() });
+      await saveSongJacket(id, { name, data: await f.arrayBuffer() });
       ed.mutate(() => setHdr(ed.chart, 'PREIMAGE', name));
-      await refreshJacket(currentSongId);
+      await refreshJacket(id);
       if (sheet === 'info') renderSheet();
     });
-    inp.click();
   } else if (act === 'rmJacket') {
     if (!currentSongId) return;
     await saveSongJacket(currentSongId, null);
@@ -3258,6 +3282,7 @@ async function openSong(id: string, mode: 'edit' | 'play', course?: string) {
   } finally {
     // 始められなかったとき（譜面が空など）は幕を消す
     play.cancelLoading();
+    document.body.classList.remove('pre-play');
   }
 }
 
@@ -3293,6 +3318,8 @@ async function openSongInner(id: string, mode: 'edit' | 'play', data: NonNullabl
   if (id !== currentSongId) return;
   // 長さが分からなかった曲は、開いたときに覚える
   if (audio.buffer) void persist();
+  // 遊ぶとき: 曲えらびを隠してからプレイ画面が出るまで、後ろのエディタを見せない（幕が閉じきる前に読み終わったとき）
+  if (mode === 'play') document.body.classList.add('pre-play');
   home.hide();
   updateHeader();
   if (mode === 'play') await startTest(true);
@@ -3409,6 +3436,29 @@ $('btnHome').addEventListener('click', async () => {
   await persist();
   await home.show(currentSongId);
 });
+// 16:9 の枠（左右の黒帯）: 曲えらび・結果・オンラインの画面のとき。エディタ・プレイ（自分で帯を描く）のときは外す
+{
+  const rootEl = $('root');
+  const shown = (el: Element | null) => !!el && !el.classList.contains('hidden');
+  let on: boolean | null = null;
+  const update = () => {
+    const playing = shown($('play'));
+    if (playing) document.body.classList.remove('pre-play');
+    const fr = !playing && (shown($('home')) || shown($('result')) || [...rootEl.querySelectorAll(':scope > .ol')].some(shown));
+    if (fr === on) return;
+    on = fr;
+    document.body.classList.toggle('fr169', fr);
+    // 画面の大きさが変わったので、キャンバスの画面に測り直させる
+    window.dispatchEvent(new Event('resize'));
+  };
+  const mo = new MutationObserver(update);
+  for (const id of ['home', 'play', 'result']) mo.observe($(id), { attributes: true, attributeFilter: ['class'] });
+  const watchOl = () => { for (const el of rootEl.querySelectorAll(':scope > .ol')) mo.observe(el, { attributes: true, attributeFilter: ['class'] }); };
+  new MutationObserver(() => { watchOl(); update(); }).observe(rootEl, { childList: true });
+  watchOl();
+  update();
+}
+
 // 起動のロゴ: 効果音を読み込んでから、音と動きをそろえて始める。
 // 曲えらびの準備ができて、ロゴを 2 秒見せたら、もう一つの効果音とともに帯が駆け抜けて消える。
 // 効果音が鳴っているあいだは試聴（曲の音）を鳴らさない
@@ -5401,12 +5451,7 @@ const ARR_IC = {
 
 /** 別の音源を読み込んで、track の t 秒の所に置く */
 function arrAddSource(track: number, t: number, onDone: () => void) {
-  const inp = document.createElement('input');
-  inp.type = 'file';
-  inp.accept = 'audio/*,.ogg,.mp3,.wav,.m4a,.aac,.flac';
-  inp.addEventListener('change', async () => {
-    const f = inp.files?.[0];
-    if (!f) return;
+  pickOneFile('audio/*,.ogg,.mp3,.wav,.m4a,.aac,.flac', async (f) => {
     try {
       busy(`「${f.name}」を読み込んでいます…`);
       const buf = await audio.ctx.decodeAudioData(await f.arrayBuffer());
@@ -5425,7 +5470,6 @@ function arrAddSource(track: number, t: number, onDone: () => void) {
       toast(`「${f.name}」は読み込めませんでした`);
     }
   });
-  inp.click();
 }
 
 function renderCutSheet(body: HTMLElement) {
