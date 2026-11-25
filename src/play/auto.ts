@@ -11,8 +11,9 @@ export interface AutoEvent {
   note?: Note;
 }
 
-/** 連打は 1 秒に 35 打。風船は時間内に割れる速さ（上限 1 秒に 50 打） */
+/** 連打は 1 秒に 35 打。風船は時間内に割れる速さ（1 秒に 30〜50 打） */
 const ROLL_RATE = 35;
+const BALLOON_MIN_RATE = 30;
 const BALLOON_MAX_RATE = 50;
 
 /**
@@ -49,8 +50,8 @@ export function buildAutoEvents(notes: readonly Note[], from = -Infinity): AutoE
       const end = Math.max(n.time, stopAt(n.time, n.endTime ?? n.time));
       const hits = Math.max(1, n.hits ?? 5);
       const dur = Math.max(0, end - n.time);
-      // 受付時間の 9 割で割り切る速さ。ただし 1 秒 50 打まで
-      const rate = Math.min(BALLOON_MAX_RATE, dur > 0 ? Math.max(1, (hits - 1) / (dur * 0.9)) : BALLOON_MAX_RATE);
+      // 受付時間の 9 割で割り切る速さ。ただし 1 秒に 30 打より遅くはしない（50 打まで）
+      const rate = Math.min(BALLOON_MAX_RATE, dur > 0 ? Math.max(BALLOON_MIN_RATE, (hits - 1) / (dur * 0.9)) : BALLOON_MAX_RATE);
       for (let k = 0; k < hits; k++) {
         const t = n.time + k / rate;
         if (t > end + 1e-6) break;

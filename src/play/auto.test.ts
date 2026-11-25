@@ -19,6 +19,12 @@ describe('オートの打撃', () => {
     expect(ev[19].pop).toBe(true);
     expect(ev[19].t).toBeLessThanOrEqual(1);
   });
+  it('風船は長くても 1 秒に 30 打より遅く叩かない', () => {
+    const ev = buildAutoEvents([note({ type: 'balloon', time: 0, endTime: 4, hits: 10 })]);
+    expect(ev.length).toBe(10);
+    expect(ev[9].pop).toBe(true);
+    expect(ev[9].t).toBeCloseTo(9 / 30, 6);
+  });
   it('風船の速さは 1 秒 50 打まで（間に合わなければ割れない）', () => {
     const ev = buildAutoEvents([note({ type: 'balloon', time: 0, endTime: 0.5, hits: 100 })]);
     expect(ev.length).toBeLessThanOrEqual(26);
