@@ -322,14 +322,17 @@ function toast(msg: string) {
 
 // ---------- 音源 ----------
 
+/** 何回目の setAudio か（読み込み中に別の曲を開いたら、前の曲の音源で上書きしない） */
+let audioGen = 0;
 async function setAudio(file: AudioFile | null, save = true) {
+  const gen = ++audioGen;
   ed.audio = file;
   try {
     await audio.loadMusic(file ? file.data.slice(0) : null);
   } catch {
-    await audio.loadMusic(null);
-    toast(`「${file?.name}」は再生できません`);
+    if (gen === audioGen) toast(`「${file?.name}」は再生できません`);
   }
+  if (gen !== audioGen) return;
   if (save) {
     if (collab.active) void collab.audioChanged(file);
     else void persist(file);
@@ -1432,7 +1435,8 @@ async function persist(audioFile?: AudioFile | null) {
   clearTimeout(saveTimer);
   // 曲を開いていないとき（曲選択の画面だけのとき）は保存しない
   if (!currentSongId) return;
-  await saveSong(currentSongId, { chart: ed.chart, courseIndex: ed.courseIndex }, audioFile, audio.buffer ? audio.musicDuration : 0);
+  // 音源を読み込み中（まだ無い）ときは、覚えている長さを変えない
+  await saveSong(currentSongId, { chart: ed.chart, courseIndex: ed.courseIndex }, audioFile, audio.buffer ? audio.musicDuration : undefined);
 }
 /** 音源のファイル名を WAVE: に合わせる（曲の情報や TJA のテキストで WAVE: を変えたとき） */
 function syncAudioName() {
@@ -3300,6 +3304,8 @@ async function openSongInner(id: string, mode: 'edit' | 'play', data: NonNullabl
   void setCurrentId(id);
   ed.load(data.chart, null, data.courseIndex);
   view.pos = 0;
+  // 前の曲の音源はすぐ外す（新しい音源を読み終わる前に再生しても、前の曲が流れないように。読み込み中の前の曲の音源も捨てる）
+  void setAudio(null, false);
   // エディタは譜面だけ先に出す（音源の読み込み・変換を待たない）
   if (mode === 'edit') { home.hide(); updateHeader(); }
   let a = await loadSongAudio(id);

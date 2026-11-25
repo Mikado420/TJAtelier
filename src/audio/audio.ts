@@ -247,9 +247,30 @@ export class AudioEngine {
     this.hitLevel[kind] = AudioEngine.level(this.customHit[kind] ?? this.builtinHit(kind), true);
   }
 
-  async loadMusic(buf: ArrayBuffer | null) {
-    this.music = buf ? await this.ctx.decodeAudioData(buf) : null;
-    this.musicLevel = this.music ? AudioEngine.level(this.music, false) : 0;
+  /** 何回目の loadMusic か（読み込み中に別の曲を入れたら、前の曲の読み込み結果は捨てる） */
+  private musicGen = 0;
+
+  /**
+   * 曲を入れる（null で無し）。読み終わる前にもう一度呼ばれたら、前の呼び出しの結果は使わない（false を返す）。
+   * 読めない音源は、曲を無しにしてから投げる
+   */
+  async loadMusic(buf: ArrayBuffer | null): Promise<boolean> {
+    const g = ++this.musicGen;
+    let m: AudioBuffer | null = null;
+    try {
+      m = buf ? await this.ctx.decodeAudioData(buf) : null;
+    } catch (e) {
+      if (g === this.musicGen) this.setMusic(null);
+      throw e;
+    }
+    if (g !== this.musicGen) return false;
+    this.setMusic(m);
+    return true;
+  }
+
+  private setMusic(m: AudioBuffer | null) {
+    this.music = m;
+    this.musicLevel = m ? AudioEngine.level(m, false) : 0;
     this.applyMix();
   }
 
