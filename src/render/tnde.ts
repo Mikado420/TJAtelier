@@ -128,6 +128,13 @@ const GENRES: [RegExp, string][] = [
 ];
 
 /** 踊り子 1（3 人で 1 枚）の動き: [絵の番号, 長さ（16 分の数）]。16 拍で 1 回り（参考動画で数えた） */
+/**
+ * のぼりの上の背景（Bg_up/0）の、鈴を持ったキャラの動き（参考動画「Glitch hoppin'」で 1 コマずつ測った）。
+ * 1.8337 秒（ほぼ 110 コマ）で 1 回り: 大きく跳ねて速く左へ → 小さく 2 回はずんでゆっくり左へ。1 回りでちょうど 1 人ぶん（492px）左へ進む。
+ * BELL_X は 1 回りの始めからの横のずれ、BELL_Y はコマの左上の y（どちらも 1920 の画面の px）
+ */
+const BELL_X = [0.0, -7.3, -14.5, -22.0, -29.5, -37.3, -45.0, -52.5, -60.0, -67.7, -75.5, -82.9, -90.3, -98.0, -106.2, -113.7, -121.4, -129.1, -136.9, -144.3, -151.8, -159.3, -166.8, -173.8, -181.0, -188.0, -195.0, -201.7, -208.5, -215.0, -222.0, -228.0, -234.0, -239.7, -241.3, -243.3, -245.3, -248.0, -250.3, -252.3, -254.3, -257.0, -259.3, -261.3, -262.1, -265.1, -268.3, -270.3, -272.3, -275.0, -277.0, -279.3, -281.3, -283.7, -286.0, -288.3, -290.3, -292.7, -294.9, -297.3, -299.3, -301.4, -304.0, -306.3, -308.4, -310.3, -313.0, -315.3, -317.3, -319.3, -322.1, -324.3, -326.3, -328.4, -331.0, -333.0, -335.3, -337.7, -340.0, -342.0, -344.7, -346.6, -349.0, -351.3, -353.6, -355.6, -357.9, -360.3, -362.6, -364.9, -366.9, -369.2, -371.3, -377.4, -383.3, -389.3, -396.0, -402.0, -408.3, -415.0, -421.3, -428.0, -435.0, -442.0, -448.7, -455.7, -463.0, -470.0, -477.0, -484.3];
+const BELL_Y = [-50.0, -52.1, -53.5, -55.0, -57.1, -58.1, -59.1, -60.1, -61.1, -61.6, -62.1, -62.1, -62.1, -62.1, -62.1, -61.6, -61.2, -60.3, -59.3, -57.8, -56.3, -54.2, -52.2, -50.3, -48.2, -45.2, -42.7, -39.7, -36.2, -33.1, -29.1, -25.1, -21.1, -17.1, -17.1, -15.1, -12.1, -10.1, -8.1, -6.1, -4.1, -3.1, -1.1, -0.1, 1.8, 2.9, 3.9, 4.9, 4.9, 5.9, 5.9, 6.9, 6.9, 6.9, 6.0, 4.9, 2.9, 2.0, 1.0, 0.1, -1.1, -3.1, -4.1, -5.1, -6.0, -7.1, -9.1, -10.1, -11.0, -12.1, -13.0, -15.1, -16.1, -17.1, -15.2, -12.4, -10.4, -8.4, -6.5, -4.4, -3.4, -1.5, -0.4, 1.2, 2.2, 3.3, 4.3, 4.6, 5.2, 5.6, 6.2, 6.2, 6.2, 2.3, -1.8, -5.8, -9.4, -13.4, -16.4, -20.4, -23.4, -26.4, -29.4, -32.4, -35.4, -38.4, -41.1, -43.4, -45.4, -47.9];
 const DANCE_A: [number, number][] = [[0, 2], [1, 2], [2, 2], [1, 2], [0, 2], [1, 2], [2, 1], [2, 1], [4, 1], [5, 1], [6, 2], [7, 2], [8, 2], [7, 2], [6, 2], [7, 2], [8, 2], [5, 2]];
 const DANCE_B = [10, 11, 3, 11, 10, 11, 3, 11, 10, 13, 14, 15, 14, 13, 14, 15, 14, 13];
 
@@ -196,7 +203,7 @@ export class TndeSkin {
   ready = false;
   private beatTab: { course: Course; cum: number[] } | null = null;
   /** 曲ごとに決める背景（上・下）と踊り子 */
-  private pick = { up: 2, down: 5, dancer: 1, key: '' };
+  private pick = { up: 2, down: 5, dancer: 1, clr: 0, key: '' };
   /** 読み込んである絵の組（背景・踊り子） */
   private loadedSet = '';
 
@@ -288,6 +295,9 @@ export class TndeSkin {
     if (!p.key && !this.force && /^(bg\/Bg_(up|down)\/|dancer\/Normal1$|mob$)/.test(name)) return false;
     let m = /^bg\/Bg_up\/([^/]+)\//.exec(name);
     if (m) return m[1] === String(p.up);
+    // クリアの下の背景: 曲ごとに 2 つのうち 1 つ（c/0 は切り分けた bg/clear/ を使う）。魂ゲージが半分を超えてから読む
+    if (name.startsWith('bg/Bg_down/c/')) return name.startsWith('bg/Bg_down/c/1/') && p.clr === 1 && this.clearWant;
+    if (name.startsWith('bg/clear/')) return p.clr === 0;
     m = /^bg\/Bg_down\/([^/]+)\//.exec(name);
     if (m) return m[1] === String(p.down);
     if (/^gauge\/(base|fill|rainbow)\d$/.test(name)) return name.endsWith('3');
@@ -308,7 +318,7 @@ export class TndeSkin {
 
   /** 読む絵の組の名前（変わったら読み直す） */
   private setKey() {
-    return `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}|${+(this.need.balloon && this.evBalloon)}${+(this.need.gogo && this.evGogo)}${+this.clearWant}${+this.maxWant}${+this.inWant}|${this.view}`;
+    return `${this.dormant ? 'z' : ''}${this.pick.key ? '' : '-'}${this.pick.up}|${this.pick.down}|${this.pick.dancer}|${this.pick.clr}|${+(this.need.balloon && this.evBalloon)}${+(this.need.gogo && this.evGogo)}${+this.clearWant}${+this.maxWant}${+this.inWant}|${this.view}`;
   }
   /** 隠れていて描かない所（full: 上下の背景・踊り子、bottom: 下の背景・踊り子、lane: レーンと左のパネルだけ） */
   private view: '' | 'full' | 'bottom' | 'lane' = '';
@@ -690,13 +700,13 @@ export class TndeSkin {
   bgPhase = 0;
 
   /** 背景・踊り子を決める（指定しなければ曲名で決まる） */
-  force: { up: number; down: number; dancer: number } | null = null;
+  force: { up: number; down: number; dancer: number; clr?: number } | null = null;
 
   private choose(title: string) {
-    if (this.force) { this.pick = { ...this.force, key: '' }; return; }
+    if (this.force) { this.pick = { clr: 0, ...this.force, key: '' }; return; }
     if (this.pick.key === title) return;
     const h = hash(title);
-    this.pick = { key: title, up: [2, 3][h % 2], down: [1, 2, 4, 5][(h >>> 3) % 4], dancer: (h >>> 7) % 2 ? 1 : 2 };
+    this.pick = { key: title, up: [0, 2, 3][h % 3], down: [1, 2, 4, 5][(h >>> 3) % 4], dancer: (h >>> 7) % 2 ? 1 : 2, clr: (h >>> 11) % 2 };
   }
 
   // ---------- 状態の変わり目 ----------
@@ -1083,6 +1093,7 @@ export class TndeSkin {
     // 上の背景は 1 秒に 92.4px ずつ左へ流れる（参考動画で測った）
     const sc = (wall / 1000) * 92.4 - this.bgPhase;
     const fade = clear ? Math.min(1, (wall - this.clearAt) / 200) : 0;
+    if (u === 0) { this.drawUp0(c, wall, clear); return; }
     if (u === 2) {
       const tw = 326 * S;
       const o = -(((sc % tw) + tw) % tw);
@@ -1145,6 +1156,61 @@ export class TndeSkin {
       if (fade < 1) layer(0);
       this.alpha(c, fade, () => layer(2));
     }
+  }
+
+  /** クリアの色に変わる時間（上の背景 0・1。参考動画で測った） */
+  private static readonly UP_FADE = 150;
+
+  /**
+   * のぼりの上の背景（Bg_up/0）。参考動画「Glitch hoppin'」で測った:
+   * - のぼり: Base.png の 2 段（濃い・薄いのぼりが 1 本おきに並ぶ）を重ねた 328×154 を 1.5 倍にして、縦横に並べる。
+   *   上の端は y = -79、1 秒に 92.2px 左へ流れる。ふだんは赤（左の組）、クリアは黄と白（右の組）
+   * - 鈴を持ったキャラ: 492px おきに並び（持ち物は 鞠・風車・でんでん太鼓・団子 の順）、BELL_X・BELL_Y の動きで跳ねながら左へ進む。
+   *   ふだんは桃（1 段目）、クリアは橙（3 段目）
+   */
+  private drawUp0(c: CanvasRenderingContext2D, wall: number, clear: boolean) {
+    const fade = clear ? Math.min(1, (wall - this.clearAt) / TndeSkin.UP_FADE) : 0;
+    const t = wall / 1000;
+    const TW0 = 328 * S;
+    // 位置の基準は参考動画の時刻に合わせてある（動画の 20 秒 = wall 20000 で同じ絵になる）
+    const ox = -((((t * 92.2 + 227.5) % TW0) + TW0) % TW0);
+    const banners = (set: number) => {
+      c.save();
+      c.translate(ox, 0);
+      this.cached(c, `up0b${set}`, '', -TW0, -79, TW + TW0 * 3, 320, (g) => {
+        for (let x = -TW0; x < TW + TW0 * 2; x += TW0) {
+          for (const y of [-79, -79 + 231]) {
+            this.put(g, 'bg/Bg_up/0/Base', x, y, set * 328, 0, 328, 154);
+            this.put(g, 'bg/Bg_up/0/Base', x, y, set * 328, 154, 328, 154);
+          }
+        }
+      });
+      c.restore();
+    };
+    // 鈴のキャラ: f = 1 回りの中の何コマ目か、n = 何回り目か
+    // 1 回りは 1.8337 秒（動画の 20〜100 秒の 44 回りで測った）
+    const fr = (t - 20) * (110 / 1.83371);
+    const n = Math.floor(fr / 110);
+    const f = fr - n * 110;
+    const i0 = Math.floor(f);
+    const k = f - i0;
+    const xa = BELL_X[i0];
+    const xb = i0 + 1 < 110 ? BELL_X[i0 + 1] : -492;
+    const ya = BELL_Y[i0];
+    const yb = BELL_Y[(i0 + 1) % 110];
+    const dx = xa + (xb - xa) * k;
+    const y = ya + (yb - ya) * k;
+    const bells = (row: number) => {
+      // いちばん左のキャラの番号（持ち物は番号 % 4）
+      const base = 104.7 + dx - 492 * n;
+      const first = Math.floor((-500 - base) / 492);
+      for (let j = first; base + 492 * j < TW; j++) {
+        const v = ((j % 4) + 4) % 4;
+        this.put(c, 'bg/Bg_up/0/Bells', base + 492 * j, y, v * 328, row * 233, 328, 233);
+      }
+    };
+    if (fade < 1) { banners(0); bells(0); }
+    if (fade > 0) this.alpha(c, fade, () => { banners(2); bells(2); });
   }
 
   /**
@@ -1455,14 +1521,17 @@ export class TndeSkin {
       g.globalAlpha = 1;
     };
     // クリアの背景が出きったら、その下は見えないので描かない
-    if (!clear || wall - this.clearAt < 200) {
+    if (!clear || wall - this.clearAt < (this.pick.clr === 1 ? 150 : 200)) {
       this.cached(c, 'down0', `${d}`, 0, 540, TW, 540, bake(0.8));
       // 光る絵のある所だけ重ねる（重ならない四角に分けてある。1280×360 の絵の中の位置）
       const parts = (TndeSkin.GLOW_AT[d] ?? []).map(([x0, y0, x1, y1]) => [x0 * S, 540 + y0 * S, (x1 - x0) * S, (y1 - y0) * S]);
       if (parts.length) this.alpha(c, (pulse - 0.8) / 0.2, () => this.cached(c, 'down1', `${d}`, 0, 540, TW, 540, bake(1), parts));
     }
     if (d === 4) this.drawPetals(c, wall);
-    if (clear) this.drawClearDown(c, wall, now);
+    if (clear) {
+      if (this.pick.clr === 1) this.drawClearDown1(c, wall);
+      else this.drawClearDown(c, wall, now);
+    }
     this.drawRollCharas(c, wall);
     this.drawDancers(c, beat, wall);
   }
@@ -1538,6 +1607,60 @@ export class TndeSkin {
   }
   private inAt = [-1, -1, -1, -1, -1];
   private dancePhase = 0;
+
+  /**
+   * クリアの下の背景 c/1（波の模様の地に、縁起物の 4 枚の帯）。参考動画「Glitch hoppin'」で 1 コマずつ測った:
+   * - 0.15 秒で前の背景から変わる。地（DownClear）は動かない
+   * - 帯 1・3 は y = 540、帯 2・4 は y = 420 から 1 秒ごとに上下する（C1_BOB）
+   * - 画面にある部品は、クリアから 0.2〜0.37 秒の間に 1 つずつ入ってくる: 帯 1 は下から、帯 2 は上から（C1_IN）。
+   *   行き過ぎて戻る。0.467 秒から、4 枚とも 1 秒に 60px 左へ流れる（3843px でひと回り）
+   */
+  /** 帯の重なり順（奥から） */
+  private static readonly C1_ORDER = [1, 2, 3, 4];
+  private static readonly C1_BOB = [-1, -2, 0, 2, 4, 6, 8, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 30, 32, 34, 36, 38, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 7, 6, 5, 4, 3, 2, 1, 0];
+  /** 入ってくる部品: [帯, 絵の中の x, y, w, h, 止まる時刻（クリアからの秒）, 落ちてくるときの傾き（度。招き猫だけ傾いて落ちてくる）] */
+  private static readonly C1_IN: [number, number, number, number, number, number, number?][] = [
+    [1, 1194, 220, 108, 125, 0.2], [1, 656, 12, 429, 211, 0.233], [1, 699, 237, 147, 123, 0.233], [1, 515, 259, 98, 92, 0.26],
+    [1, 258, 0, 323, 252, 0.3], [1, 282, 279, 139, 81, 0.32], [1, 242, 325, 34, 35, 0.33], [1, 0, 180, 145, 180, 0.367],
+    [2, 863, 29, 823, 413, 0.2], [2, 383, 100, 331, 350, 0.267], [2, 69, 48, 270, 379, 0.35, -5],
+  ];
+  private drawClearDown1(c: CanvasRenderingContext2D, wall: number) {
+    const t = (wall - this.clearAt) / 1000;
+    const W = 2562 * S;
+    const x0 = t < 0.467 ? 0 : -(((60 * (t - 0.467)) % W) + W) % W;
+    const fb = Math.floor((t - 0.95) * 60);
+    const bob = TndeSkin.C1_BOB[((fb % 60) + 60) % 60];
+    const entering = t < 0.6;
+    this.alpha(c, Math.min(1, t / 0.15), () => {
+      this.cached(c, 'c1bg', '', 0, 540, TW, 540, (g) => this.put(g, 'bg/Bg_down/c/1/DownClear', 0, 540));
+      for (const n of TndeSkin.C1_ORDER) {
+        const name = `bg/Bg_down/c/1/DownClear${n}`;
+        const y = n % 2 ? 540 : 420 + bob;
+        if (entering && n <= 2) {
+          for (const [L, sx, sy, sw, sh, at, tilt] of TndeSkin.C1_IN) {
+            if (L !== n) continue;
+            const k = (t - at) * 60;
+            let d: number;
+            // 帯 1: 下から 1 コマに 48.5px で上がり、40px 行き過ぎて戻る。帯 2: 上から 1 コマに 51px で落ち、44px 行き過ぎて戻る
+            if (n === 1) d = k < 0 ? -48.5 * k : k < 4 ? -10 * k : k < 7 ? (-40 * (7 - k)) / 3 : 0;
+            else d = k < 0 ? 51 * k : k < 4 ? 11 * k : k < 8 ? 11 * (8 - k) : 0;
+            const x = x0 + sx * S;
+            const yy = y + sy * S + d;
+            const a = tilt && k < -3 ? Math.max(-30, tilt * (-3 - k)) : 0;
+            if (!a) { this.put(c, name, x, yy, sx, sy, sw, sh); continue; }
+            c.save();
+            c.translate(x + (sw * S) / 2, yy + (sh * S) / 2);
+            c.rotate((a * Math.PI) / 180);
+            this.put(c, name, (-sw * S) / 2, (-sh * S) / 2, sx, sy, sw, sh);
+            c.restore();
+          }
+          continue;
+        }
+        this.put(c, name, x0, y);
+        if (x0 + W < TW) this.put(c, name, x0 + W, y);
+      }
+    });
+  }
 
   /**
    * クリアの下の背景（金の市松・雲・こま・松と梅）。0.2 秒で現れる。
