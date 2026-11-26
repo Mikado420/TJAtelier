@@ -706,7 +706,7 @@ export class TndeSkin {
     if (this.force) { this.pick = { clr: 0, ...this.force, key: '' }; return; }
     if (this.pick.key === title) return;
     const h = hash(title);
-    this.pick = { key: title, up: [0, 2, 3][h % 3], down: [1, 2, 4, 5][(h >>> 3) % 4], dancer: (h >>> 7) % 2 ? 1 : 2, clr: (h >>> 11) % 2 };
+    this.pick = { key: title, up: [0, 1, 2, 3][h % 4], down: [1, 2, 4, 5][(h >>> 3) % 4], dancer: (h >>> 7) % 2 ? 1 : 2, clr: (h >>> 11) % 2 };
   }
 
   // ---------- 状態の変わり目 ----------
@@ -1094,6 +1094,7 @@ export class TndeSkin {
     const sc = (wall / 1000) * 92.4 - this.bgPhase;
     const fade = clear ? Math.min(1, (wall - this.clearAt) / 200) : 0;
     if (u === 0) { this.drawUp0(c, wall, clear); return; }
+    if (u === 1) { this.drawUp1(c, wall, clear); return; }
     if (u === 2) {
       const tw = 326 * S;
       const o = -(((sc % tw) + tw) % tw);
@@ -1168,6 +1169,75 @@ export class TndeSkin {
    * - 鈴を持ったキャラ: 492px おきに並び（持ち物は 鞠・風車・でんでん太鼓・団子 の順）、BELL_X・BELL_Y の動きで跳ねながら左へ進む。
    *   ふだんは桃（1 段目）、クリアは橙（3 段目）
    */
+  /**
+   * 六角と梅の上の背景（Bg_up/1）。参考動画「ベースラインやってる?笑」で 1 コマずつ測った:
+   * - 下地（UPScroll_0）: 329×184 を 1.5 倍で横に並べ、y = 0。1 秒に 92.53px 左へ
+   * - そのほか（梅・キャラ・六角）: 984px（1.5 倍で 1476px）の組で、1 秒に 92.2px 左へ
+   * - 六角（UPScroll_1・Normal_0〜2）とキャラ: 2 秒で 1 往復、まっすぐ上下する（y = -5〜-15）
+   * - 白い梅の固まり: 2 秒で 1 往復、なめらかに上下（y = -2〜-18）。小さい梅: 上の端を止めて 0.9 倍まで縮む
+   * - 4 秒ごとに、Normal_0〜2 の六角が左の端を軸に 0.1 秒で裏返って消え、後ろからキャラが上がってくる。
+   *   2.6 秒ほどでキャラが下がり、六角がまた 0.1 秒で表に返る
+   */
+  private static readonly UP1_HEX: [number, number, number, number][] = [[48, 14, 94, 110], [284, 14, 94, 110], [750, 93, 94, 111]];
+  private static readonly UP1_MOF: [number, number, number, number, number][] = [
+    // [x, y, w, h, 種類（0: 小さい梅・縮む、1: 白い梅の固まり・上下）]
+    [160, 0, 79, 71, 0], [488, 0, 79, 71, 0], [816, 0, 79, 71, 0],
+    [55, 151, 78, 74, 0], [383, 151, 78, 74, 0], [711, 151, 78, 74, 0],
+    [166, 45, 215, 171, 1], [494, 45, 215, 171, 1], [822, 45, 162, 171, 1], [0, 110, 53, 106, 1],
+  ];
+  private drawUp1(c: CanvasRenderingContext2D, wall: number, clear: boolean) {
+    const fade = clear ? Math.min(1, (wall - this.clearAt) / TndeSkin.UP_FADE) : 0;
+    const t = wall / 1000;
+    const W1 = 984 * S;
+    const lx = -((((t * 92.2 + 1263.9) % W1) + W1) % W1);
+    const BW = 329 * S;
+    const bx = -((((t * 92.53 + 215.15) % BW) + BW) % BW);
+    // 2 秒の上下（u = 0 で上、1 で下）
+    const u = (((t - 20.167) % 2) + 2) % 2;
+    const tri = u < 1 ? u : 2 - u;
+    const hexDy = -5 - 10 * tri;
+    const cos = 0.5 - 0.5 * Math.cos(Math.PI * tri);
+    // 4 秒の六角とキャラの入れ替わり（ph = 0 で六角が裏返り始める）
+    const ph = (((t - 20.217) % 4) + 4) % 4;
+    const hexK = ph < 0.1 ? 1 - ph / 0.1 : ph < 2.833 ? 0 : ph < 2.933 ? (ph - 2.833) / 0.1 : 1;
+    const charaOn = ph >= 0.1 && ph < 2.963;
+    const lift = ph < 0.45 ? 110 * (1 - (ph - 0.1) / 0.35) : ph > 2.633 ? (110 * (ph - 2.633)) / 0.33 : 0;
+    const one = (kk: '' | 'Clear') => {
+      const N = (n: string) => `bg/Bg_up/1/${kk ? 'Clear' : 'Normal'}${n}`;
+      // 下地
+      c.save();
+      c.translate(bx, 0);
+      this.cached(c, `up1b${kk}`, '', 0, 0, TW + BW, 276, (g) => {
+        for (let x = 0; x < TW + BW; x += BW) this.put(g, `bg/Bg_up/1/UPScroll${kk ? '_Clear' : ''}_0`, x, 0, 0, 0, 329, 184);
+      });
+      c.restore();
+      for (let ox = lx; ox < TW; ox += W1) {
+        // 梅
+        for (const [x, y, w, h, kind] of TndeSkin.UP1_MOF) {
+          if (kind === 1) { this.put(c, N('_Mof'), ox + x * S, y * S - 2 - 16 * cos, x, y, w, h); continue; }
+          const k = S * (1 - 0.1 * cos);
+          this.put(c, N('_Mof'), ox + (x + w / 2) * S - (w * k) / 2, y * S, x, y, w, h, k);
+        }
+        // キャラ（下からせり上がる。ゲージの下には出さない）
+        if (charaOn) {
+          c.save();
+          c.beginPath();
+          c.rect(ox, 0, W1, 237);
+          c.clip();
+          this.put(c, 'bg/Bg_up/1/Chara', ox, hexDy + lift, 0, 0, 984, 266);
+          c.restore();
+        }
+        // 六角
+        this.put(c, `bg/Bg_up/1/UPScroll${kk ? '_Clear' : ''}_1`, ox, hexDy, 0, 0, 984, 266);
+        if (hexK > 0) {
+          TndeSkin.UP1_HEX.forEach(([x, y, w, h], i) => this.put(c, N(`_${i}`), ox + x * S, hexDy + y * S, x, y, w, h, S * hexK, S));
+        }
+      }
+    };
+    if (fade < 1) one('');
+    if (fade > 0) this.alpha(c, fade, () => one('Clear'));
+  }
+
   private drawUp0(c: CanvasRenderingContext2D, wall: number, clear: boolean) {
     const fade = clear ? Math.min(1, (wall - this.clearAt) / TndeSkin.UP_FADE) : 0;
     const t = wall / 1000;
