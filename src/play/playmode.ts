@@ -7,7 +7,8 @@ import { GlBlur } from './glblur';
 import { TndeSkin, type PlateStyle, type SkinNeed } from '../render/tnde';
 import { applyMods } from '../chart/mods';
 import { BUILD_ID } from '../update';
-import { forgetRects, isRotated } from '../orient';
+import { forgetRects, isRotated, pixelRatio } from '../orient';
+import { blurRGBA } from './boxblur';
 import { suggestDonWidth, zoneSamples } from './zone';
 import { buildAutoEvents, type AutoEvent } from './auto';
 import { Broadcast, type PlayInfo } from './broadcast';
@@ -1060,8 +1061,10 @@ export class PlayMode {
     const r = fit169({ x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight });
     Object.assign(cv.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
     if (!im || !im.complete || !im.naturalWidth) return;
-    const w = Math.max(8, Math.round(r.w / BLUR_Q));
-    const h = Math.max(8, Math.round(r.h / BLUR_Q));
+    // 画面の実際の細かさ（端末の画素・PC の拡大のぶん）で描く。大きすぎる画面では 3840 px までにする
+    const q = Math.min(pixelRatio(), 3840 / Math.max(1, r.w));
+    const w = Math.max(8, Math.round(r.w * q));
+    const h = Math.max(8, Math.round(r.h * q));
     const dim = 1 - this.dimOf(false);
     const key = `${this.bgImgUrl}|${w}x${h}|${dim}`;
     if (key === this.bgKey) return;
@@ -1070,28 +1073,39 @@ export class PlayMode {
     cv.height = h;
     const g = cv.getContext('2d');
     if (!g) return;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
     if (this.canFilter === null) {
       g.filter = 'blur(1px)';
       this.canFilter = g.filter === 'blur(1px)';
       g.filter = 'none';
     }
     // 枠より BLUR_PAD 広く描く（端がぼけて薄くならないように）。枠いっぱいに切り抜く
-    const pad = BLUR_PAD / BLUR_Q;
+    const pad = BLUR_PAD * q;
     const k = Math.max((w + pad * 2) / im.naturalWidth, (h + pad * 2) / im.naturalHeight);
     const dw = im.naturalWidth * k;
     const dh = im.naturalHeight * k;
     try {
       if (this.canFilter) {
-        g.filter = `blur(${BLUR / BLUR_Q}px)`;
+        g.filter = `blur(${BLUR * q}px)`;
         g.drawImage(im, (w - dw) / 2, (h - dh) / 2, dw, dh);
         g.filter = 'none';
       } else {
-        const t = (this.blurTmp ??= document.createElement('canvas'));
-        const tw = Math.max(4, Math.round(w / 2));
-        const th = Math.max(4, Math.round(h / 2));
-        if (t.width !== tw || t.height !== th) { t.width = tw; t.height = th; }
-        t.getContext('2d')?.drawImage(im, (tw - dw / 2) / 2, (th - dh / 2) / 2, dw / 2, dh / 2);
-        g.drawImage(t, 0, 0, w, h);
+        // ぼかしが使えない（iPhone の Safari など）: #root の px の細かさで描いて画素を直接ぼかし、なめらかに広げる
+        // （ぼけた絵なので、広げても粗くならない。画面の細かさのままぼかすより軽い）
+        const s = Math.min(1, 1 / q);
+        const t = document.createElement('canvas');
+        const tw = (t.width = Math.max(4, Math.round(w * s)));
+        const th = (t.height = Math.max(4, Math.round(h * s)));
+        const tg = t.getContext('2d', { willReadFrequently: true });
+        if (tg) {
+          tg.imageSmoothingQuality = 'high';
+          tg.drawImage(im, (tw - dw * s) / 2, (th - dh * s) / 2, dw * s, dh * s);
+          const px = tg.getImageData(0, 0, tw, th);
+          blurRGBA(px.data, tw, th, BLUR * q * s);
+          tg.putImageData(px, 0, 0);
+          g.drawImage(t, 0, 0, w, h);
+        }
       }
     } catch { /* 描けない絵 */ }
     if (dim > 0) {
