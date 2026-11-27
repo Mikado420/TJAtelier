@@ -119,7 +119,7 @@ export class TndeLoading {
     // サブタイトルの先頭の「--」「++」（プレイ中に出すかどうかの印）は出さない
     const sub = subtitle?.replace(/^(--|\+\+)/, '').trim();
     // 本家のサブタイトルは、全角も半角も決まった幅に並べ、半角の英字だけ太い（参考動画「魔宵月」で測った）
-    this.sub = sub ? textCanvas(sub, 34.5, P(710), '#000', 'rgba(0,0,0,0)', 0, KANTEI, { mono: true, kx: 1.055, halfBold: 3 }) : null;
+    this.sub = sub ? textCanvas(sub, 34.5, P(710), '#000', 'rgba(0,0,0,0)', 0, KANTEI, { mono: true, kx: 1.055, halfBold: 1.9 }) : null;
     const n = sk.hintCount;
     this.hint = n ? Math.floor(Math.random() * n) : -1;
   }
