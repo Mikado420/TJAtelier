@@ -1251,7 +1251,8 @@ export class TndeSkin {
     const banners = (set: number) => {
       c.save();
       c.translate(ox, 0);
-      this.cached(c, `up0b${set}`, '', -TW0, -79, TW + TW0 * 3, 320, (g) => {
+      // 縦は上の背景の下の端（y = 300）まで。2 段目ののぼりの下が切れて、裏の黒が見えないように
+      this.cached(c, `up0b${set}`, '', -TW0, -79, TW + TW0 * 3, 379, (g) => {
         for (let x = -TW0; x < TW + TW0 * 2; x += TW0) {
           for (const y of [-79, -79 + 231]) {
             this.put(g, 'bg/Bg_up/0/Base', x, y, set * 328, 0, 328, 154);
