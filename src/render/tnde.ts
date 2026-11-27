@@ -2389,15 +2389,18 @@ export class TndeSkin {
   private drawSplash(c: CanvasRenderingContext2D, wall: number) {
     const im = this.img('fx/GoGoSplash');
     if (!im) return;
-    const n = Math.floor(this.lw(im) / 230);
+    // 230×460 の 30 コマ（細かくした絵は横 10 コマ × 3 段に並べ直してある）
+    const cols = Math.floor(this.lw(im) / 230);
+    const n = cols * Math.floor(this.lh(im) / 460);
     const i = step(wall, this.gogoAt, 30);
     if (i < 0 || i >= n) return;
+    const sx = (i % cols) * 230, sy = Math.floor(i / cols) * 460;
     this.add(c, 1, () => {
       for (const [x, y, rot] of SPLASH) {
         c.save();
         c.translate(P(x), P(y) - P(230));
         c.rotate(rot);
-        this.di(c, im, i * 230, 0, 230, 460, -P(115), -P(230), P(230), P(460));
+        this.di(c, im, sx, sy, 230, 460, -P(115), -P(230), P(230), P(460));
         c.restore();
       }
     });
