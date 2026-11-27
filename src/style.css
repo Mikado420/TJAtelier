@@ -3173,6 +3173,10 @@ body.playing .grid-streaks.hide-playing, .hidden > .grid-streaks { display: none
 .stage.stack .zoom-ctl #zoomReset { width: 52px; }
 .stage .br-ctl { flex-direction: row; --bh: max(22px, min(30px, calc(var(--tl-h, 60px) - 8px))); top: calc(var(--ev-top, 30px) + (var(--tl-h, 60px) - var(--bh)) / 2); }
 .stage .br-ctl .br-stack { margin-top: 0; margin-left: 3px; }
+/* プレビューの出し入れ（拡大率のボタンの左） */
+.stage.stack .zoom-ctl #pvToggle { width: 44px; margin-right: 8px; }
+.zoom-ctl #pvToggle svg { width: 20px; height: 20px; stroke-width: 1.9; }
+.zoom-ctl #pvToggle.on { background: rgba(77, 159, 190, 0.55); }
 
 /* ---------- エディタ: 右の縦の帯（幅 48・ボタンは高さいっぱいに均等） ---------- */
 :root { --rail-w: 48px; }

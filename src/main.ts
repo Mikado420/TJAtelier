@@ -124,6 +124,8 @@ const settings = {
   branch: 'auto' as 'auto' | 'N' | 'E' | 'M',
   /** エディタ: 譜面分岐のほかの分岐も下に並べる */
   brStack: false,
+  /** エディタ: 上にプレビュー（プレイ画面のレーン）を出す */
+  pvShow: true,
   /** 背景の動画の明るさ（0.1〜1） */
   videoDim: 0.5,
   /** 下に出す動画（下・全面+下）の明るさ */
@@ -342,32 +344,40 @@ async function setAudio(file: AudioFile | null, save = true) {
   updateHeader();
 }
 
-/** 波形用に 1 秒あたり 400 個の最大振幅を作る */
-function computePeaks(): [Float32Array | null, number] {
+/** 波形用に 1 秒あたり 2000 個の最大振幅と RMS を作る（レーンの下地に細かく描くため） */
+function computePeaks(): [Float32Array | null, number, Float32Array?] {
   const buf = audio.buffer;
   if (!buf) return [null, 0];
-  const rate = 400;
+  const rate = 2000;
   const n = Math.ceil(buf.duration * rate);
   const peaks = new Float32Array(n);
+  const rms = new Float32Array(n);
   const per = buf.sampleRate / rate;
-  for (let ch = 0; ch < Math.min(2, buf.numberOfChannels); ch++) {
+  const chs = Math.min(2, buf.numberOfChannels);
+  for (let ch = 0; ch < chs; ch++) {
     const data = buf.getChannelData(ch);
     for (let i = 0; i < n; i++) {
       const a = Math.floor(i * per);
       const b = Math.min(data.length, Math.floor((i + 1) * per));
       let m = peaks[i];
-      for (let k = a; k < b; k += 4) {
+      let sq = 0;
+      let c = 0;
+      for (let k = a; k < b; k += 2) {
         const v = data[k] < 0 ? -data[k] : data[k];
         if (v > m) m = v;
+        sq += v * v;
+        c++;
       }
       peaks[i] = m;
+      if (c) rms[i] += sq / c / chs;
     }
   }
-  // 小さい曲でも見やすいように正規化
+  for (let i = 0; i < n; i++) rms[i] = Math.sqrt(rms[i]);
+  // 小さい曲でも見やすいように正規化（RMS も同じ比で）
   let max = 0;
   for (const v of peaks) if (v > max) max = v;
-  if (max > 0) for (let i = 0; i < n; i++) peaks[i] = Math.min(1, peaks[i] / max);
-  return [peaks, rate];
+  if (max > 0) for (let i = 0; i < n; i++) { peaks[i] = Math.min(1, peaks[i] / max); rms[i] = Math.min(1, rms[i] / max); }
+  return [peaks, rate, rms];
 }
 
 // ---------- 再生 ----------
@@ -762,6 +772,18 @@ const resetZoom = () => {
 $('zoomIn').addEventListener('click', () => view.setZoom(view.zoom * 1.25));
 $('zoomOut').addEventListener('click', () => view.setZoom(view.zoom / 1.25));
 $('zoomReset').addEventListener('click', resetZoom);
+// プレビューの出し入れ
+const syncPvToggle = () => {
+  view.showPreview = settings.pvShow !== false;
+  $('pvToggle').classList.toggle('on', view.showPreview);
+  view.invalidate();
+};
+$('pvToggle').addEventListener('click', () => {
+  settings.pvShow = settings.pvShow === false;
+  saveSettings();
+  syncPvToggle();
+});
+syncPvToggle();
 
 // 今の位置の小節・BPM・拍子と、拡大率の表示（毎フレーム、変わったときだけ書き換える）
 let hudKey = '';
@@ -1508,6 +1530,9 @@ function syncBranches(force = false) {
   view.branches = bs.map((b) => ({ a: b.start, b: b.end, label: branchLabel(b) }));
   view.branchNo = ed.branch;
   brCtl.classList.toggle('hidden', !bs.length);
+  // 下の段の今の位置の表示は、分岐のボタンの右に
+  const reserve = bs.length ? brCtl.offsetWidth + 10 : 0;
+  if (reserve !== view.barReserve) { view.barReserve = reserve; view.invalidate(); }
   brCtl.querySelectorAll<HTMLButtonElement>('[data-br]').forEach((b) => b.classList.toggle('on', b.dataset.br === 'stack' ? settings.brStack : Number(b.dataset.br) === ed.branch));
   if (collab.active) return;
   // ほかの分岐を下に並べる（区間の外は暗く）
