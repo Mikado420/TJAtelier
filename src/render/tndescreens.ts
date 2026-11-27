@@ -43,7 +43,7 @@ function cell(sk: TndeSkin, c: CanvasRenderingContext2D, name: string, sx: numbe
 }
 
 /** 白い字・黒い縁の 1 行（曲名など）を作っておく */
-function textCanvas(text: string, px: number, maxW: number, fill = '#fff', stroke = '#000', lw = px * 0.22, family = `'TNDE Seurat', sans-serif`, opt: { mono?: boolean; kx?: number } = {}) {
+function textCanvas(text: string, px: number, maxW: number, fill = '#fff', stroke = '#000', lw = px * 0.22, family = `'TNDE Seurat', sans-serif`, opt: { mono?: boolean; kx?: number; halfBold?: number } = {}) {
   const cv = document.createElement('canvas');
   const g = cv.getContext('2d')!;
   const font = `${px}px ${family}`;
@@ -67,6 +67,12 @@ function textCanvas(text: string, px: number, maxW: number, fill = '#fff', strok
     g.translate(cv.width / 2, 0);
     g.scale(kx, 1);
     if (lw > 0) kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.strokeText(ch, a, b));
+    // halfBold = 半角の字だけを字の色で太らせる幅（かな・漢字は太らせると潰れるので、そのまま）
+    if (opt.halfBold) {
+      g.lineWidth = opt.halfBold;
+      g.strokeStyle = fill;
+      kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.strokeText(ch, a, b), (gl) => !!gl.half);
+    }
     kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.fillText(ch, a, b));
     return { cv, tw, maxW };
   }
@@ -112,8 +118,8 @@ export class TndeLoading {
     this.title = textCanvas(title, 63.5, P(710), '#fff', '#000', 14, KANTEI);
     // サブタイトルの先頭の「--」「++」（プレイ中に出すかどうかの印）は出さない
     const sub = subtitle?.replace(/^(--|\+\+)/, '').trim();
-    // 本家のサブタイトルは、全角も半角も決まった幅に並べ、同じ黒で少し太らせてある（参考動画「魔宵月」で測った）
-    this.sub = sub ? textCanvas(sub, 34.5, P(710), '#000', '#000', 1.5, KANTEI, { mono: true, kx: 1.055 }) : null;
+    // 本家のサブタイトルは、全角も半角も決まった幅に並べ、半角の英字だけ太い（参考動画「魔宵月」で測った）
+    this.sub = sub ? textCanvas(sub, 34.5, P(710), '#000', 'rgba(0,0,0,0)', 0, KANTEI, { mono: true, kx: 1.055, halfBold: 3 }) : null;
     const n = sk.hintCount;
     this.hint = n ? Math.floor(Math.random() * n) : -1;
   }

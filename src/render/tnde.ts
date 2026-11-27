@@ -2299,8 +2299,9 @@ export class TndeSkin {
     c.strokeStyle = '#000';
     c.fillStyle = '#fff';
     // 白い所の真ん中（段位があるときは段位より右の白い所の真ん中。参考動画「魔宵月」の「ひろと」で測った）
-    if (dan) fitText(c, F.name, 216, 502, 168, true);
-    else fitText(c, F.name, 192, 502, 220, true);
+    // 下の枠との間を本家と同じ 3px あける
+    if (dan) fitText(c, F.name, 216, 500, 168, true);
+    else fitText(c, F.name, 192, 500, 220, true);
     c.restore();
     if (dan) this.drawDanText(c, im, dan, pf.danPass === 'gold');
   }

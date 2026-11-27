@@ -576,11 +576,11 @@ export class TndeSelect {
     g.strokeStyle = edge;
     g.fillStyle = fill;
     if (lw > 0) kDraw(g, l, 0, 0, (ch, a, b) => g.strokeText(ch, a, b));
-    // bold = 字そのものを字の色で太らせる幅（本家のサブタイトル）
+    // bold = 半角の字だけを字の色で太らせる幅（本家のサブタイトル。かな・漢字は太らせると潰れるので、そのまま）
     if (bold > 0) {
       g.lineWidth = bold;
       g.strokeStyle = fill;
-      kDraw(g, l, 0, 0, (ch, a, b) => g.strokeText(ch, a, b));
+      kDraw(g, l, 0, 0, (ch, a, b) => g.strokeText(ch, a, b), (gl) => !!gl.half);
     }
     kDraw(g, l, 0, 0, (ch, a, b) => g.fillText(ch, a, b));
     const r = { cv, w: w + pad * 2, h: asc + des + pad * 2, ax: (w + pad * 2) / 2, ay: (asc + des + pad * 2) / 2 };
@@ -1475,7 +1475,7 @@ export class TndeSelect {
     const bk = this.im(backName);
     if (bk) g.drawImage(bk.im, 960 - 858 * 0.75, 435 - 528 * 0.75, 858 * 1.5, 528 * 1.5);
     this.put(this.text(s.title, 55.7, 14, '#100b0b', { punct: 0.4 }), 960.5, 197, 1100);
-    if (s.subtitle) this.put(this.text(s.subtitle, 31, 10.5, '#100b0b', { kx: 0.943, mono: true, bold: 1.5 }), 961, 257.5, 1100);
+    if (s.subtitle) this.put(this.text(s.subtitle, 31, 10.5, '#100b0b', { kx: 0.943, mono: true, bold: 2.5 }), 961, 257.5, 1100);
     const sel = this.dsel;
     // ボタンを選んでいるときの黄色い光（ボタンの後ろ）
     if (sel < 2 || sel > 5) this.blit('diffCursor', 86, 410, 88, 85, BTN_X[sel] + 57.75 - 66, BTN_Y[sel] + 57 - 63.75, 88 * 1.5, 85 * 1.5);

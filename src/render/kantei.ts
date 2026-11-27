@@ -12,6 +12,8 @@ export interface KGlyph {
   kx: number;
   /** ます目の中で字を右へずらす量 */
   dx: number;
+  /** 半角の字（英数字・記号） */
+  half?: boolean;
 }
 
 export interface KLayout {
@@ -38,7 +40,7 @@ export function kLayout(g: CanvasRenderingContext2D, text: string, px: number, p
     if (isHalf(ch)) {
       const cell = px * 0.5;
       const kx = m > cell ? cell / m : 1;
-      glyphs.push({ ch, x, kx, dx: (cell - m * kx) / 2 });
+      glyphs.push({ ch, x, kx, dx: (cell - m * kx) / 2, half: true });
       x += cell;
     } else if (mono && isWide(ch)) {
       glyphs.push({ ch, x, kx: 1, dx: (px - m) / 2 });
@@ -56,9 +58,10 @@ export function kLayout(g: CanvasRenderingContext2D, text: string, px: number, p
 }
 const cache = new Map<string, KLayout>();
 
-/** 並べた字を (x, y) を左端にして描く（textAlign は left にしておく）。op = 1 字を描く（strokeText か fillText） */
-export function kDraw(g: CanvasRenderingContext2D, l: KLayout, x: number, y: number, op: (ch: string, x: number, y: number) => void) {
+/** 並べた字を (x, y) を左端にして描く（textAlign は left にしておく）。op = 1 字を描く（strokeText か fillText）。only = 描く字を選ぶ */
+export function kDraw(g: CanvasRenderingContext2D, l: KLayout, x: number, y: number, op: (ch: string, x: number, y: number) => void, only?: (gl: KGlyph) => boolean) {
   for (const gl of l.glyphs) {
+    if (only && !only(gl)) continue;
     if (gl.kx === 1) { op(gl.ch, x + gl.x + gl.dx, y); continue; }
     g.save();
     g.translate(x + gl.x + gl.dx, y);
