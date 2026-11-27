@@ -81,6 +81,8 @@ export interface TndeInfo {
   genre?: string;
   folder?: { name: string; color: string; custom: boolean };
   stage?: number;
+  /** サブタイトル（先頭が「--」なら出さない。ほかは曲名と入れ替えて出す） */
+  sub?: string;
 }
 
 export interface TndeFrame {
@@ -2576,7 +2578,6 @@ export class TndeSkin {
 
   // ---------- 曲名 ----------
 
-  private titleCache: { key: string; c: HTMLCanvasElement } | null = null;
   /** ジャンルと曲目を入れ替える時計の始まり */
   private stageAt = -1;
 
@@ -2641,9 +2642,19 @@ export class TndeSkin {
         midText(g, '曲', GX + 213.5 * GK, cy, 'center');
       }));
     }
-    const key = F.info.title;
-    if (this.titleCache?.key !== key) {
-      const cv = this.titleCache?.c ?? document.createElement('canvas');
+    // サブタイトルは、先頭が「--」でなければ曲名と入れ替える（ジャンルと曲目の入れ替えと同じ時計）
+    const raw = F.info.sub ?? '';
+    const sub = raw.startsWith('--') ? '' : raw.replace(/^\+\+/, '').trim();
+    const subA = !sub ? 0 : n < 745 ? 0 : n < 1000 ? (n - 745) / 255 : n < 1745 ? 1 : Math.max(0, 1 - (n - 1745) / 255);
+    if (subA < 1) this.alpha(c, 1 - subA, () => this.putTitle(c, 0, F.info.title));
+    if (subA > 0) this.alpha(c, subA, () => this.putTitle(c, 1, sub));
+  }
+  private titleCache: ({ key: string; c: HTMLCanvasElement } | null)[] = [null, null];
+  /** 右上の曲名（白い字に黒い縁）。i = 0: 曲名、1: サブタイトル */
+  private putTitle(c: CanvasRenderingContext2D, i: number, key: string) {
+    let tc = this.titleCache[i];
+    if (tc?.key !== key) {
+      const cv = tc?.c ?? document.createElement('canvas');
       const t = cv.getContext('2d');
       if (!t) return;
       const font = `48px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
@@ -2660,9 +2671,9 @@ export class TndeSkin {
       t.strokeText(key, w / 2, 47);
       t.fillStyle = '#fff';
       t.fillText(key, w / 2, 47);
-      this.titleCache = { key, c: cv };
+      tc = this.titleCache[i] = { key, c: cv };
     }
-    const cv = this.titleCache.c;
+    const cv = tc.c;
     // 長い曲名は横に縮める（TJAPlayer3 と同じく 990px まで）
     const tw = Math.min(cv.width, 1014);
     // 字の真ん中が y 67.5 に来る高さ（参考動画で測った）

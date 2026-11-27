@@ -98,7 +98,9 @@ export class TndeLoading {
     }
     // 曲名は勘亭流（プレイ画面と同じ字）。白い字に黒い縁
     this.title = textCanvas(title, 62, P(710), '#fff', '#000', 14, KANTEI);
-    this.sub = subtitle ? textCanvas(subtitle, 40, P(710), '#000', 'rgba(0,0,0,0)', 0) : null;
+    // サブタイトルの先頭の「--」「++」（プレイ中に出すかどうかの印）は出さない
+    const sub = subtitle?.replace(/^(--|\+\+)/, '').trim();
+    this.sub = sub ? textCanvas(sub, 40, P(710), '#000', 'rgba(0,0,0,0)', 0) : null;
     const n = sk.hintCount;
     this.hint = n ? Math.floor(Math.random() * n) : -1;
   }
@@ -142,8 +144,9 @@ export class TndeLoading {
     if (a <= 0) return;
     const m = this.sk.meta('load/Plate');
     const cy = m ? (m.y ?? 0) + m.h / 2 : 269;
-    putText(c, this.title, P(640), P(this.sub ? cy - 15 : cy - 4), a);
-    if (this.sub) putText(c, this.sub, P(640), P(cy + 30), a);
+    // 字の真ん中の高さ（参考動画「魔宵月」で測った: 曲名 393.5px・サブタイトル 475.5px）
+    putText(c, this.title, P(640), P(this.sub ? cy - 6.33 : cy - 4), a);
+    if (this.sub) putText(c, this.sub, P(640), P(cy + 48.33), a);
     if (this.hint >= 0) full(this.sk, c, `load/hint${this.hint}`, a);
     // ジャケット: 帯の左（真ん中の高さを帯にそろえる。黒い縁）
     const im = this.jacket;
