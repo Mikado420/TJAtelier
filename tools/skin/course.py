@@ -1,8 +1,8 @@
 """難易度マーク（プレイ画面の左のパネル）を 4 倍の細かさで作る。
 5_Game/4_CourseSymbol の絵は小さく（89×60 など）拡大すると粗いので、選曲画面の大きなマーク（Difficulty_Mark.png）を
-同じ大きさ・位置に縮めて貼り、まわりを黒で縁取り、下の字（かんたん など）を大江戸勘亭流で書き直す。
+同じ大きさ・位置に縮めて貼り、まわりを黒で縁取り、下の字（かんたん など）を勘亭流（DF勘亭流）で書き直す。
 大きさ・位置は元の小さな絵に重なりが一番よくなるように合わせた値。
-使い方: python3 -I tools/skin/course.py <TNDE-R/Graphics> <出力先> [大江戸勘亭流の otf]"""
+使い方: python3 -I tools/skin/course.py <TNDE-R/Graphics> <出力先> [勘亭流のフォント]"""
 import json, os, sys
 import cv2
 import numpy as np
@@ -18,6 +18,9 @@ LABEL = {'Easy': ('かんたん', (17, 73, 43, 53)), 'Normal': ('ふつう', (26
 # 縁取りの太さ（元の絵の px）
 MARK_EDGE = 1.0
 TEXT_EDGE = 2.6
+# 字の幅と横の位置の手直し（参考動画「魔宵月」のプレイ画面の「おに」に DF勘亭流 を重ねて測った: 横に 2.5% 広く、画面で 1px 左）
+TEXT_KX = 1.025
+TEXT_DX = -1 / 1.5
 
 
 def label(txt, box, font):
@@ -36,8 +39,8 @@ def label(txt, box, font):
     im = Image.new('RGBA', (gw + 4 * sw, gh + 4 * sw), (0, 0, 0, 0))
     ImageDraw.Draw(im).text((2 * sw - bb[0], 2 * sw - bb[1]), txt, font=f, fill=(255, 255, 255, 255), stroke_width=sw, stroke_fill=(0, 0, 0, 255))
     # 字の幅を元の絵に合わせる（縁取りは太さを保つため、中身の幅で比べる）
-    im = im.resize((max(1, round(im.width * tw / gw)), im.height), Image.LANCZOS)
-    cx, cy = (x0 + x1 + 1) / 2 * K, (y0 + y1 + 1) / 2 * K
+    im = im.resize((max(1, round(im.width * tw * TEXT_KX / gw)), im.height), Image.LANCZOS)
+    cx, cy = ((x0 + x1 + 1) / 2 + TEXT_DX) * K, (y0 + y1 + 1) / 2 * K
     return im, (round(cx - im.width / 2), round(cy - im.height / 2))
 
 
@@ -67,7 +70,7 @@ def make(G, n, font):
 
 def main():
     G, OUT = sys.argv[1], sys.argv[2]
-    font = sys.argv[3] if len(sys.argv) > 3 else os.path.join(G, 'FOT-OedoKtr.otf')
+    font = sys.argv[3] if len(sys.argv) > 3 else os.path.join(OUT, 'DFPKanTeiRyu-XB.ttf')
     mp = os.path.join(OUT, 'skin.json')
     man = json.load(open(mp, encoding='utf-8'))
     os.makedirs(os.path.join(OUT, 'course'), exist_ok=True)
