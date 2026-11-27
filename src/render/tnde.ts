@@ -9,6 +9,8 @@ import { CLEAR_LINE, type Game, type HitKind, type Judge } from '../engine/game'
 export const TW = 1920;
 export const TH = 1080;
 const S = 1.5;
+/** 下の帯の 赤・黄・緑 ひと組の幅（参考動画の px） */
+const FOOT_SET = 384;
 /** 1280×720 の値を 1920×1080 に */
 const P = (v: number) => v * S;
 
@@ -1573,8 +1575,14 @@ export class TndeSkin {
     2: [[0, 0, 1280, 198]],
     3: [[186, 0, 1093, 327]],
     4: [[149, 101, 1274, 173]],
-    5: [[0, 0, 1280, 131], [269, 169, 990, 243], [45, 243, 1234, 310]],
+    5: [[0, 0, 1280, 131], [269, 169, 990, 231], [38, 231, 1240, 310]],
   };
+  /**
+   * 下の背景 5 の灯籠（層 3 = 後ろの赤い光、層 4 = 灯籠）。参考動画「魔宵月」「Glitch hoppin'」で測ると、
+   * スキンの絵より 18px 上で、左の 4 本は 6px 左・右の 4 本は 3px 右にある。光は足して重ねる（灯籠の周りが明るい橙になる）
+   */
+  private static readonly LAMP_DX = [-6, 3];
+  private static readonly LAMP_DY = -18;
 
   private drawDown(c: CanvasRenderingContext2D, wall: number, beat: number, clear: boolean, now: number) {
     const d = this.pick.down;
@@ -1586,6 +1594,12 @@ export class TndeSkin {
       for (let i = 0; i < n; i++) {
         if (d === 4 && i === 3) continue;
         g.globalAlpha = glow.includes(i) ? a : 1;
+        if (d === 5 && (i === 3 || i === 4)) {
+          if (i === 3) g.globalCompositeOperation = 'lighter';
+          TndeSkin.LAMP_DX.forEach((dx, k) => this.put(g, `bg/Bg_down/5/${i}`, k * 640 * S + dx, 540 + TndeSkin.LAMP_DY, k * 640, 0, 640, 360));
+          g.globalCompositeOperation = 'source-over';
+          continue;
+        }
         this.put(g, `bg/Bg_down/${d}/${i}`, 0, 540);
       }
       g.globalAlpha = 1;
@@ -1813,10 +1827,17 @@ export class TndeSkin {
   }
   private mobAt = -1;
 
-  /** 下の帯（参考動画では絵を右へ 648px ずらした位置で止まっている） */
+  /**
+   * 下の帯。参考動画では 赤・黄・緑 が 128px ずつ（x=-64 から 384px ごと）に継ぎ目なく並び、上の黒い縁は 6px。
+   * スキンの絵は 1 色が 127px ほどで 1280px に割り切れないので、赤から緑までのひと組（絵の x=42.5〜296.75）を切り出して並べる
+   */
   private drawFooter(c: CanvasRenderingContext2D) {
-    this.put(c, 'footer1', 648, TH - 44 * S);
-    this.put(c, 'footer1', 648 - 1280 * S, TH - 44 * S);
+    const y = TH - 44 * S;
+    const edge = 6;
+    this.put(c, 'footer1', 0, y, 0, 0, 1280, 2, S, edge / 2);
+    const sx = 42.5, sw = 254.25, sy = 3, sh = 44 - sy;
+    const kx = FOOT_SET / sw, ky = (TH - y - edge) / sh;
+    for (let x = -FOOT_SET / 6; x < TW; x += FOOT_SET) this.put(c, 'footer1', x, y + edge, sx, sy, sw, sh, kx, ky);
   }
 
   // ---------- どんちゃん ----------
