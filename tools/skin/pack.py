@@ -1,7 +1,6 @@
 """TNDE スキン（TaikoNijiiroDondaEX Ver4.1用）の 5_Game から、プレイ画面で使う絵を public/skins/tnde へ書き出す。
 使い方: python3 -I tools/skin/pack.py <TNDE-R/Graphics> <出力先> [差し替えのフォルダ]
-差し替えのフォルダに NamePlate.png があれば、スキンのものの代わりに使う。
-勘亭流の字は差し替えのフォルダの DFPKanTeiRyu-XB.ttf（本家と同じ字）を使い、無ければスキンの FOT-OedoKtr.otf を使う
+差し替えのフォルダに NamePlate.png・FOT-OedoKtr.otf があれば、スキンのものの代わりに使う
 連番の絵（どんちゃん・踊り子など）は 1 枚の絵にまとめる（読み込む数を減らす）"""
 import cv2, json, os, re, sys, shutil
 import numpy as np
@@ -180,16 +179,15 @@ _sh = np.clip(_up * 1.7 - cv2.GaussianBlur(_up, (0, 0), 2.2) * 0.7, 0, 255)
 _A = _sh[:, :, 3:]
 _hd = np.dstack([np.clip(np.where(_A > 1, _sh[:, :, :3] / np.maximum(_A, 1) * 255, 0), 0, 255), _A]).astype(np.uint8)
 man['img']['nameplate_frames'] = {'f': wr('nameplate_frames', _hd, False), 'w': _hd.shape[1], 'h': _hd.shape[0]}
-shutil.copy(pick('FOT-Seurat_Pro_B.otf'), os.path.join(OUT, 'FOT-Seurat_Pro_B.otf'))
-KANTEI = 'DFPKanTeiRyu-XB.ttf'
-shutil.copy(pick(KANTEI) if os.path.exists(pick(KANTEI)) else pick('FOT-OedoKtr.otf'), os.path.join(OUT, KANTEI))
+for f in ['FOT-Seurat_Pro_B.otf', 'FOT-OedoKtr.otf']:
+    shutil.copy(pick(f), os.path.join(OUT, f))
 # 称号のキラキラ（参考動画から取り出した 120 コマの光。スキンの素材ではないので、作り直しても残す）
 if os.path.exists(os.path.join(OUT, 'fx/TitleShine.webp')):
     man['img']['fx/TitleShine'] = {'f': 'fx/TitleShine.webp', 'w': 3300, 'h': 1272}
 json.dump(man, open(os.path.join(OUT, 'skin.json'), 'w'), ensure_ascii=False, separators=(',', ':'))
-# 難易度マーク（選曲画面の大きなマークと勘亭流の字で、4 倍の細かさに作る）
+# 難易度マーク（選曲画面の大きなマークと大江戸勘亭流の字で、4 倍の細かさに作る）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import course
-sys.argv = [sys.argv[0], SRC, OUT, os.path.join(OUT, KANTEI)]
+sys.argv = [sys.argv[0], SRC, OUT, os.path.join(OUT, 'FOT-OedoKtr.otf')]
 course.main()
 # このあと screens.py で読み込み画面・リザルト画面の絵を足し、hq.py で粗く見える絵（字・数字・どんちゃん・終わりの演出）を waifu2x で細かくする

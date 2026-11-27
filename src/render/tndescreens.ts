@@ -4,10 +4,9 @@
  * 動きの時間・位置は TJAPlayer3 系（OpenTaiko）の作りと、本家の参考動画で測った値
  */
 import { midText, type TndeSkin, type PlateStyle, type PlayMods } from './tnde';
-import { kDraw, kLayout } from './kantei';
 
 const S = 1.5;
-/** 曲名・サブタイトルの字（勘亭流。本家と同じ DF勘亭流） */
+/** 曲名の字（大江戸勘亭流） */
 const KANTEI = `'TNDE Kantei', 'TNDE Seurat', sans-serif`;
 const P = (v: number) => v * S;
 const clamp = (v: number, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -43,40 +42,23 @@ function cell(sk: TndeSkin, c: CanvasRenderingContext2D, name: string, sx: numbe
 }
 
 /** 白い字・黒い縁の 1 行（曲名など）を作っておく */
-function textCanvas(text: string, px: number, maxW: number, fill = '#fff', stroke = '#000', lw = px * 0.22, family = `'TNDE Seurat', sans-serif`, opt: { mono?: boolean; kx?: number; halfBold?: number } = {}) {
+function textCanvas(text: string, px: number, maxW: number, fill = '#fff', stroke = '#000', lw = px * 0.22, family = `'TNDE Seurat', sans-serif`) {
   const cv = document.createElement('canvas');
   const g = cv.getContext('2d')!;
   const font = `${px}px ${family}`;
   g.font = font;
-  // 勘亭流は本家と同じく、半角を 0.5 字の幅に並べる
-  const kan = family.includes('Kantei');
-  const l = kan ? kLayout(g, text, px, 1, opt.mono) : null;
-  const kx = opt.kx ?? 1;
-  const tw = Math.ceil((l ? l.width : g.measureText(text).width) * kx);
+  const tw = Math.ceil(g.measureText(text).width);
   const pad = Math.ceil(lw) + 4;
   cv.width = tw + pad * 2;
   cv.height = Math.ceil(px * 1.4) + pad * 2;
   g.font = font;
   g.textBaseline = 'middle';
-  g.textAlign = l ? 'left' : 'center';
+  g.textAlign = 'center';
   g.lineJoin = 'round';
   g.lineWidth = lw;
   g.strokeStyle = stroke;
-  g.fillStyle = fill;
-  if (l) {
-    g.translate(cv.width / 2, 0);
-    g.scale(kx, 1);
-    if (lw > 0) kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.strokeText(ch, a, b));
-    // halfBold = 半角の字だけを字の色で太らせる幅（かな・漢字は太らせると潰れるので、そのまま）
-    if (opt.halfBold) {
-      g.lineWidth = opt.halfBold;
-      g.strokeStyle = fill;
-      kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.strokeText(ch, a, b), (gl) => !!gl.half);
-    }
-    kDraw(g, l, -l.width / 2, cv.height / 2, (ch, a, b) => g.fillText(ch, a, b));
-    return { cv, tw, maxW };
-  }
   g.strokeText(text, cv.width / 2, cv.height / 2);
+  g.fillStyle = fill;
   g.fillText(text, cv.width / 2, cv.height / 2);
   return { cv, tw, maxW };
 }
@@ -115,11 +97,10 @@ export class TndeLoading {
       im.src = jacket;
     }
     // 曲名は勘亭流（プレイ画面と同じ字）。白い字に黒い縁
-    this.title = textCanvas(title, 63.5, P(710), '#fff', '#000', 14, KANTEI);
+    this.title = textCanvas(title, 62, P(710), '#fff', '#000', 14, KANTEI);
     // サブタイトルの先頭の「--」「++」（プレイ中に出すかどうかの印）は出さない
     const sub = subtitle?.replace(/^(--|\+\+)/, '').trim();
-    // 本家のサブタイトルは、全角も半角も決まった幅に並べ、半角の英字だけ太い（参考動画「魔宵月」で測った）
-    this.sub = sub ? textCanvas(sub, 34.5, P(710), '#000', 'rgba(0,0,0,0)', 0, KANTEI, { mono: true, kx: 1.055, halfBold: 1.9 }) : null;
+    this.sub = sub ? textCanvas(sub, 40, P(710), '#000', 'rgba(0,0,0,0)', 0) : null;
     const n = sk.hintCount;
     this.hint = n ? Math.floor(Math.random() * n) : -1;
   }
@@ -164,8 +145,8 @@ export class TndeLoading {
     const m = this.sk.meta('load/Plate');
     const cy = m ? (m.y ?? 0) + m.h / 2 : 269;
     // 字の真ん中の高さ（参考動画「魔宵月」で測った: 曲名 393.5px・サブタイトル 475.5px）
-    putText(c, this.title, P(640) - 1, P(this.sub ? cy - 6.33 : cy - 4), a);
-    if (this.sub) putText(c, this.sub, P(640) - 1, P(cy + 48.33) + 1, a);
+    putText(c, this.title, P(640), P(this.sub ? cy - 6.33 : cy - 4), a);
+    if (this.sub) putText(c, this.sub, P(640), P(cy + 48.33), a);
     if (this.hint >= 0) full(this.sk, c, `load/hint${this.hint}`, a);
     // ジャケット: 帯の左（真ん中の高さを帯にそろえる。黒い縁）
     const im = this.jacket;
@@ -287,7 +268,6 @@ export class TndeResult {
   private title: ReturnType<typeof textCanvas>;
   private bestText: ReturnType<typeof textCanvas> | null;
   private coin: ReturnType<typeof textCanvas>;
-  private coin0: ReturnType<typeof textCanvas>;
   /*
    * 時刻は OpenTaiko（TJAPlayer3 系）のリザルトと同じ（明るくなり始めたところが 0、ms）:
    * 2 秒でゲージが 59ms ごとに 2% ずつ伸びる → 伸び終わって 1 秒で 良・可・不可・連打数・最大コンボ数が 0.42 秒ずつ →
@@ -329,10 +309,8 @@ export class TndeResult {
     this.tCrown = this.S + 2500;
     this.M = 10275 + 66 * this.G;
     // 曲名は勘亭流（プレイ画面と同じ字）
-    this.title = textCanvas(d.title, 56.5, P(660), '#fff', '#000', 13, KANTEI);
-    // 本家の「0」は太く横に広い（参考動画「魔宵月」で測った: 0 が x 895〜935、コインが 937〜1044）
-    this.coin = textCanvas('コイン', 37.5, 999, '#fff', '#000', 10, KANTEI, { kx: 1.05 });
-    this.coin0 = textCanvas('０', 37.5, 999, '#fff', '#000', 10, KANTEI, { kx: 1.45 });
+    this.title = textCanvas(d.title, 52, P(660), '#fff', '#000', 14, KANTEI);
+    this.coin = textCanvas('0コイン', 38, 999, '#fff', '#000', 10, KANTEI);
     this.bestText = d.best !== null ? textCanvas(`${d.best}`, 27, 999, '#fff8dc', 'rgba(0,0,0,0)', 0) : null;
   }
 
@@ -432,7 +410,7 @@ export class TndeResult {
 
     // ---------- 上の帯・曲名・何曲目 ----------
     full(sk, c, 'res/Header');
-    putText(c, this.title, 959, 100);
+    putText(c, this.title, 958, 100);
     this.drawSongCount(c);
 
     // ---------- パネル ----------
@@ -465,8 +443,7 @@ export class TndeResult {
 
   /** 下のまん中の「0コイン」（黒い間も出しておく） */
   drawCoin(c: CanvasRenderingContext2D) {
-    putText(c, this.coin0, 917, 1055);
-    putText(c, this.coin, 990.5, 1055);
+    putText(c, this.coin, 970, 1055);
   }
 
   /**

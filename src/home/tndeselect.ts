@@ -2,7 +2,6 @@
  * TNDE スキンの選曲画面・難易度えらび（canvas で描く）。
  * 位置・大きさは本家の画面録画に素材を重ねて測った値（1920×1080）。動きの時間と式は TJAPlayer3（OpenTaiko の元）と同じ。
  */
-import { kDraw, kLayout } from '../render/kantei';
 import type { AudioEngine } from '../audio/audio';
 import { folderParents, type SongEntry } from '../io/library';
 import type { PlateStyle, TndeSkin } from '../render/tnde';
@@ -548,20 +547,18 @@ export class TndeSelect {
 
   private texts = new Map<string, { cv: HTMLCanvasElement; w: number; h: number; ax: number; ay: number }>();
   private textScale = 1;
-  private text(t: string, px: number, lw: number, edge: string, opt: { font?: string; kx?: number; punct?: number; fill?: string; mono?: boolean; bold?: number } = {}) {
-    const font = opt.font ?? KANTEI, kx = opt.kx ?? 1, punct = opt.punct ?? 1, fill = opt.fill ?? '#fff', mono = opt.mono ?? false, bold = opt.bold ?? 0;
+  private text(t: string, px: number, lw: number, edge: string, opt: { font?: string; kx?: number; punct?: number; fill?: string } = {}) {
+    const font = opt.font ?? KANTEI, kx = opt.kx ?? 1, punct = opt.punct ?? 1, fill = opt.fill ?? '#fff';
     const Z = this.textScale;
-    const key = `${t}|${px}|${lw}|${edge}|${font}|${kx}|${punct}|${fill}|${mono}|${bold}|${Z}`;
+    const key = `${t}|${px}|${lw}|${edge}|${font}|${kx}|${punct}|${fill}|${Z}`;
     const have = this.texts.get(key);
     if (have) return have;
     const cv = document.createElement('canvas');
     const g = cv.getContext('2d')!;
     g.font = `${px}px ${font}`;
-    // 勘亭流は本家と同じく、半角を 0.5 字の幅に並べる（ほかの字はフォントの幅のまま）
-    const l = font.includes('Kantei')
-      ? kLayout(g, t, px, punct, mono)
-      : (() => { let x = 0; return { glyphs: [...t].map((ch) => { const gl = { ch, x, kx: 1, dx: 0 }; x += g.measureText(ch).width * ('、。'.includes(ch) ? punct : 1); return gl; }), width: x }; })();
-    const w = l.width * kx;
+    const chars = [...t];
+    const adv = chars.map((ch) => g.measureText(ch).width * ('、。'.includes(ch) ? punct : 1));
+    const w = adv.reduce((a, b) => a + b, 0) * kx;
     const m = g.measureText(t);
     const asc = m.actualBoundingBoxAscent, des = m.actualBoundingBoxDescent;
     const pad = lw;
@@ -575,14 +572,10 @@ export class TndeSelect {
     g.lineWidth = lw;
     g.strokeStyle = edge;
     g.fillStyle = fill;
-    if (lw > 0) kDraw(g, l, 0, 0, (ch, a, b) => g.strokeText(ch, a, b));
-    // bold = 半角の字だけを字の色で太らせる幅（本家のサブタイトル。かな・漢字は太らせると潰れるので、そのまま）
-    if (bold > 0) {
-      g.lineWidth = bold;
-      g.strokeStyle = fill;
-      kDraw(g, l, 0, 0, (ch, a, b) => g.strokeText(ch, a, b), (gl) => !!gl.half);
+    for (const pass of [0, 1]) {
+      let x = 0;
+      chars.forEach((ch, i) => { if (pass === 0) { if (lw > 0) g.strokeText(ch, x, 0); } else g.fillText(ch, x, 0); x += adv[i]; });
     }
-    kDraw(g, l, 0, 0, (ch, a, b) => g.fillText(ch, a, b));
     const r = { cv, w: w + pad * 2, h: asc + des + pad * 2, ax: (w + pad * 2) / 2, ay: (asc + des + pad * 2) / 2 };
     // 描いた字は 160 まで（古いものから手放す）
     while (this.texts.size >= 160) {
@@ -1474,8 +1467,8 @@ export class TndeSelect {
     const backName = `diffBack${it.look.bar < 0 ? 0 : it.look.bar}`;
     const bk = this.im(backName);
     if (bk) g.drawImage(bk.im, 960 - 858 * 0.75, 435 - 528 * 0.75, 858 * 1.5, 528 * 1.5);
-    this.put(this.text(s.title, 55.7, 14, '#100b0b', { punct: 0.4 }), 960.5, 197, 1100);
-    if (s.subtitle) this.put(this.text(s.subtitle, 31, 10.5, '#100b0b', { kx: 0.943, mono: true, bold: 0.95 }), 961, 257.5, 1100);
+    this.put(this.text(s.title, 52, 16, '#100b0b', { kx: 0.98, punct: 0.4 }), 961.5, 195, 1100);
+    if (s.subtitle) this.put(this.text(s.subtitle, 30, 10, '#100b0b', { kx: 0.9 }), 962, 256.5, 1100);
     const sel = this.dsel;
     // ボタンを選んでいるときの黄色い光（ボタンの後ろ）
     if (sel < 2 || sel > 5) this.blit('diffCursor', 86, 410, 88, 85, BTN_X[sel] + 57.75 - 66, BTN_Y[sel] + 57 - 63.75, 88 * 1.5, 85 * 1.5);

@@ -1,5 +1,4 @@
 import type { Course, Note } from '../chart/types';
-import { kDraw, kLayout, fontPx } from './kantei';
 import { CLEAR_LINE, type Game, type HitKind, type Judge } from '../engine/game';
 
 /**
@@ -10,8 +9,6 @@ import { CLEAR_LINE, type Game, type HitKind, type Judge } from '../engine/game'
 export const TW = 1920;
 export const TH = 1080;
 const S = 1.5;
-/** 右上の曲名の字の大きさ（参考動画「魔宵月」に DF勘亭流 を重ねて測った） */
-const TITLE_PX = 55;
 /** 下の帯の 赤・黄・緑 ひと組の幅（参考動画の px） */
 const FOOT_SET = 384;
 /** 1280×720 の値を 1920×1080 に */
@@ -224,7 +221,7 @@ export class TndeSkin {
     s.man = await r.json();
     // プレイ画面の字: 曲名・称号・名前は勘亭流、ジャンル・曲目は丸ゴシック
     await Promise.all(
-      [['TNDE Seurat', 'FOT-Seurat_Pro_B.otf'], ['TNDE Kantei', 'DFPKanTeiRyu-XB.ttf']].map(async ([name, file]) => {
+      [['TNDE Seurat', 'FOT-Seurat_Pro_B.otf'], ['TNDE Kantei', 'FOT-OedoKtr.otf']].map(async ([name, file]) => {
         try {
           const ff = new FontFace(name, `url(${base}${file})`);
           document.fonts.add(ff);
@@ -2285,23 +2282,22 @@ export class TndeSkin {
     c.save();
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    // 称号: 帯に収まるいちばん大きい字（17px まで。それより小さくなるときは 13px で横に縮める）。
-    // 参考動画「魔宵月」の「ブルー達人／グリーン金達人」に DF勘亭流 を重ねて測った: 字の幅 212px まで、真ん中 (181, 470.5)
+    // 称号: 帯に収まるいちばん大きい字（21px まで。それより小さくなるときは 13px で横に縮める）
     c.font = `20px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     const tw = c.measureText(F.title).width || 1;
-    const ts = Math.max(13, Math.min(17, (20 * 212) / tw));
+    const ts = Math.max(13, Math.min(21, (20 * 228) / tw));
     c.font = `${ts}px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.fillStyle = titleInk(pf);
-    fitText(c, F.title, 181, 470.5, 212);
-    c.font = `25px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+    // 帯の 1P の丸より右の真ん中（字の真ん中が帯の所の真ん中に来る高さ）
+    fitText(c, F.title, 192, 468, 228);
+    c.font = `21px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
     c.lineJoin = 'round';
-    c.lineWidth = 5;
+    c.lineWidth = 6;
     c.strokeStyle = '#000';
     c.fillStyle = '#fff';
-    // 白い所の真ん中（段位があるときは段位より右の白い所の真ん中。参考動画「魔宵月」の「ひろと」で測った）
-    // 下の枠との間を本家と同じ 3px あける
-    if (dan) fitText(c, F.name, 216, 500, 168, true);
-    else fitText(c, F.name, 192, 500, 220, true);
+    // 白い所の真ん中（段位があるときは段位より右の白い所の真ん中。参考動画で測った）
+    if (dan) fitText(c, F.name, 215, 500, 168, true);
+    else fitText(c, F.name, 191, 500, 220, true);
     c.restore();
     if (dan) this.drawDanText(c, im, dan, pf.danPass === 'gold');
   }
@@ -2664,28 +2660,27 @@ export class TndeSkin {
       const cv = tc?.c ?? document.createElement('canvas');
       const t = cv.getContext('2d');
       if (!t) return;
-      const font = `${TITLE_PX}px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
+      const font = `48px 'TNDE Kantei', 'TNDE Seurat', sans-serif`;
       t.font = font;
-      const l = kLayout(t, key, TITLE_PX);
-      const w = Math.ceil(l.width) + 24;
+      const w = Math.ceil(t.measureText(key).width) + 24;
       cv.width = w;
       cv.height = 90;
       t.font = font;
-      t.textAlign = 'left';
+      t.textAlign = 'center';
       t.textBaseline = 'middle';
       t.lineJoin = 'round';
-      t.lineWidth = 12;
+      t.lineWidth = 13;
       t.strokeStyle = '#000';
-      kDraw(t, l, 12, 47, (ch, a, b) => t.strokeText(ch, a, b));
+      t.strokeText(key, w / 2, 47);
       t.fillStyle = '#fff';
-      kDraw(t, l, 12, 47, (ch, a, b) => t.fillText(ch, a, b));
+      t.fillText(key, w / 2, 47);
       tc = this.titleCache[i] = { key, c: cv };
     }
     const cv = tc.c;
     // 長い曲名は横に縮める（TJAPlayer3 と同じく 990px まで）
     const tw = Math.min(cv.width, 1014);
-    // 字の真ん中が y 68 に来る高さ（参考動画「魔宵月」で測った）
-    c.drawImage(cv, Math.min(1733.5 - tw / 2, 1880 - tw), 68 - 47, tw, cv.height);
+    // 字の真ん中が y 67.5 に来る高さ（参考動画で測った）
+    c.drawImage(cv, Math.min(1732 - tw / 2, 1880 - tw), 65 - 47, tw, cv.height);
   }
 
   // ---------- コンボの巻物・連打・風船 ----------
@@ -2805,18 +2800,13 @@ export function midText(c: CanvasRenderingContext2D, t: string, x: number, y: nu
   c.restore();
 }
 
-function fitText(c: CanvasRenderingContext2D, t: string, x: number, y: number, max: number, stroke = false, kx = 1) {
-  // 勘亭流（本家と同じく半角は 0.5 字の幅）で並べる。textAlign は center のつもりで真ん中を x に
-  const l = kLayout(c, t, fontPx(c.font));
-  const w = l.width * kx;
+function fitText(c: CanvasRenderingContext2D, t: string, x: number, y: number, max: number, stroke = false) {
+  const w = c.measureText(t).width;
   c.save();
   c.translate(x, y);
-  c.scale((w > max ? max / w : 1) * kx, 1);
-  const align = c.textAlign;
-  c.textAlign = 'left';
-  if (stroke) kDraw(c, l, -l.width / 2, 0, (ch, a, b) => c.strokeText(ch, a, b));
-  kDraw(c, l, -l.width / 2, 0, (ch, a, b) => c.fillText(ch, a, b));
-  c.textAlign = align;
+  if (w > max) c.scale(max / w, 1);
+  if (stroke) c.strokeText(t, 0, 0);
+  c.fillText(t, 0, 0);
   c.restore();
 }
 
