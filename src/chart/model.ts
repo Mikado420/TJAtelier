@@ -122,8 +122,8 @@ export function shiftCourse(c: ECourse, at: number, d: number) {
   if (c.endTick !== undefined) c.endTick = mv(c.endTick);
 }
 
-/** 分岐しても全部の譜面で同じにする命令（時間の流れ） */
-export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay']);
+/** 分岐しても全部の譜面で同じにする命令（時間の流れ・小節線を出すか） */
+export const SHARED_KINDS = new Set<EEvent['kind']>(['bpm', 'measure', 'delay', 'barline']);
 
 /** start が tick 以上の、いちばん前の小節の番号（無ければ -1。小節は start の順に並んでいる） */
 function measureFrom(ms: Measure[], tick: number): number {
@@ -711,22 +711,21 @@ function playOne(chart: EChart, course: ECourse, tag?: (n: Note, tick: number) =
     if (last.time === p.time) params[params.length - 1] = p;
     else params.push(p);
   }
-  // 譜面分岐を決める小節（分岐の 1 小節前。直前で決める分岐はその前のとても短い小節）の小節線は黄色
+  // 譜面分岐を置いた小節（#BRANCHSTART のすぐ後の小節）の頭の小節線は黄色。
+  // その線が #BARLINEOFF で隠れているときは黄色も出さない（OpenTaiko と同じ）
   const msAll = measures(course, cEnd);
-  const brJudge = new Set<number>();
+  const brBar = new Set<number>();
   for (const b of course.branches ?? []) {
     const i = measureFrom(msAll, b.start);
-    brJudge.add(i > 0 ? msAll[i - 1].start : b.start);
+    if (i >= 0) brBar.add(msAll[i].start);
   }
-  // 分岐を決める、とても短い小節のすぐ後の位置
-  const afterTiny = new Set<number>();
-  for (const p of msAll) if (p.num / p.den <= 1 / 1000 && brJudge.has(p.start)) afterTiny.add(p.start + p.length);
   for (const m of msAll) {
     if (m.start > cEnd) break;
     if (!t.barlineAt(m.start)) continue;
+    // 分岐を直前で決めるとても短い小節の線は、すぐ後の分岐の線と重なるので出さない
+    if (m.num / m.den <= 1 / 1000 && brBar.has(m.start + m.length)) continue;
     const im = t.scrollImAt(m.start);
-    // （とても短い小節のすぐ後の小節線はほぼ同じ所に重なるので、それも黄色にする）
-    const br = brJudge.has(m.start) || (bars.length > 0 && !!bars[bars.length - 1].branch && afterTiny.has(m.start));
+    const br = brBar.has(m.start);
     bars.push({ time: t.tickToTime(m.start), bpm: t.bpmAt(m.start), scroll: t.scrollAt(m.start), ...(im ? { scrollY: im } : {}), ...(bt ? { beat: bt.beatOf(m.start) } : {}), ...(br ? { branch: true as const } : {}) });
   }
   // ゴーゴー区間は「直前に通過したノーツ」ではなくイベントの時刻で決める

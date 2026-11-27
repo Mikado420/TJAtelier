@@ -46,20 +46,35 @@ describe('分岐（始まりの位置だけで置く）', () => {
     expect(body(ed)).toBe('1111,\n2222,\n1212,\n2121,');
   });
 
-  it('黄色の小節線は分岐を決める小節（1 小節前・直前はとても短い小節）。強制分岐の直前は出さない', () => {
+  it('黄色の小節線は分岐を置いた小節の頭（強制分岐も）。直前で決める分岐は、前のとても短い小節の線を隠す', () => {
     const yellow = (ed: Editor) => toPlayable(ed.chart, ed.mainCourse).bars.filter((b) => b.branch).map((b) => Math.round(b.time * 1000));
+    const near = (ed: Editor, ms: number) => toPlayable(ed.chart, ed.mainCourse).bars.filter((b) => Math.abs(b.time * 1000 - ms) < 1).length;
     const a = new Editor(parseTJA(TJA));
     a.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: false });
-    expect(yellow(a)).toEqual([2000]); // 2 小節目の頭（BPM 120 で 2 秒）
+    expect(yellow(a)).toEqual([4000]); // 3 小節目の頭（BPM 120 で 4 秒）
     const b = new Editor(parseTJA(TJA));
     b.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: true });
-    expect(yellow(b)).toEqual([4000, 4000]); // 短い小節とすぐ後の小節線（重なる）
+    expect(yellow(b)).toEqual([4000]);
+    expect(near(b, 4000)).toBe(1); // 短い小節の線は出さない
+    expect(body(b)).toContain('#MEASURE 1/9999\n#BARLINEOFF\n0,\n#BRANCHSTART p,60,80\n#N\n#MEASURE 4/4\n#BARLINEON\n');
     const c = new Editor(parseTJA(TJA));
     const f = c.placeBranch(M * 2, { type: 'p', x: -1, y: -2, pre: true })!;
-    expect(yellow(c)).toEqual([]);
-    // 条件の分岐に変えると #BARLINEOFF / ON を外して黄色が出る
+    expect(yellow(c)).toEqual([4000]);
     c.placeBranch(M * 2, { type: 'p', x: 60, y: 80, pre: true }, f);
-    expect(c.mainCourse.events.filter((e) => e.kind === 'barline')).toEqual([]);
-    expect(yellow(c)).toEqual([4000, 4000]);
+    expect(yellow(c)).toEqual([4000]);
+    const d = new Editor(parseTJA(TJA));
+    d.placeBranch(M, { type: 'p', x: -1, y: 101, pre: false });
+    expect(yellow(d)).toEqual([2000]);
+  });
+
+  it('分岐の小節の頭を #BARLINEOFF にすると黄色の線も出ない。普通・玄人・達人のどれにも書き、読み直しても同じ', () => {
+    const src = 'TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n#BARLINEOFF\n#BRANCHSTART p,60,80\n#N\n2222,\n#BARLINEON\n1212,\n#E\n2222,\n#BARLINEON\n1212,\n#M\n2222,\n#BARLINEON\n1212,\n#BRANCHEND\n2121,\n#END\n';
+    const ed = new Editor(parseTJA(src));
+    const p = toPlayable(ed.chart, ed.mainCourse);
+    expect(p.bars.filter((b) => b.branch)).toEqual([]);
+    expect(p.bars.map((b) => Math.round(b.time * 1000))).toEqual([0, 4000, 6000]);
+    const out = body(ed);
+    expect(out).toBe('1111,\n#BRANCHSTART p,60,80\n#N\n#BARLINEOFF\n2222,\n#BARLINEON\n1212,\n#E\n#BARLINEOFF\n2222,\n#BARLINEON\n1212,\n#M\n#BARLINEOFF\n2222,\n#BARLINEON\n1212,\n#BRANCHEND\n2121,');
+    expect(body(new Editor(parseTJA(writeTJA(ed.chart))))).toBe(out);
   });
 });

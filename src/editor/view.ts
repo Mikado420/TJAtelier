@@ -1140,11 +1140,10 @@ export class EditorView {
           ctx.fillStyle = C.text;
           ctx.fillText(String(m.index + 1), x + 6 * s, L.waveY + 6 * s);
         }
-        // 譜面分岐を決める小節（分岐の 1 小節前。直前で決める分岐はその前のとても短い小節）の線は黄色（#BARLINEOFF の所は除く）
-        // （とても短い小節のすぐ後の線はほぼ同じ所に重なるので、短い小節の線が黄色ならそれも黄色）
-        const tinyBefore = course.events.find((e) => e.kind === 'measure' && e.num / e.den <= 1 / 1000 && e.tick < m.start && e.tick + measureTicks(e.num, e.den) === m.start);
-        const brBar = (this.branches.some((b) => b.a === m.start + m.length || (m.start === 0 && b.a === 0)) && barShown(m.start))
-          || (!!tinyBefore && this.branches.some((b) => b.a === m.start) && barShown(tinyBefore.tick));
+        // 譜面分岐を置いた小節の頭の線は黄色（#BARLINEOFF の所は除く）
+        const brBar = this.branches.some((b) => b.a === m.start) && barShown(m.start);
+        // 分岐を直前で決めるとても短い小節の線は、すぐ後の黄色の線と重なるので描かない
+        if (!brBar && m.num / m.den <= 1 / 1000 && this.branches.some((b) => b.a === m.start + m.length)) continue;
         laneClip(() => {
           ctx.fillStyle = brBar ? '#ffd400' : C.measure;
           ctx.fillRect(x - lw / 2, g.y, lw, g.h);
@@ -1172,18 +1171,22 @@ export class EditorView {
     const evRowY = (tick: number) => (this.stack ? this.rowGeom(ln.rowOf(tick)).y + L.laneH + 6 * s : L.evTop);
     const evItems: EventItem[] = [];
     // 分岐を直前で決めるためのとても短い小節（#MEASURE 1/9999）と、その後で元の拍子に戻す #MEASURE は、分岐の印にまとめる
+    // （短い小節の線を隠す #BARLINEOFF と、分岐の小節で戻す #BARLINEON も。分岐の黄色の線を隠す #BARLINEOFF は出す）
     const preTicks = new Set<number>();
+    const preOff = new Set<number>();
     for (const e of course.events) {
       if (e.kind !== 'measure' || e.num / e.den > 1 / 1000) continue;
       const after = e.tick + measureTicks(e.num, e.den);
       if (!this.branches.some((b) => b.a === after)) continue;
       preTicks.add(e.tick);
       preTicks.add(after);
+      preOff.add(e.tick);
     }
     for (const e of course.events) {
       // GOGO はレーンの色で分かるので、イベントとしては出さない
       if (e.kind === 'gogo' || TJA_ONLY.has(e.kind) || !this.evShow[e.kind]) continue;
-      if ((e.kind === 'measure' || e.kind === 'barline') && preTicks.has(e.tick)) continue;
+      if (e.kind === 'measure' && preTicks.has(e.tick)) continue;
+      if (e.kind === 'barline' && (preOff.has(e.tick) || (e.on && preTicks.has(e.tick)))) continue;
       if (e.tick > rightTick) continue;
       const x = xt(e.tick);
       if (x >= L.colW && x <= this.w) {

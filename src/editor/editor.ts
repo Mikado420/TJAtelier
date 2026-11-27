@@ -1,5 +1,5 @@
 import {
-  alignMeasures, branchPath, forcedOf, measureAt, measureTicks, TINY_TICKS, preMeasureOf, PRE_MEASURE, shiftCourse, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
+  alignMeasures, branchPath, forcedOf, SHARED_KINDS, measureAt, measureTicks, TINY_TICKS, preMeasureOf, PRE_MEASURE, shiftCourse, measures, newChart, newCourse, setBranchPath, sortCourse, Timing, TPB, contentEnd, isLong,
   type BranchNo, type BranchPart, type EBranch, type EChart, type ECourse, type EEvent, type ENote, type Measure,
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
@@ -178,7 +178,7 @@ export class Editor {
     this.mutate(() => {
       const c = this.mainCourse;
       const notes = c.notes.filter((n) => n.tick >= a && n.tick < b);
-      const events = c.events.filter((e) => e.tick >= a && e.tick < b && e.kind !== 'bpm' && e.kind !== 'measure' && e.kind !== 'delay');
+      const events = c.events.filter((e) => e.tick >= a && e.tick < b && !SHARED_KINDS.has(e.kind));
       const copy = () => ({ notes: notes.map((n) => ({ ...n })), events: events.map((e) => ({ ...e })) });
       out = { start: a, end: b, type: 'p', x: 60, y: 80, close: true, e: copy(), m: copy() };
       (c.branches ??= []).push(out);
@@ -199,18 +199,13 @@ export class Editor {
   }
 
   /**
-   * 強制分岐を直前で決めるときは、前のとても短い小節の線（黄色）を出さない:
-   * 短い小節に #BARLINEOFF、分岐の小節に #BARLINEON（もともと線を出していたときだけ）。それ以外ならその 2 つを外す
+   * 分岐を直前で決めるときは、前のとても短い小節の線を出さない（すぐ後の分岐の黄色の線と重なるので）:
+   * 短い小節に #BARLINEOFF、分岐の小節に #BARLINEON（もともと線を出していたときだけ）
    */
   private syncPreBarline(c: ECourse, b: EBranch) {
     const pre = preMeasureOf(c, b);
     if (!pre) return;
     const off = c.events.find((e) => e.kind === 'barline' && e.tick === pre.tick && !e.on);
-    const on = c.events.find((e) => e.kind === 'barline' && e.tick === b.start && e.on);
-    if (forcedOf(b) === null) {
-      if (off) c.events = c.events.filter((e) => e !== off && e !== on);
-      return;
-    }
     if (off) return;
     // 短い小節の前で線を出していたか
     let shown = true;
@@ -275,7 +270,7 @@ export class Editor {
       const end = forced ? start : Math.min(nextStart, Math.max(start + 1, lastM.start + lastM.length));
       const copyN = (a: number, z: number) => ({
         notes: c.notes.filter((n) => n.tick >= a && n.tick < z).map((n) => ({ ...n })),
-        events: c.events.filter((e) => e.tick >= a && e.tick < z && e.kind !== 'bpm' && e.kind !== 'measure' && e.kind !== 'delay').map((e) => ({ ...e })),
+        events: c.events.filter((e) => e.tick >= a && e.tick < z && !SHARED_KINDS.has(e.kind)).map((e) => ({ ...e })),
       });
       if (!b) {
         // ほかの区間の途中なら、その区間をここで終わらせる（後ろの部分は新しい区間へ）
