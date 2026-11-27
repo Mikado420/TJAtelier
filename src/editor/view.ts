@@ -213,9 +213,6 @@ export interface GhostRow {
 }
 
 /** ほかのレーンを描くための表（譜面が変わったら作り直す） */
-/** 波形を x の一定の幅ごとにまとめたもの */
-interface WaveCols { x0: number; bw: number; pk: Float32Array; rm: Float32Array }
-
 interface GhostGeo { chart: EChart; course: ECourse; timing: Timing; lanes: DelayLanes; ms: Measure[]; gogo: [number, number][] }
 
 /** 合作: ほかの人が見ている場所 */
@@ -234,7 +231,7 @@ export class EditorView {
   playing = false;
   /** 曲の長さ（秒）。左上に縦書きで表示 */
   duration = 0;
-  private wave: { peaks: Float32Array; rate: number; rms?: Float32Array } | null = null;
+  private wave: { peaks: Float32Array; rate: number } | null = null;
 
   /** tol: そのあたりのノーツとみなす幅（tick。音符の半径ぶん） */
   onTap: (tick: number, tol: number) => void = () => {};
@@ -278,7 +275,11 @@ export class EditorView {
   private vrowRaw = 0;
   private vAnim = 0;
   get vrow() {
-    return Math.min(Math.max(0, this.vrowRaw), Math.min(this.totalRows - 1, this.maxV));
+    return Math.min(Math.max(0, this.vrowRaw), this.totalRows - 1);
+  }
+  /** 同時に見せる段の数（#DELAY で重なる所は、1 段目の下に同じ大きさで 2 段目まで並べる。3 段以上は上下にスクロール） */
+  get visRows() {
+    return this.stack ? Math.min(this.totalRows, 2) : 1;
   }
   /**
    * 合作: ほかのレーンも、自分のレーンの下に同じ大きさで並べる（#DELAY の段と同じ形。譜面ごとに少し間をあける）。
@@ -345,18 +346,16 @@ export class EditorView {
     const L = this.L;
     return this.rowOffWith(r, L.laneH, L.subGap, L.lgap);
   }
-  /**
-   * rowOff の計算（L を使わない形。L の中からも呼ぶ）。
-   * 自分のレーンの段の下には命令の欄（subGap）、ほかのレーンの段の間は細いすき間（lgap）。途中の値は間を比例で
-   */
+  /** rowOff の計算（L を使わない形。L の中からも呼ぶ）。lgap = 譜面の境目（命令の段＋名前の帯） */
   private rowOffWith(r: number, laneH: number, subGap: number, lgap: number) {
-    const own = this.rowsInfo.lanes.rows;
-    const n = Math.floor(r);
-    const ownN = Math.min(n, own);
-    let y = ownN * (laneH + subGap) + Math.max(0, n - own) * (laneH + lgap);
-    const f = r - n;
-    if (f > 0) y += f * (laneH + (n < own ? subGap : lgap));
-    return y;
+    let gap = 0;
+    const info = this.rowsInfo;
+    let start = info.lanes.rows;
+    for (const n of info.counts) {
+      gap += Math.min(1, Math.max(0, r - (start - 1))) * lgap;
+      start += n;
+    }
+    return r * (laneH + subGap) + gap;
   }
   /** 再生中の時刻（DELAY の空きの間も判定枠を進めるため） */
   posTime: number | null = null;
@@ -393,8 +392,8 @@ export class EditorView {
     this.dirty = true;
   }
 
-  setWave(peaks: Float32Array | null, rate = 0, rms?: Float32Array) {
-    this.wave = peaks ? { peaks, rate, rms } : null;
+  setWave(peaks: Float32Array | null, rate = 0) {
+    this.wave = peaks ? { peaks, rate } : null;
     this.invalidate();
   }
 
@@ -411,22 +410,15 @@ export class EditorView {
     return 40 * s + Math.max(38, 124 * s) + 12 + 6;
   }
 
-  /** プレビュー（プレイ画面のレーンの帯）を出す */
-  showPreview = true;
-  /** 下の段の左に DOM のボタン（分岐の切り替え）が占める幅。今の位置の表示はその右に出す */
-  barReserve = 0;
-  /** 上下のスクロールで行ける一番下の段（全部見えていれば 0） */
-  private maxV = Infinity;
-
   /** 配置は大きさ・段・スクロールが変わったときだけ計算し直す（1 フレームに何度も使うため） */
-  private lMemo: { s: number; w: number; h: number; stack: boolean; pv: boolean; info: unknown; vrow: number; L: ReturnType<EditorView['calcL']> } | null = null;
+  private lMemo: { s: number; w: number; h: number; stack: boolean; info: unknown; vrow: number; L: ReturnType<EditorView['calcL']> } | null = null;
   get L() {
     const info = this.stack ? this.rowsInfo : this.lanes;
     const vrow = this.stack ? this.vrow : 0;
     const m = this.lMemo;
-    if (m && m.s === this.s && m.w === this.w && m.h === this.h && m.stack === this.stack && m.pv === this.showPreview && m.info === info && m.vrow === vrow) return m.L;
+    if (m && m.s === this.s && m.w === this.w && m.h === this.h && m.stack === this.stack && m.info === info && m.vrow === vrow) return m.L;
     const L = this.calcL();
-    this.lMemo = { s: this.s, w: this.w, h: this.h, stack: this.stack, pv: this.showPreview, info, vrow, L };
+    this.lMemo = { s: this.s, w: this.w, h: this.h, stack: this.stack, info, vrow, L };
     return L;
   }
 
@@ -434,49 +426,33 @@ export class EditorView {
     const s = this.s;
     const box = (b: { x: number; y: number; r: number }): Box => ({ x: b.x * s, y: b.y * s, r: b.r * s });
     if (this.stack) {
-      // 上から: プレビュー（出し入れできる）→ レーンの段（全部入るまで縮める。波形はレーンの下地）→ 下の段（今の位置・分岐・拡大率）→ ツール
+      const laneH = (R.laneBottom - R.laneTop) * s;
       const evH = Math.max(16, (R.evBottom - R.evTop) * s);
+      const vis = this.visRows;
       // 段と段の間は命令の欄（#DELAY の段ごとに、その段の命令を下に出す）
       const subGap = evH + 12 * s;
-      // ほかのレーンの段の間（名前はレーンの中に出す）
-      const laneGap = 6 * s;
+      const laneGap = R.laneGap * s;
+      // 譜面の境目: 下の譜面の名前の帯
       const lgap = laneGap;
       const colW = R.laneX * s;
-      const barBot = this.h - this.toolsH - 2;
-      const barH = Math.max(30, 46 * s);
-      const barTop = barBot - barH;
+      // 上から: プレビュー（プレイ画面のレーンの帯をそのまま縮小。幅はレーンと同じ）→ レーン → 命令 → 波形 → ツール
+      const waveBot = this.h - this.toolsH - 2;
+      const minWave = Math.max(44, 110 * s);
       const pvW = Math.max(0, this.w - colW);
-      const base = (R.laneBottom - R.laneTop) * s;
-      /** 段を縮める下限（元の大きさに対する比） */
-      const kMin = 0.5;
-      // プレビューは、レーン 1 段が元の大きさで入る分を残して置く
-      const pvH = this.showPreview ? Math.max(0, Math.min(pvW * PREVIEW_ASPECT, barTop - 10 * s - base - subGap - 6 * s)) : 0;
+      const below = laneH + evH + 14 * s;
+      const pvH = Math.max(0, Math.min(pvW * PREVIEW_ASPECT, waveBot - minWave - below - 6 * s));
       const laneY = pvH + 6 * s;
-      const avail = Math.max(base * kMin, barTop - 4 * s - laneY);
-      const total = this.totalRows;
-      // 全部の段（と、自分のレーンの命令の欄）がちょうど入る高さにする（空いていれば高くして波形を大きく見せる）。
-      // 音符・判定枠は元の大きさまで
-      const gaps = this.rowOffWith(total, 0, subGap, lgap);
-      const kH = Math.min(3.5, Math.max(kMin, (avail - gaps) / total / base));
-      const k = Math.min(1, kH);
-      const laneH = base * kH;
-      const blockH = total > 1 ? avail : laneH;
-      const off = (r: number) => this.rowOffWith(r, laneH, subGap, lgap);
-      const endAll = off(total);
-      let maxV = 0;
-      while (maxV < total - 1 && endAll - off(maxV) > blockH + 0.5) maxV++;
-      this.maxV = maxV;
-      let vis = 0;
-      while (vis < total && off(vis) + laneH <= blockH + 0.5) vis++;
+      const tlTop = laneY + below;
+      // 段が 2 つ以上なら、レーンから波形の上までを上下にスクロールする所にする
+      const blockH = this.totalRows > 1 ? Math.max(laneH, tlTop - 8 * s - laneY) : laneH;
       const cy = laneY + laneH / 2;
       // 自分のレーンの命令の段: 自分のレーンの最後の段のすぐ下（スクロールといっしょに動く）
-      const ownBottom = laneY + off(this.lanes.rows - 1) - off(this.vrow) + laneH;
+      const ownBottom = laneY + this.rowOffWith(this.lanes.rows - 1, laneH, subGap, lgap) - this.rowOffWith(this.vrow, laneH, subGap, lgap) + laneH;
+      const headH = Math.max(18, 44 * s);
       return {
         sub: this.lanes.rows - 1,
-        rows: total,
-        vis: Math.max(1, vis),
-        maxV,
-        k,
+        rows: this.totalRows,
+        vis,
         blockH,
         subGap,
         laneGap,
@@ -489,21 +465,19 @@ export class EditorView {
         evY: ownBottom,
         evH,
         evTop: ownBottom + 6 * s,
-        /** 下の段の上端（拡大率・分岐のボタンはこの段の中） */
-        ctlTop: barTop,
+        /** 拡大率のボタンの位置（波形の右上） */
+        ctlTop: tlTop + headH + 4,
         cy,
         playX: R.judgeX * s,
-        r: R.noteR * s * k,
-        bigR: R.bigR * s * k,
-        judgeR: R.judgeR * s * k,
-        judgeR2: R.judgeR2 * s * k,
-        waveX: colW,
-        waveY: barTop,
+        r: R.noteR * s,
+        bigR: R.bigR * s,
+        waveX: colW + 4 * s,
+        waveY: tlTop,
         waveH: 0,
-        play: { x: R.play.x * s, y: cy, r: R.play.r * s * Math.max(0.7, k) },
-        tlX: colW,
-        tlTop: barTop,
-        tlBottom: barBot,
+        play: { x: R.play.x * s, y: cy, r: R.play.r * s },
+        tlX: colW + 4 * s,
+        tlTop,
+        tlBottom: Math.max(tlTop + 30, waveBot),
         /** プレビュー（プレイ画面のレーン）を置く所 */
         pv: { x: colW, y: 0, w: pvW, h: pvH },
       };
@@ -512,10 +486,6 @@ export class EditorView {
     const laneH = (R.laneBottom - R.laneTop) * s;
     return {
       vis: 1,
-      maxV: 0,
-      k: 1,
-      judgeR: R.judgeR * s,
-      judgeR2: R.judgeR2 * s,
       rows: this.lanes.rows,
       laneGap: 0,
       lgap: 0,
@@ -776,14 +746,14 @@ export class EditorView {
       const dx = pt.x - this.drag.lastX;
       // #DELAY の段があるときは、レーンを縦にドラッグして段を切り替える
       if (this.drag.v) {
-        this.vrowRaw = this.vrow - (pt.y - this.drag.lastY) / (L.laneH + (this.vrow < L.sub + 1 ? L.subGap : L.lgap));
+        this.vrowRaw = this.vrow - (pt.y - this.drag.lastY) / (L.laneH + L.subGap + (L.rows > L.sub + 1 ? L.lgap / 2 : 0));
         this.drag.lastY = pt.y;
         this.invalidate();
         return;
       }
       const ax = Math.abs(pt.x - this.drag.startX);
       const ay = Math.abs(pt.y - this.drag.startY);
-      if (!this.drag.moved && L.maxV > 0 && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
+      if (!this.drag.moved && L.rows > 1 && ay > 8 && ay > ax && this.drag.startX > L.colW && this.drag.startY >= L.laneY && this.drag.startY <= L.laneY + L.blockH) {
         this.drag.moved = true;
         this.drag.v = true;
         this.drag.lastY = pt.y;
@@ -835,10 +805,10 @@ export class EditorView {
         const horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
         if (e.ctrlKey || e.metaKey || (!horiz && !e.shiftKey)) {
           this.setZoom(this.zoom * Math.exp(-e.deltaY * 0.002));
-        } else if (e.shiftKey && !horiz && this.L.maxV > 0 && e.altKey) {
+        } else if (e.shiftKey && !horiz && this.L.rows > 1 && e.altKey) {
           // Shift + Alt + ホイールで段を切り替える
           const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-          if (d) this.settleRow(Math.min(this.L.maxV, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
+          if (d) this.settleRow(Math.min(this.L.rows - 1, Math.max(0, Math.round(this.vrow) + Math.sign(d))));
         } else {
           this.onUserScroll();
           this.stopSettle();
@@ -860,8 +830,18 @@ export class EditorView {
       const c = this.cmpBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
       if (c && this.onGhostCompare) return this.onGhostCompare(c.id);
     }
-    // 下の段（今の位置・ボタン）は、タップしても何もしない
-    if (this.stack && y >= L.tlTop && y <= L.tlBottom) return;
+    if (this.stack && y >= L.tlTop && y <= L.tlBottom) {
+      // ほかのレーンの名前をタップ → そのレーンへ
+      const g = this.ghostBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
+      if (g) return this.onGhostTap(g.id);
+      // タイムラインをタップ → その位置へ移動
+      if (x < L.tlX) return;
+      this.onUserScroll();
+      const t = this.lanes.tickAt(this.dOfTl(x), 0);
+      if (t !== null) this.pos = Math.max(this.ed.minPos, this.ed.snapView(t));
+      this.invalidate();
+      return;
+    }
     if (y >= L.waveY && y <= L.waveY + L.waveH) {
       // ほかのレーンの名前をタップ → そのレーンへ
       const g = this.ghostBoxes.find((b) => x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2);
@@ -959,9 +939,7 @@ export class EditorView {
       // レーンとタイムラインを 1 つのまとまりに: 間（命令の段・段の間）もタイムラインの台と同じ色で埋める
       ctx.fillStyle = C.tlBg;
       ctx.fillRect(L.colW, L.laneY, this.w - L.colW, L.tlTop - L.laneY);
-      this.drawBar(L);
-      // 波形（レーンの下地。時刻は自分のレーンの 1 段目にそろえる）
-      this.wave0 = this.waveCols(L.colW, this.w, (x) => ln.timeOfDisp(this.dOf(x)));
+      this.drawTimeline(L);
     } else {
       ctx.fillStyle = 'rgba(29,32,35,0.9)';
       ctx.fillRect(L.waveX, L.waveY, this.w - L.waveX, L.waveH);
@@ -1005,19 +983,6 @@ export class EditorView {
           ctx.fillStyle = c;
           ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, Math.max(4, 10 * s));
           ctx.globalAlpha = 1;
-        }
-      }
-
-      // 波形（レーンの下地）。#DELAY の段は、その段に出ている所の時刻で
-      if (this.stack && this.wave0) {
-        for (let r = 0; r <= L.sub; r++) {
-          const g = this.rowGeom(r);
-          if (g.y > L.laneY + L.blockH || g.y + g.h < L.laneY) continue;
-          const cols = r === 0 ? this.wave0 : this.waveCols(L.colW, this.w, (x) => {
-            const t = ln.tickAt(this.dOf(x), r);
-            return t === null ? null : ed.timing.tickToTime(t);
-          });
-          if (cols) this.paintWave(cols, g.y, g.h);
         }
       }
 
@@ -1099,7 +1064,7 @@ export class EditorView {
       const dr = Math.max(3, 6 * s);
       const gap = dr * 3;
       const y0 = L.laneY + L.blockH / 2 - ((L.rows - 1) * gap) / 2;
-      for (let r = 0; r < L.rows && L.maxV > 0; r++) {
+      for (let r = 0; r < L.rows && L.rows > 1; r++) {
         ctx.fillStyle = r >= cur && r <= last ? EVENT_COLOR.delay : 'rgba(255,255,255,0.3)';
         ctx.beginPath();
         ctx.arc(this.w - dr * 2.5, y0 + r * gap, dr, 0, Math.PI * 2);
@@ -1156,7 +1121,7 @@ export class EditorView {
         const d = inBeat === 0 ? 1 : TPB / gcd(TPB, inBeat);
         const g = geomOf(m.start + rel);
         ctx.fillStyle = DOT_COLORS[d] ?? '#6c6c74';
-        hexPath(ctx, x, g.cy, (inBeat === 0 ? 13 : 9) * s * Math.max(0.7, L.k));
+        hexPath(ctx, x, g.cy, (inBeat === 0 ? 13 : 9) * s);
         ctx.fill();
       }
       });
@@ -1183,7 +1148,7 @@ export class EditorView {
         laneClip(() => {
           ctx.fillStyle = brBar ? '#ffd400' : C.measure;
           ctx.fillRect(x - lw / 2, g.y, lw, g.h);
-          if (row !== 0 || this.stack) {
+          if (row !== 0) {
             ctx.fillStyle = C.text;
             ctx.fillText(String(m.index + 1), x + 6 * s, g.y + 6 * s);
           }
@@ -1316,13 +1281,13 @@ export class EditorView {
     ctx.lineWidth = Math.max(1.5, 4 * s);
     ctx.strokeStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(L.playX, L.cy, L.judgeR, 0, Math.PI * 2);
+    ctx.arc(L.playX, L.cy, R.judgeR * s, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
     ctx.lineWidth = Math.max(1, 3 * s);
     ctx.strokeStyle = '#4d9fbe';
     ctx.beginPath();
-    ctx.arc(L.playX, L.cy, L.judgeR2, 0, Math.PI * 2);
+    ctx.arc(L.playX, L.cy, R.judgeR2 * s, 0, Math.PI * 2);
     ctx.stroke();
 
     // 選んでいる範囲（水色の帯。両端の音符が収まるよう少し広げる）
@@ -1436,104 +1401,238 @@ export class EditorView {
     this.drawColumn(L);
   }
 
-  /** 下の段（stack の配置）: 左に分岐のボタン（DOM）、その右に今の小節・BPM・拍子。右は拡大率のボタン（DOM） */
-  private drawBar(L: Lay) {
+  /**
+   * 上のタイムライン（stack の配置）。上から 小節の見出し → 波形 → 音符の段。
+   * 判定枠と同じ x が再生位置で、右端までで 3 小節。見出しの左（再生位置の手前）に、今の小節・BPM・拍子
+   */
+  private drawTimeline(L: Lay) {
     const { ctx, ed } = this;
     const s = L.s;
-    const x0 = L.colW;
+    const x0 = L.tlX;
+    const x1 = this.w;
     const top = L.tlTop;
     const bot = L.tlBottom;
-    if (bot - top < 20) return;
-    ctx.fillStyle = 'rgba(20,23,26,0.95)';
-    ctx.fillRect(x0, top, this.w - x0, bot - top);
-    ctx.fillStyle = C.laneLine;
-    ctx.fillRect(x0, top, this.w - x0, Math.max(1, s));
+    if (bot - top < 30) return;
+    const ln = this.lanes;
+    const dpos = this.dpos;
+    const tz = this.tlZoom;
+    const xd = (d: number) => this.xOfTl(d, dpos);
+    const xt = (tick: number) => xd(ln.disp(tick));
+    const [leftTick, rightTick] = ln.tickRange(this.dOfTl(x0 - 60 * s), this.dOfTl(x1 + 60 * s));
+    const course = ed.course;
     const font = (w: number, px: number) => `${w} ${Math.round(px)}px ${this.ff}`;
-    const at = Math.max(0, ed.snap(this.pos));
-    const mm = ed.measureOf(at);
-    const f0 = font(800, Math.max(12, 26 * s));
-    const f1 = font(700, Math.max(11, 20 * s));
-    const f2 = font(700, Math.max(8, 13 * s));
-    // 桁数が変わっても位置が動かないよう、決まった幅の枠に左寄せで書く
-    ctx.font = f0;
-    const wBar = ctx.measureText('8888').width;
-    ctx.font = f2;
-    const wLbl = ctx.measureText('BPM').width;
-    ctx.font = f1;
-    const wBpm = ctx.measureText('888.88').width;
-    const gap = 10 * s + 2;
-    const bx = x0 + 10 + this.barReserve;
-    const lx = bx + wBar + gap;
-    const vx = lx + wLbl + 4;
-    const mx = vx + wBpm + gap;
-    const cy = (top + bot) / 2 + 1;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    ctx.font = f0;
-    ctx.fillStyle = C.text;
-    ctx.fillText(String(mm.index + 1), bx, cy);
-    ctx.font = f2;
-    ctx.fillStyle = C.sub;
-    ctx.fillText('BPM', lx, cy);
-    ctx.font = f1;
-    ctx.fillStyle = C.text;
-    ctx.fillText(String(Number(ed.timing.bpmAt(at).toFixed(2))), vx, cy);
-    ctx.fillText(`${mm.num}/${mm.den}`, mx, cy);
-  }
 
-  /** 今のフレームの、自分のレーンの 1 段目の時刻での波形（ほかの段も時刻でそろえて使う） */
-  private wave0: WaveCols | null = null;
+    const headH = Math.max(18, 44 * s);
+    // 波形はレーンと同じ縮尺（音符はレーンにあるので、ここには出さない）
+    const noteH = 0;
+    const notesTop = bot - noteH;
+    const ny = notesTop + noteH / 2;
+    const waveTop = top + headH + 2;
+    const waveBot = notesTop - 2;
 
-  /** 波形を x の 1px ごとの最大振幅・RMS にする（timeAt が null の所は空） */
-  private waveCols(x0: number, x1: number, timeAt: (x: number) => number | null): WaveCols | null {
-    const wv = this.wave;
-    if (!wv || x1 <= x0) return null;
-    const bw = 1;
-    const n = Math.ceil((x1 - x0) / bw) + 1;
-    const pk = new Float32Array(n);
-    const rm = new Float32Array(n);
-    const len = wv.peaks.length;
-    let prev = timeAt(x0);
-    for (let i = 0; i < n; i++) {
-      const next = timeAt(x0 + (i + 1) * bw);
-      if (prev !== null && next !== null) {
-        let i0 = Math.floor(Math.min(prev, next) * wv.rate);
-        let i1 = Math.ceil(Math.max(prev, next) * wv.rate);
-        if (i1 >= 0 && i0 < len) {
-          i0 = Math.max(0, i0);
-          i1 = Math.min(len - 1, Math.max(i1, i0));
-          let p = 0;
-          let q = 0;
-          for (let j = i0; j <= i1; j++) {
-            if (wv.peaks[j] > p) p = wv.peaks[j];
-            if (wv.rms && wv.rms[j] > q) q = wv.rms[j];
-          }
-          pk[i] = p;
-          rm[i] = Math.min(p, q * 1.2);
+    // 台
+    ctx.fillStyle = 'rgba(20,23,26,0.95)';
+    ctx.fillRect(x0, top, x1 - x0, bot - top);
+    ctx.fillStyle = 'rgba(10,12,14,0.55)';
+    ctx.fillRect(x0, top, x1 - x0, headH);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(x0, waveTop, x1 - x0, waveBot - waveTop);
+    ctx.fillStyle = 'rgba(34,49,58,0.55)';
+    ctx.fillRect(x0, notesTop, x1 - x0, noteH);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, top, x1 - x0, bot - top);
+    ctx.clip();
+
+    // ゴーゴー区間・選んでいる範囲
+    ctx.fillStyle = 'rgba(255,110,40,0.14)';
+    for (const [a, b] of ed.gogoRanges()) {
+      const xa = Math.max(x0, xt(a));
+      const xb = Math.min(x1, xt(b));
+      if (xb > xa) ctx.fillRect(xa, waveTop, xb - xa, bot - waveTop);
+    }
+    if (ed.sel) {
+      const xa = Math.max(x0, xt(ed.sel.start));
+      const xb = Math.min(x1, xt(ed.sel.end));
+      if (xb > xa) {
+        ctx.fillStyle = 'rgba(147,205,226,0.18)';
+        ctx.fillRect(xa, waveTop, xb - xa, bot - waveTop);
+      }
+    }
+
+    // グリッドと小節の見出し（再生位置より左の小節番号は、左上の今の位置の表示にまとめる）
+    const ms = ed.measuresUntil(Math.max(0, rightTick));
+    const step = ed.step;
+    const stepPx = (step / TPB) * tz;
+    const lw = Math.max(1, s * 1.5);
+    // 小節番号は重ならないものだけ（とても短い小節が続く所など）
+    // 今の位置の表示（小節・BPM・拍子）。それぞれ決まった幅の枠に左寄せで書き、桁数が変わっても位置が動かないように
+    const ro = (() => {
+      const at = Math.max(0, ed.snap(this.pos));
+      const mm = ed.measureOf(at);
+      const bar = String(mm.index + 1);
+      const bpmV = String(Number(ed.timing.bpmAt(at).toFixed(2)));
+      const meter = `${mm.num}/${mm.den}`;
+      const f0 = font(800, Math.max(12, 26 * s));
+      const f1 = font(700, Math.max(11, 20 * s));
+      const f2 = font(700, Math.max(8, 13 * s));
+      ctx.font = f0;
+      const wBar = ctx.measureText('8888').width;
+      ctx.font = f2;
+      const wLbl = ctx.measureText('BPM').width;
+      ctx.font = f1;
+      const wBpm = ctx.measureText('888.88').width;
+      const wMeter = ctx.measureText('88/88').width;
+      const gap = 10 * s + 2;
+      const bx = x0 + 6;
+      const lx = bx + wBar + gap;
+      const vx = lx + wLbl + 4;
+      const mx = vx + wBpm + gap;
+      const rx = mx + wMeter;
+      return { bar, bpmV, meter, f0, f1, f2, bx, lx, vx, mx, rx };
+    })();
+    let labelEnd = Math.max(L.playX - 2, ro.rx + 10);
+    for (const m of ms) {
+      if (m.start + m.length < leftTick) continue;
+      if (m.start > rightTick) break;
+      if (stepPx >= 5) {
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        const count = Math.min(512, Math.ceil(m.length / step - 1e-6));
+        for (let k = 1; k < count; k++) {
+          const rel = Math.round(k * step);
+          if (rel % TPB === 0) continue;
+          ctx.fillRect(xt(m.start + rel) - 0.5, top + headH, 1, bot - top - headH);
         }
       }
-      prev = next;
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      for (let rel = TPB; rel < m.length; rel += TPB) ctx.fillRect(xt(m.start + rel) - lw / 2, top + headH * 0.62, lw, bot - top - headH * 0.62);
+      const x = xt(m.start);
+      ctx.fillStyle = 'rgba(255,255,255,0.62)';
+      ctx.fillRect(x - lw / 2, top, lw * 1.4, bot - top);
+      if (x < labelEnd) continue;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = C.text;
+      ctx.font = font(800, Math.max(12, 26 * s));
+      const label = String(m.index + 1);
+      ctx.fillText(label, x + 5 * s + 2, top + headH / 2 + 1);
+      labelEnd = x + 5 * s + 2 + ctx.measureText(label).width + 6 * s;
     }
-    return { x0, bw, pk, rm };
-  }
 
-  /** 波形をレーンの下地に描く（上下対称の外形を薄く、RMS の芯を少し濃く） */
-  private paintWave(c: WaveCols, y: number, h: number) {
-    const ctx = this.ctx;
-    const cy = y + h / 2;
-    const A = h * 0.46;
-    const n = c.pk.length;
-    const shape = (v: Float32Array, color: string) => {
-      ctx.beginPath();
-      ctx.moveTo(c.x0, cy);
-      for (let i = 0; i < n; i++) ctx.lineTo(c.x0 + i * c.bw, cy - v[i] * A);
-      for (let i = n - 1; i >= 0; i--) ctx.lineTo(c.x0 + i * c.bw, cy + v[i] * A);
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-    };
-    shape(c.pk, 'rgba(255,255,255,0.12)');
-    if (this.wave?.rms) shape(c.rm, 'rgba(255,255,255,0.15)');
+    // 波形
+    const wv = this.wave;
+    const mid = (waveTop + waveBot) / 2;
+    const half = (waveBot - waveTop) / 2 - 1;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    ctx.fillRect(x0, mid, x1 - x0, 1);
+    if (wv && half > 1) {
+      const bw = 2;
+      const binTicks = (bw / tz) * TPB;
+      const k0 = Math.floor(this.dOfTl(x0) / binTicks);
+      const k1 = Math.ceil(this.dOfTl(x1) / binTicks);
+      ctx.fillStyle = C.wave;
+      let prevT = ln.timeOfDisp(k0 * binTicks);
+      for (let k = k0; k < k1; k++) {
+        const nextT = ln.timeOfDisp((k + 1) * binTicks);
+        let i0 = Math.floor(Math.min(prevT, nextT) * wv.rate);
+        let i1 = Math.ceil(Math.max(prevT, nextT) * wv.rate);
+        prevT = nextT;
+        if (i1 < 0 || i0 >= wv.peaks.length) continue;
+        i0 = Math.max(0, i0);
+        i1 = Math.min(wv.peaks.length - 1, Math.max(i1, i0));
+        let peak = 0;
+        for (let i = i0; i <= i1; i++) if (wv.peaks[i] > peak) peak = wv.peaks[i];
+        const hh = Math.max(0.5, peak * half);
+        ctx.fillRect(xd(k * binTicks), mid - hh, bw - 0.6, hh * 2);
+      }
+    }
+    ctx.restore();
+
+    // 合作: ほかのレーン（波形の所に重ねる）
+    if (!this.fullGhosts.length) this.drawGhosts(L, { top: waveTop + 2 * s, bottom: waveBot - 2 * s });
+
+    // 音符の段（後ろから）
+    if (noteH > 0) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, notesTop - noteH, x1 - x0, noteH * 2);
+    ctx.clip();
+    // 音符の大きさもレーンと同じ比で縮める（段の高さには収める）
+    const k = this.tlScale;
+    const r = Math.max(3, Math.min(L.r * k, noteH * 0.34));
+    const bigR = Math.max(4, Math.min(L.bigR * k, noteH * 0.48));
+    const notes = course.notes;
+    const [lo1, hi1] = visRange(notes, leftTick, rightTick, this.ed.undoCount);
+    for (let i = hi1 - 1; i >= lo1; i--) {
+      const n = notes[i];
+      const endT = n.endTick ?? n.tick;
+      if (endT < leftTick || n.tick > rightTick) continue;
+      const x = xt(n.tick);
+      const ex = n.endTick !== undefined ? xt(n.endTick) : undefined;
+      const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
+      if (n.type === 'balloon' && ex !== undefined) {
+        ctx.globalAlpha = 0.45;
+        drawRoll(ctx, x, ex, ny, r, 'balloon');
+        ctx.globalAlpha = 1;
+        drawAny(ctx, n.type, x, ny, r, undefined, n.hits ?? 5);
+      } else {
+        drawAny(ctx, n.type, x, ny, big ? bigR : r, ex, n.type === 'balloon' ? n.hits ?? 5 : null);
+      }
+    }
+    if (ed.sel) {
+      ctx.strokeStyle = '#93cde2';
+      ctx.lineWidth = Math.max(1.5, 3 * s);
+      for (const n of ed.selectedNotes()) {
+        if (n.tick < leftTick || n.tick > rightTick) continue;
+        const big = n.type === 'bigDon' || n.type === 'bigKa' || n.type === 'bigRoll';
+        ctx.beginPath();
+        ctx.arc(xt(n.tick), ny, (big ? bigR : r) + 3 * s, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    }
+
+    // 再生位置（判定枠と同じ x）
+    const px = L.playX;
+    ctx.save();
+    ctx.shadowColor = 'rgba(30,136,255,0.9)';
+    ctx.shadowBlur = 6 * s;
+    ctx.fillStyle = '#93cde2';
+    ctx.fillRect(px - Math.max(1, 1.5 * s), top, Math.max(2, 3 * s), bot - top);
+    ctx.beginPath();
+    ctx.moveTo(px - 9 * s - 3, top);
+    ctx.lineTo(px + 9 * s + 3, top);
+    ctx.lineTo(px, top + 12 * s + 4);
+    ctx.closePath();
+    ctx.fill();
+    // 下の縁（レーンと同じ光る線。上はレーンとつなげるので出さない）
+    ctx.fillStyle = C.laneEdge;
+    ctx.shadowColor = 'rgba(30,136,255,0.8)';
+    ctx.shadowBlur = 8 * s;
+    const e = Math.max(1, 2 * s);
+    ctx.fillRect(x0, bot - e / 2, x1 - x0, e);
+    ctx.restore();
+    // 今の位置の小節・BPM・拍子（見出しの左端。位置は固定で、再生位置の印より手前に描く）
+    {
+      const { bar, bpmV, meter, f0, f1, f2, bx, lx, vx, mx, rx } = ro;
+      const cy = top + headH / 2 + 1;
+      ctx.fillStyle = 'rgba(10,12,14,0.95)';
+      ctx.fillRect(bx - 6, top + 2, rx - bx + 10, headH - 4);
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.font = f0;
+      ctx.fillStyle = C.text;
+      ctx.fillText(bar, bx, cy);
+      ctx.font = f2;
+      ctx.fillStyle = C.sub;
+      ctx.fillText('BPM', lx, cy);
+      ctx.font = f1;
+      ctx.fillStyle = C.text;
+      ctx.fillText(bpmV, vx, cy);
+      ctx.fillText(meter, mx, cy);
+    }
   }
 
   /** 秒 → x（今の表示で） */
@@ -1635,7 +1734,7 @@ export class EditorView {
       const rowG = (r: number) => this.rowGeom(first + r);
       const top = rowG(0).y;
       const bottom = rowG(ln.rows - 1).y + L.laneH;
-      if (top > L.laneY + L.blockH || bottom < L.laneY) return;
+      if (top - L.laneGap > L.laneY + L.blockH || bottom + L.evH + 12 * s < L.laneY) return;
       /** そのレーンの表示の位置 → 画面の x（時刻でそろえる） */
       const X = (d: number) => this.xOfTime(ln.timeOfDisp(d));
       const Xt = (tick: number) => this.xOfTime(geo.timing.tickToTime(tick));
@@ -1643,7 +1742,46 @@ export class EditorView {
       const spans = (a: number, b: number) =>
         ln.spans(a, b).map((sp) => ({ g: rowG(sp.row), x1: Math.max(x0, X(sp.a)), x2: Math.min(this.w, X(sp.b)) })).filter((sp) => sp.x2 > sp.x1);
 
+      // 譜面の上: 名前の帯
+      const hh = L.laneGap - 4 * s;
+      const hy = top - hh - 2 * s;
+      ctx.fillStyle = 'rgba(16,19,22,0.92)';
+      ctx.fillRect(x0, hy, this.w - x0, hh);
+      ctx.fillStyle = g.color;
+      ctx.fillRect(x0, hy + 4 * s, Math.max(3, 6 * s), hh - 8 * s);
+      ctx.font = font(800, Math.max(11, 24 * s));
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#f4f4f4';
       const label = `${g.main ? '★' : ''}${g.name}`;
+      ctx.fillText(label, x0 + 14 * s + 4, hy + hh / 2);
+      // 右の端: 見比べで鳴らすボタン（スピーカー）
+      if (this.onGhostCompare) {
+        const bh = hh - 4 * s;
+        const bw = bh * 1.5;
+        const bx = this.w - 10 * s - bw;
+        const by = hy + 2 * s;
+        const sk = 0;
+        ctx.beginPath();
+        ctx.moveTo(bx + sk, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw - sk, by + bh); ctx.lineTo(bx, by + bh); ctx.closePath();
+        ctx.fillStyle = g.compare ? C.play : '#2e353c';
+        ctx.fill();
+        const u = bh / 24;
+        const cx = bx + bw / 2 - 12 * u;
+        const cy = by;
+        ctx.save();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = Math.max(1.2, 2 * u);
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx + 4 * u, cy + 9 * u); ctx.lineTo(cx + 8 * u, cy + 9 * u); ctx.lineTo(cx + 13 * u, cy + 5 * u); ctx.lineTo(cx + 13 * u, cy + 19 * u); ctx.lineTo(cx + 8 * u, cy + 15 * u); ctx.lineTo(cx + 4 * u, cy + 15 * u); ctx.closePath();
+        ctx.moveTo(cx + 16 * u, cy + 9 * u); ctx.quadraticCurveTo(cx + 18 * u, cy + 12 * u, cx + 16 * u, cy + 15 * u);
+        if (g.compare) { ctx.moveTo(cx + 18.5 * u, cy + 7 * u); ctx.quadraticCurveTo(cx + 22 * u, cy + 12 * u, cx + 18.5 * u, cy + 17 * u); }
+        ctx.stroke();
+        ctx.restore();
+        this.cmpBoxes.push({ x1: bx - 6 * s, x2: bx + bw + 6 * s, y1: hy - 4 * s, y2: hy + hh + 4 * s, id: g.id });
+      }
       const grads = geo.course.grads ?? [];
 
       // レーン（#DELAY で重なった所だけ下の段。ほかは暗く）
@@ -1664,8 +1802,6 @@ export class EditorView {
       ctx.fillStyle = g.color;
       for (let r = 0; r < ln.rows; r++) ctx.fillRect(x0, rowG(r).y, this.w - x0, L.laneH);
       ctx.globalAlpha = 1;
-      // 波形（時刻でそろえるので、自分のレーンの 1 段目と同じ）
-      if (this.wave0) this.paintWave(this.wave0, rowG(0).y, L.laneH);
       // ゴーゴー
       ctx.fillStyle = C.gogo;
       for (const [a, b] of geo.gogo) for (const sp of spans(a, b)) ctx.fillRect(sp.x1, sp.g.y, sp.x2 - sp.x1, sp.g.h);
@@ -1708,7 +1844,7 @@ export class EditorView {
           if (x < x0 || x > this.w) continue;
           const d = inBeat === 0 ? 1 : TPB / gcd(TPB, inBeat);
           ctx.fillStyle = DOT_COLORS[d] ?? '#6c6c74';
-          hexPath(ctx, x, rowG(ln.rowOf(m.start + rel)).cy, (inBeat === 0 ? 13 : 9) * s * Math.max(0.7, L.k));
+          hexPath(ctx, x, rowG(ln.rowOf(m.start + rel)).cy, (inBeat === 0 ? 13 : 9) * s);
           ctx.fill();
         }
         const x = Xt(m.start);
@@ -1725,7 +1861,7 @@ export class EditorView {
       ctx.strokeStyle = 'rgba(255,255,255,0.55)';
       for (let r = 0; r < ln.rows; r++) {
         ctx.beginPath();
-        ctx.arc(L.playX, rowG(r).cy, L.judgeR, 0, Math.PI * 2);
+        ctx.arc(L.playX, rowG(r).cy, R.judgeR * s, 0, Math.PI * 2);
         ctx.stroke();
       }
       // 音符（後ろから）
@@ -1772,8 +1908,7 @@ export class EditorView {
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
         const evs = geo.course.events.filter((e) => e.kind !== 'gogo' && !TJA_ONLY.has(e.kind) && this.evShow[e.kind] && e.tick >= leftTick && e.tick <= rightTick).sort((a, b) => a.tick - b.tick);
-        const bh = Math.min(30 * s, L.laneH * 0.24);
-        ctx.font = `600 ${Math.round(Math.min(22 * s, bh * 0.72))}px ${this.ff}`;
+        const bh = 30 * s;
         const pad = 7 * s;
         const ends = new Map<number, number>();
         for (const e of evs) {
@@ -1782,8 +1917,15 @@ export class EditorView {
           if (x < x0 || x > this.w) continue;
           const er = ln.rowOf(e.tick);
           const ry = rowG(er).y + L.laneH;
-          const by = ry - bh - 3 * s;
+          const by = ry + 8 * s;
           const end = ends.get(er) ?? -Infinity;
+          ctx.fillStyle = EVENT_COLOR[e.kind];
+          ctx.beginPath();
+          ctx.moveTo(x, ry + 2);
+          ctx.lineTo(x - 9 * s, ry + 10 * s);
+          ctx.lineTo(x + 9 * s, ry + 10 * s);
+          ctx.closePath();
+          ctx.fill();
           if (x < end) continue;
           const gr = e.kind === 'scroll' ? grads.find((q) => q.start === e.tick) : undefined;
           const t = gr ? `×${gr.from}→${gr.to}` : eventShort(e);
@@ -1796,44 +1938,18 @@ export class EditorView {
           ends.set(er, x + 2 * s + w + 4 * s);
         }
       }
-      // 名前（レーンの左上）
-      {
-        const nh = Math.max(16, Math.min(34 * s, L.laneH * 0.26));
-        ctx.font = font(800, nh * 0.6);
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
+      // 名前の帯が上に隠れたら、名前をレーンの左上に残す
+      if (hy + hh / 2 < L.laneY && bottom > L.laneY + 20 * s) {
+        ctx.font = font(800, Math.max(10, 20 * s));
         const tw = ctx.measureText(label).width;
-        const py = top + 4 * s;
+        const py = Math.min(L.laneY + 4 * s, bottom - 40 * s);
         ctx.fillStyle = 'rgba(10,12,14,0.85)';
-        ctx.fillRect(x0 + 4, py, tw + 20 * s, nh);
+        ctx.fillRect(x0 + 4, py, tw + 20 * s, Math.max(16, 34 * s));
         ctx.fillStyle = g.color;
-        ctx.fillRect(x0 + 4, py, Math.max(3, 5 * s), nh);
+        ctx.fillRect(x0 + 4, py, Math.max(3, 5 * s), Math.max(16, 34 * s));
         ctx.fillStyle = '#f4f4f4';
-        ctx.fillText(label, x0 + 4 + 12 * s, py + nh / 2);
-        // 右上: 見比べで鳴らすボタン（スピーカー）
-        if (this.onGhostCompare) {
-          const bh = nh;
-          const bw = bh * 1.5;
-          const bx = this.w - 10 * s - bw;
-          const by = py;
-          ctx.fillStyle = g.compare ? C.play : '#2e353c';
-          ctx.fillRect(bx, by, bw, bh);
-          const u = bh / 24;
-          const cx = bx + bw / 2 - 12 * u;
-          const cy = by;
-          ctx.save();
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = Math.max(1.2, 2 * u);
-          ctx.lineJoin = 'round';
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(cx + 4 * u, cy + 9 * u); ctx.lineTo(cx + 8 * u, cy + 9 * u); ctx.lineTo(cx + 13 * u, cy + 5 * u); ctx.lineTo(cx + 13 * u, cy + 19 * u); ctx.lineTo(cx + 8 * u, cy + 15 * u); ctx.lineTo(cx + 4 * u, cy + 15 * u); ctx.closePath();
-          ctx.moveTo(cx + 16 * u, cy + 9 * u); ctx.quadraticCurveTo(cx + 18 * u, cy + 12 * u, cx + 16 * u, cy + 15 * u);
-          if (g.compare) { ctx.moveTo(cx + 18.5 * u, cy + 7 * u); ctx.quadraticCurveTo(cx + 22 * u, cy + 12 * u, cx + 18.5 * u, cy + 17 * u); }
-          ctx.stroke();
-          ctx.restore();
-          this.cmpBoxes.push({ x1: bx - 6 * s, x2: bx + bw + 6 * s, y1: by - 4 * s, y2: by + bh + 4 * s, id: g.id });
-        }
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, x0 + 4 + 12 * s, py + Math.max(8, 17 * s));
       }
     });
     ctx.restore();
@@ -1848,12 +1964,22 @@ export class EditorView {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     for (const c of this.cursors) {
+      // 上のタイムラインにも同じ時刻の線を出す
+      if (this.stack) {
+        const xt = this.xOfTl(this.lanes.dispOfTime(c.t));
+        if (xt >= L.tlX && xt <= this.w) {
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = c.color;
+          ctx.fillRect(xt - Math.max(1, 1.5 * s), L.tlTop, Math.max(2, 3 * s), L.tlBottom - L.tlTop);
+          ctx.globalAlpha = 1;
+        }
+      }
       const x = this.xOfTime(c.t);
       if (x < L.colW || x > this.w) continue;
       const y0 = this.stack ? L.laneY : L.waveY;
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = c.color;
-      ctx.fillRect(x - Math.max(1, 1.5 * s), y0, Math.max(2, 3 * s), (this.stack ? Math.max(L.evTop + L.evH, L.laneY + L.blockH) : L.evTop + L.evH) - y0);
+      ctx.fillRect(x - Math.max(1, 1.5 * s), y0, Math.max(2, 3 * s), L.evTop + L.evH - y0);
       const tw = ctx.measureText(c.name).width + 12 * s;
       ctx.fillRect(x - tw / 2, y0, tw, 20 * s);
       ctx.globalAlpha = 1;
