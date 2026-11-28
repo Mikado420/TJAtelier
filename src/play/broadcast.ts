@@ -311,7 +311,7 @@ export class Broadcast {
       g.setTransform(this.q, 0, 0, this.q, 0, 0);
       g.clearRect(0, 0, TL.w, TL.h);
       const x = (t: number) => (Math.max(0, Math.min(this.dur, t)) / this.dur) * TL.w;
-      g.fillStyle = lit ? 'rgba(200,51,126,0.34)' : 'rgba(200,51,126,0.2)';
+      g.fillStyle = lit ? 'rgba(235,110,50,0.5)' : 'rgba(235,110,50,0.32)';
       for (const [a, b] of c.gogo) g.fillRect(x(a), 0, Math.max(2, x(Number.isFinite(b) ? b : this.dur) - x(a)), TL.h);
       const bw = TL.w / BARS;
       g.fillStyle = lit ? '#93cde2' : 'rgba(255,255,255,0.2)';
