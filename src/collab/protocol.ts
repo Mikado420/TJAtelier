@@ -38,7 +38,7 @@ export interface GradVal {
   mode: 'linear' | 'geometric';
   digits: number;
   basis?: 'count' | 'time';
-  speed?: 'scroll' | 'visual' | 'visualBase';
+  speed?: 'scroll' | 'visual' | 'visualBase' | 'visualEnd';
 }
 
 /** レーンのヘッダー（独立した TJA としての値） */

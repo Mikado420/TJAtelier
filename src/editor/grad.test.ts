@@ -61,13 +61,57 @@ describe('グラデ', () => {
     expect(vals()).toEqual([[0, 1], [M / 4, 1.5], [(M * 3) / 8, 0.5], [M / 2, 2], [(M * 3) / 4, 2.5], [M, 3]]);
   });
 
-  it('見た目の速さで: BPM が倍になる所では SCROLL を半分にして、BPM × SCROLL を滑らかにする', () => {
+  it('前の終点基準（visual）: 開始値は始点の BPM、終了値は終点の BPM が基準のまま', () => {
     const t = 'TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n#BPMCHANGE 240\n1111,\n#END\n';
     const ed = new Editor(parseTJA(t));
     ed.setGrad({ start: 0, end: M * 2, from: 1, to: 0.5, mode: 'linear', digits: 3, speed: 'visual' });
-    const s = ed.course.events.filter((e) => e.kind === 'scroll').map((e) => (e as { value: number }).value);
-    // 見た目の速さは 120 → 120 で一定なので、BPM 120 の間は 1、BPM 240 の間は 0.5
-    expect(s).toEqual([1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    const s = ed.course.events.filter((e) => e.kind === 'scroll').map((e) => [e.tick, (e as { value: number }).value]);
+    // 見た目の速さは 120 → 120 で一定。同じ値は置かないので、始点の 1 と BPM 240 の所の 0.5 だけ
+    expect(s).toEqual([[0, 1], [M, 0.5]]);
+  });
+
+  describe('開始値と終了値が同じなら等速（BPM 150 → 200 → 300）', () => {
+    const t = 'TITLE:t\nBPM:150\nCOURSE:Oni\nLEVEL:1\n#START\n#BPMCHANGE 150\n1111,\n1111,\n#BPMCHANGE 200\n1111,\n1111,\n#BPMCHANGE 300\n1111,\n1111,\n#END\n';
+    const vals = (ed: Editor) => ed.course.events.filter((e) => e.kind === 'scroll').map((e) => [e.tick, (e as { value: number }).value]);
+    it('終点基準: 終点の見た目（1 × 300）で等速。#BPMCHANGE の所にだけ置く', () => {
+      const ed = new Editor(parseTJA(t));
+      ed.setGrad({ start: 0, end: M * 5, from: 1, to: 1, mode: 'linear', digits: 3, basis: 'time', speed: 'visualEnd' });
+      expect(vals(ed)).toEqual([[0, 2], [M * 2, 1.5], [M * 4, 1]]);
+    });
+    it('始点基準: 始点の見た目（1 × 150）で等速', () => {
+      const ed = new Editor(parseTJA(t));
+      ed.setGrad({ start: 0, end: M * 5, from: 1, to: 1, mode: 'linear', digits: 3, basis: 'time', speed: 'visualBase' });
+      expect(vals(ed)).toEqual([[0, 1], [M * 2, 0.75], [M * 4, 0.5]]);
+    });
+    it('終点基準で 1→2: 見た目の速さは 300 → 600', () => {
+      const ed = new Editor(parseTJA(t));
+      ed.setGrad({ start: 0, end: M * 5, from: 1, to: 2, mode: 'linear', digits: 3, basis: 'count', speed: 'visualEnd' });
+      const v = vals(ed);
+      expect(v[0]).toEqual([0, 2]);
+      expect(v[v.length - 1]).toEqual([M * 5, 2]);
+    });
+  });
+
+  it('同じ値の #SCROLL は置かない。単体で置いた #SCROLL の後は、同じ値でも置き直す', () => {
+    const ed = new Editor(parseTJA(TJA));
+    ed.setGrad({ start: 0, end: M, from: 1, to: 1, mode: 'linear', digits: 3 });
+    const vals = () => ed.course.events.filter((e) => e.kind === 'scroll').map((e) => [e.tick, (e as { value: number }).value]);
+    expect(vals()).toEqual([[0, 1]]);
+    ed.addEvent({ tick: M / 4, kind: 'scroll', value: 2 });
+    expect(vals()).toEqual([[0, 1], [M / 4, 2], [M / 2, 1]]);
+  });
+
+  it('前の、音符ごとに同じ値を置いた譜面を読み直しても、同じ値の #SCROLL は単体で置いたものにならない', () => {
+    const ed = new Editor(parseTJA(TJA));
+    ed.setGrad({ start: 0, end: M, from: 1, to: 1, mode: 'linear', digits: 3 });
+    for (const k of [1, 2, 3]) ed.course.events.push({ tick: (M * k) / 4, kind: 'scroll', value: 1 });
+    ed.course.events.push({ tick: M, kind: 'scroll', value: 1 });
+    ed.replaceChart(parseTJA(writeTJA(ed.chart)));
+    expect(ed.course.grads?.length).toBe(1);
+    expect(ed.course.events.some((e) => e.kind === 'scroll' && e.pin)).toBe(false);
+    // 置き直すと、同じ値の #SCROLL は消える
+    ed.setGrad({ ...ed.course.grads![0] }, ed.course.grads![0]);
+    expect(ed.course.events.filter((e) => e.kind === 'scroll').map((e) => e.tick)).toEqual([0]);
   });
 
   it('見た目・始点の BPM: 1→2 は見た目でちょうど 2 倍（120 → 240）。終点の #SCROLL は 240 ÷ 240 = 1', () => {

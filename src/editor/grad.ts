@@ -16,11 +16,16 @@ import { measures, measureScale, TPB, type ECourse, type EEvent } from '../chart
  *
  * #BPMCHANGE があるときの選び方（speed）:
  * - 'scroll': #SCROLL の値そのものを滑らかに変える（BPM が変わるとそこで見た目の速さが跳ねる）
- * - 'visual': 見た目の速さ（BPM × SCROLL）を滑らかに変える。各位置の #SCROLL = その位置の見た目の速さ ÷ その位置の BPM。
+ * - 'visualBase'（始点基準）: 見た目の速さ（BPM × SCROLL）を滑らかに変える。各位置の #SCROLL = その位置の見た目の速さ ÷ その位置の BPM。
  *             範囲の中の #BPMCHANGE の位置にも #SCROLL を置く（置かないとそこで速さが跳ねる）。
- *             開始値・終了値は、始点・終点での #SCROLL の値（終点の見た目の速さ = 終了値 × 終点の BPM）
- * - 'visualBase': 'visual' と同じく見た目の速さを滑らかにするが、開始値・終了値は「始点の BPM を基準にした見た目の速さ」。
- *             終点の見た目の速さ = 終了値 × 始点の BPM（終点の #SCROLL は、それを終点の BPM で割った値）
+ *             開始値・終了値は「始点の BPM を基準にした見た目の速さ」（見た目の速さ = 値 × 始点の BPM）。
+ *             開始値と終了値が同じなら、始点の見た目のまま等速
+ * - 'visualEnd'（終点基準）: 'visualBase' の基準を終点の BPM にしたもの（見た目の速さ = 値 × 終点の BPM）。
+ *             開始値と終了値が同じなら、終点の見た目のまま等速
+ * - 'visual'（前の終点基準。前に保存したグラデのため残す）: 開始値は始点の BPM、終了値は終点の BPM を基準にする
+ *             （開始値と終了値が同じでも、BPM が変わると等速にならない）
+ *
+ * 前と同じ値の #SCROLL は置かない（始点には必ず置く）
  * 小節線（#MEASURE で長さが変わっても同じ）はいつも対象に入れる。
  *
  * グラデの設定はエディタの中だけで覚えておき、.tja には書き込まない（書き出すのは普通の #SCROLL）。
@@ -36,7 +41,7 @@ export interface Grad {
   /** 進み具合の基準。'time' = 秒数、'count' = 対象の数（未設定は前に保存したデータとの互換のため 'count'） */
   basis?: 'count' | 'time';
   /** #BPMCHANGE があるとき、何を滑らかにするか（無いときは 'scroll'） */
-  speed?: 'scroll' | 'visual' | 'visualBase';
+  speed?: 'scroll' | 'visual' | 'visualBase' | 'visualEnd';
   /** （使わない。小節線はいつも対象。前に保存したデータとの互換のため残す） */
   barlines?: boolean;
   /**
@@ -60,6 +65,9 @@ export function gradParts(g: Pick<Grad, 'start' | 'end' | 'holes'>): [number, nu
   if (g.end > a) out.push([a, g.end]);
   return out;
 }
+
+/** 見た目の速さ（BPM × SCROLL）を滑らかにするか */
+const isVisual = (s: Grad['speed']) => s === 'visual' || s === 'visualBase' || s === 'visualEnd';
 
 /** その位置の BPM を返す関数（譜面の最初の BPM と、難易度の #BPMCHANGE から） */
 export function bpmFn(c: ECourse, baseBpm: number) {
@@ -117,7 +125,7 @@ export function gradTargets(c: ECourse, g: Pick<Grad, 'start' | 'end' | 'speed' 
   const set = new Set<number>();
   for (const n of c.notes) if (n.tick >= start && n.tick < end) set.add(n.tick);
   for (const m of measures(c, end)) if (m.start >= start && m.start < end) set.add(m.start);
-  if (g.speed === 'visual' || g.speed === 'visualBase') for (const e of c.events) if (e.kind === 'bpm' && e.tick > start && e.tick < end) set.add(e.tick);
+  if (isVisual(g.speed)) for (const e of c.events) if (e.kind === 'bpm' && e.tick > start && e.tick < end) set.add(e.tick);
   return [...set].filter((t) => !inGradHole(g, t)).sort((a, b) => a - b);
 }
 
@@ -140,11 +148,12 @@ export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: numbe
   const ts = gradTargets(c, g);
   const p = gradProgress(c, g, ts, baseBpm);
   const out: { tick: number; value: number }[] = [];
-  if (g.speed === 'visual' || g.speed === 'visualBase') {
+  if (isVisual(g.speed)) {
     // 見た目の速さ（BPM × SCROLL）を滑らかにする
     const bpm = bpmFn(c, baseBpm);
-    const v0 = g.from * bpm(g.start);
-    const v1 = g.to * (g.speed === 'visualBase' ? bpm(g.start) : bpm(g.end));
+    const ref = g.speed === 'visualBase' ? bpm(g.start) : bpm(g.end);
+    const v0 = g.from * (g.speed === 'visual' ? bpm(g.start) : ref);
+    const v1 = g.to * ref;
     ts.forEach((tick, k) => out.push({ tick, value: round(interp(g.mode, v0, v1, p[k]) / bpm(tick), g.digits) }));
     out.push({ tick: g.end, value: round(v1 / bpm(g.end), g.digits) });
   } else {
@@ -160,7 +169,38 @@ export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: numbe
     for (const [a] of holes) out.push({ tick: a, value: before });
     out.sort((x, y) => x.tick - y.tick);
   }
-  return out;
+  return dropSame(c, g, out, new Set(holes.map(([a]) => a)));
+}
+
+/**
+ * 前と同じ値の #SCROLL を外す（その位置ではもう同じ値になっているので）。
+ * 始点と、別の段に出ている所の頭には必ず置く。別の段に出ている所を抜けた後と、
+ * 単体で置いた #SCROLL（pin）で値が変わった後は、同じ値でも置き直す
+ */
+function dropSame(c: ECourse, g: Grad, out: { tick: number; value: number }[], heads: Set<number>) {
+  const pins = new Map<number, number>();
+  for (const e of c.events) if (e.kind === 'scroll' && isPin(e, g)) pins.set(e.tick, e.value);
+  const pinTicks = [...pins.keys()].sort((a, b) => a - b);
+  const res: { tick: number; value: number }[] = [];
+  let cur = NaN;
+  let pi = 0;
+  let prev = -Infinity;
+  for (const s of out) {
+    while (pi < pinTicks.length && pinTicks[pi] < s.tick) cur = pins.get(pinTicks[pi++])!;
+    const left = (g.holes ?? []).some(([, b]) => b > prev && b <= s.tick);
+    prev = s.tick;
+    if (pins.has(s.tick)) {
+      // pin の位置にはグラデの値を置かない（applyGrad が外す）が、ほかの確かめ用に残す
+      res.push(s);
+      cur = pins.get(s.tick)!;
+      continue;
+    }
+    if (s.tick === g.start || heads.has(s.tick) || left || Math.abs(s.value - cur) >= 1e-9) {
+      res.push(s);
+      cur = s.value;
+    }
+  }
+  return res;
 }
 
 /** グラデの範囲（始点・終点を含む）に、グラデの値の代わりに置いた #SCROLL（pin）か */
@@ -183,11 +223,15 @@ export function applyGrad(c: ECourse, g: Grad, baseBpm: number) {
  * （TJA のテキストから読み直したとき用）
  */
 export function markPins(c: ECourse, g: Grad, baseBpm: number, checkEnd = true) {
-  const want = new Map(gradScrolls(c, g, baseBpm).map((s) => [s.tick, s.value]));
+  const ws = gradScrolls(c, g, baseBpm);
+  const want = new Map(ws.map((s) => [s.tick, s.value]));
   for (const e of c.events) {
     // 終点で次のグラデが始まるときは、終点の値は次のグラデのもの（そちらで確かめる）
     if (e.kind !== 'scroll' || e.tick < g.start || e.tick > g.end || (e.tick === g.end && !checkEnd)) continue;
-    const w = want.get(e.tick);
+    let w = want.get(e.tick);
+    // グラデが置かない位置でも、そこでのグラデの値と同じなら単体で置いたものではない
+    // （前は音符ごとに同じ値を置いていたので、前に保存した譜面に残っている）
+    if (w === undefined && !inGradHole(g, e.tick)) for (const s of ws) if (s.tick < e.tick) w = s.value;
     if (w === undefined || Math.abs(e.value - w) >= 1e-9) e.pin = true;
   }
 }

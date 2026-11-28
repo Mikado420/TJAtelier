@@ -1046,7 +1046,7 @@ view.onTap = (tick, tol) => {
   if (r.point) openPoint(r.point.kind, r.point.tick);
   if (r.newGrad) {
     const from = ed.timing.scrollAt(r.newGrad.start);
-    gradEdit = { grad: { ...r.newGrad, from, to: from * 2, mode: 'linear', digits: 3, speed: 'visual', basis: 'time' } };
+    gradEdit = { grad: { ...r.newGrad, from, to: from * 2, mode: 'linear', digits: 3, speed: 'visualEnd', basis: 'time' } };
     openSheet('grad');
   }
   if (r.editGrad) {
@@ -3530,6 +3530,8 @@ function renderGradSheet(body: HTMLElement) {
   const m2 = ed.measureOf(g.end);
   const seg = (key: string, items: [string, string][], cur: string) =>
     `<div class="btns grad-seg" style="grid-template-columns: repeat(${items.length}, minmax(0, 1fr))">${items.map(([v, label]) => `<button data-gset="${key}" data-v="${v}" class="${v === cur ? 'primary' : ''}">${label}</button>`).join('')}</div>`;
+  // 前の終点基準（開始値だけ始点の BPM が基準）は、開いたら今の終点基準にする
+  if (g.speed === 'visual') g.speed = 'visualEnd';
   $('sheetTitle').textContent = st.old ? 'グラデを変更' : 'グラデ';
   body.innerHTML = `
     <div class="grad-layout">
@@ -3541,7 +3543,7 @@ function renderGradSheet(body: HTMLElement) {
         ${seg('basis', [['time', '秒数'], ['count', '個数']], g.basis ?? 'count')}
         <label class="field"><span>小数の桁数</span><input type="number" min="0" max="6" step="1" inputmode="numeric" data-g="digits" value="${g.digits}"></label>
         <h3>#BPMCHANGE</h3>
-        ${seg('speed', [['visual', '終点基準'], ['visualBase', '始点基準'], ['scroll', 'SCROLL値']], g.speed ?? 'scroll')}
+        ${seg('speed', [['visualEnd', '終点基準'], ['visualBase', '始点基準'], ['scroll', 'SCROLL値']], g.speed ?? 'scroll')}
         <p class="grad-err" id="gradErr"></p>
         <div class="btns${st.old ? ' three' : ''}">
           ${st.old ? '<button data-gact="del">グラデを消す</button>' : ''}
