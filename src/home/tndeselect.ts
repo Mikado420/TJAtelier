@@ -477,16 +477,27 @@ export class TndeSelect {
     const m = this.im(name);
     if (m) this.g.drawImage(m.im, dx, dy, m.w * k, m.h * k);
   }
-  /** 9 分割で引きのばす（角はそのまま 1.5 倍） */
-  private nine(im: Img, s: number[], d: number[], cx: number, cy: number) {
+  /** 9 分割で引きのばす（角はそのまま 1.5 倍）。lap: 透けていない絵は、つなぎ目を 1 画素重ねる */
+  private nine(im: Img, s: number[], d: number[], cx: number, cy: number, lap = false) {
     const [sx, sy, sw, sh] = s, [dx, dy, dw, dh] = d;
     const xs = [sx, sx + cx, sx + sw - cx, sx + sw], ys = [sy, sy + cy, sy + sh - cy, sy + sh];
     const X = [dx, dx + cx * 1.5, dx + dw - cx * 1.5, dx + dw], Y = [dy, dy + cy * 1.5, dy + dh - cy * 1.5, dy + dh];
     if (X[2] < X[1]) { const m = (dx + dx + dw) / 2; X[1] = X[2] = m; }
+    // つなぎ目を画面の画素にそろえ、lap なら右・下へ 1 画素ぶん重ねる（iPhone で境目に透けた線が出ないように。重ねた所は後から描く 1 枚で隠れる）
+    const t = this.g.getTransform();
+    let ex = lap ? 0.5 : 0, ey = ex;
+    if (t.b === 0 && t.c === 0 && t.a > 0 && t.d > 0) {
+      for (let i = 0; i < 4; i++) X[i] = (Math.round(X[i] * t.a + t.e) - t.e) / t.a;
+      for (let i = 0; i < 4; i++) Y[i] = (Math.round(Y[i] * t.d + t.f) - t.f) / t.d;
+      if (lap) { ex = 1 / t.a; ey = 1 / t.d; }
+    }
     for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
       const w = xs[i + 1] - xs[i], h = ys[j + 1] - ys[j];
-      if (w <= 0 || h <= 0 || X[i + 1] <= X[i] || Y[j + 1] <= Y[j]) continue;
-      this.g.drawImage(im.im, (xs[i] - im.x) * im.k, (ys[j] - im.y) * im.k, w * im.k, h * im.k, X[i], Y[j], X[i + 1] - X[i], Y[j + 1] - Y[j]);
+      const dw = X[i + 1] - X[i], dh = Y[j + 1] - Y[j];
+      if (w <= 0 || h <= 0 || dw <= 0 || dh <= 0) continue;
+      // 後から描く 1 枚がある向きにだけ重ねる。元の絵も同じ割合でのばす
+      const ox = i < 2 && X[3] > X[i + 1] ? ex : 0, oy = j < 2 && Y[3] > Y[j + 1] ? ey : 0;
+      this.g.drawImage(im.im, (xs[i] - im.x) * im.k, (ys[j] - im.y) * im.k, (w + (ox * w) / dw) * im.k, (h + (oy * h) / dh) * im.k, X[i], Y[j], dw + ox, dh + oy);
     }
   }
 
@@ -1336,7 +1347,7 @@ export class TndeSelect {
       g.restore();
     }
     const bar = this.barImg(it.look);
-    if (bar) this.nine(bar, [0, 0, 632, 92], [x, y, w, h], 21, 21);
+    if (bar) this.nine(bar, [0, 0, 632, 92], [x, y, w, h], 21, 21, true);
     const ov = this.im('barOverlay');
     // 中の明るい所: 閉じた (562.5,498,796.5,84) → 開いた 曲 (563,392,794,283) / フォルダ (564,498,792,177)
     const iy = lerp(471 + 27, kind === 'song' ? 392 : 498, t);
