@@ -1024,16 +1024,29 @@ export class PlayMode {
   /** 背景の画像（読み込んだ絵と、16:9 の枠にぼかして暗くして描いた canvas） */
   private bgImg: HTMLImageElement | null = null;
   private bgCv: HTMLCanvasElement | null = null;
+  /** いま出す絵（背景の画像。動画用の画面で背景の画像が無ければジャケット） */
   private bgImgUrl = '';
+  private bgOwnUrl = '';
+  private bgJkUrl = '';
   /** bgCv に描いた絵の大きさ・暗さ（同じなら描き直さない） */
   private bgKey = '';
 
-  /** 背景の画像を決める（null で無し）。動画を流さないときに、16:9 の枠に出す */
-  setBgImage(src: Blob | null) {
-    if (this.bgImgUrl) URL.revokeObjectURL(this.bgImgUrl);
-    this.bgImgUrl = src ? URL.createObjectURL(src) : '';
+  /** 背景の画像を決める（null で無し）。動画を流さないときに、16:9 の枠に出す。jacket: 動画用の画面で、背景の画像が無いときに代わりに出す */
+  setBgImage(src: Blob | null, jacket: Blob | null = null) {
+    for (const u of [this.bgOwnUrl, this.bgJkUrl]) if (u) URL.revokeObjectURL(u);
+    this.bgOwnUrl = src ? URL.createObjectURL(src) : '';
+    this.bgJkUrl = jacket ? URL.createObjectURL(jacket) : '';
+    this.syncBgSrc(true);
+    if (this.active) this.applySettings();
+  }
+
+  /** 出す絵を選び直す（動画用の画面に切り替えたときも）。force: 絵が入れ替わったので必ず読み直す */
+  private syncBgSrc(force = false) {
+    const want = this.bgOwnUrl || (this.renderer.broadcast ? this.bgJkUrl : '');
+    if (!force && want === this.bgImgUrl) return;
+    this.bgImgUrl = want;
     this.bgKey = '';
-    if (src && !this.bgCv) {
+    if (want && !this.bgCv) {
       const cv = document.createElement('canvas');
       cv.className = 'play-bgimg hidden';
       cv.setAttribute('aria-hidden', 'true');
@@ -1047,7 +1060,6 @@ export class PlayMode {
       if (this.bgImgUrl) this.bgImg.src = this.bgImgUrl;
       else this.bgImg.removeAttribute('src');
     }
-    if (this.active) this.applySettings();
   }
 
   /**
@@ -1128,6 +1140,7 @@ export class PlayMode {
 
   /** 動画の出し方を背景・動画の要素に反映する（resize = 背景を描き直す） */
   private applyVideo(resize = true) {
+    this.syncBgSrc();
     const vmode = this.videoMode;
     // 背景の画像（動画を流さないとき。16:9 の枠に、動画の明るさの設定で暗くしてぼかす）
     const img = !vmode && !!this.bgImgUrl && !this.calibrating;

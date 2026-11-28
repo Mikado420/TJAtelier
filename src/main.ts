@@ -3345,7 +3345,9 @@ async function refreshJacket(id: string | null) {
   if (j && id === currentSongId) currentJacket = { name: j.name, url: URL.createObjectURL(new Blob([j.data])) };
   const g = id ? await loadSongBgImage(id).catch(() => undefined) : undefined;
   if (g && id === currentSongId) currentBg = { name: g.name, url: URL.createObjectURL(new Blob([g.data])) };
-  play.setBgImage(g && id === currentSongId ? new Blob([g.data]) : null);
+  // 動画用の画面では、背景の画像が無ければジャケットを背景の画像と同じように出す
+  const mine = id === currentSongId;
+  play.setBgImage(g && mine ? new Blob([g.data]) : null, j && mine ? new Blob([j.data]) : null);
 }
 
 /** 開いている曲の背景の動画（プレイで流す） */
