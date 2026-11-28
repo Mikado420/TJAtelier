@@ -58,6 +58,8 @@ const BLUR = 3;
 const BLUR_Q = 2;
 /** ぼかしで端が薄くならないよう、枠の外まで広げて描く幅（画面の px） */
 const BLUR_PAD = BLUR * 3;
+/** 動画用の画面の GOGO のあいだ、背景を暗くする濃さを何倍にするか */
+const GOGO_DIM = 0.3;
 
 export interface PlaySettings {
   speed: number;
@@ -537,6 +539,7 @@ export class PlayMode {
     this.result.classList.add('hidden');
     this.stopVideo();
     this.renderer.broadcast = this.broadcastOn;
+    this.gogoLit = false;
     this.applyVideo(false);
     this.resetRes();
     await prep;
@@ -658,6 +661,7 @@ export class PlayMode {
         this.canvasEl.style.visibility = '';
       }
       if (this.renderer.broadcast) this.bc.update(now);
+      this.watchGogo(course, now);
       const w = performance.now() - t0;
       P.frames++;
       P.work += w;
@@ -1024,6 +1028,10 @@ export class PlayMode {
   /** 背景の画像（読み込んだ絵と、16:9 の枠にぼかして暗くして描いた canvas） */
   private bgImg: HTMLImageElement | null = null;
   private bgCv: HTMLCanvasElement | null = null;
+  /** 動画用の画面で、背景の画像を暗くする黒い板（GOGO のあいだ薄くするため、絵に焼き込まない） */
+  private bgDim: HTMLElement | null = null;
+  /** 動画用の画面で、GOGO のあいだ背景を明るくしているか */
+  private gogoLit = false;
   /** いま出す絵（背景の画像。動画用の画面で背景の画像が無ければジャケット） */
   private bgImgUrl = '';
   private bgOwnUrl = '';
@@ -1052,6 +1060,10 @@ export class PlayMode {
       cv.setAttribute('aria-hidden', 'true');
       this.root.prepend(cv);
       this.bgCv = cv;
+      const dim = document.createElement('div');
+      dim.className = 'play-vdim hidden';
+      cv.after(dim);
+      this.bgDim = dim;
       const im = new Image();
       im.onload = () => { this.bgKey = ''; this.paintBgImg(); };
       this.bgImg = im;
@@ -1071,13 +1083,14 @@ export class PlayMode {
     const im = this.bgImg;
     if (!cv || cv.classList.contains('hidden')) return;
     const r = fit169({ x: 0, y: 0, w: this.root.clientWidth, h: this.root.clientHeight });
-    Object.assign(cv.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+    for (const el of [cv, this.bgDim]) if (el) Object.assign(el.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
     if (!im || !im.complete || !im.naturalWidth) return;
     // 画面の実際の細かさ（端末の画素・PC の拡大のぶん）で描く。大きすぎる画面では 3840 px までにする
     const q = Math.min(pixelRatio(), 3840 / Math.max(1, r.w));
     const w = Math.max(8, Math.round(r.w * q));
     const h = Math.max(8, Math.round(r.h * q));
-    const dim = 1 - this.dimOf(false);
+    // 動画用の画面では暗さを絵に焼き込まない（上の黒い板で暗くする）
+    const dim = this.renderer.broadcast ? 0 : 1 - this.dimOf(false);
     const key = `${this.bgImgUrl}|${w}x${h}|${dim}`;
     if (key === this.bgKey) return;
     this.bgKey = key;
@@ -1166,17 +1179,34 @@ export class PlayMode {
       if (this.vblurCv) this.vblurCv.width = this.vblurCv.height = 0;
       this.blurKey = '';
     }
+    this.bgDim?.classList.toggle('hidden', !img || !R.broadcast);
     if (v) {
       v.classList.toggle('hidden', !vmode);
       this.vdim?.classList.toggle('hidden', !vmode);
-      if (this.vdim) this.vdim.style.opacity = String(1 - this.dimOf(vmode === 'both' || vmode === 'bottom'));
       if (!vmode) v.pause();
     }
+    this.applyDim();
     if (R.videoMode !== mode) {
       R.videoMode = mode;
       if (resize) R.resize();
     }
     this.placeVideo();
+  }
+
+  /** 背景の動画・画像を暗くする板の濃さ（動画用の画面の GOGO のあいだは薄くして、背景を明るくする） */
+  private applyDim() {
+    const k = this.renderer.broadcast && this.gogoLit ? GOGO_DIM : 1;
+    const vm = this.videoMode;
+    if (this.vdim) this.vdim.style.opacity = String((1 - this.dimOf(vm === 'both' || vm === 'bottom')) * k);
+    if (this.bgDim) this.bgDim.style.opacity = String((1 - this.dimOf(false)) * k);
+  }
+
+  /** 動画用の画面: GOGO に入った・抜けたら、背景の明るさを変える */
+  private watchGogo(course: Course, now: number) {
+    const on = this.renderer.broadcast && !this.calibrating && course.gogo.some(([a, b]) => now >= a && now < b);
+    if (on === this.gogoLit) return;
+    this.gogoLit = on;
+    this.applyDim();
   }
 
   /** 下に出す動画の縁取りの太さ（画面の px） */
