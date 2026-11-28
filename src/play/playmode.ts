@@ -58,8 +58,8 @@ const BLUR = 3;
 const BLUR_Q = 2;
 /** ぼかしで端が薄くならないよう、枠の外まで広げて描く幅（画面の px） */
 const BLUR_PAD = BLUR * 3;
-/** 動画用の画面の GOGO のあいだ、背景を暗くする濃さを何倍にするか */
-const GOGO_DIM = 0.3;
+/** 動画用の画面の GOGO のあいだ、背景の明るさ（明るさの設定）を何倍にするか */
+const GOGO_BRIGHT = 1.5;
 
 export interface PlaySettings {
   speed: number;
@@ -1193,12 +1193,13 @@ export class PlayMode {
     this.placeVideo();
   }
 
-  /** 背景の動画・画像を暗くする板の濃さ（動画用の画面の GOGO のあいだは薄くして、背景を明るくする） */
+  /** 背景の動画・画像を暗くする板の濃さ（動画用の画面の GOGO のあいだは、明るさの設定の 1.5 倍の明るさにする） */
   private applyDim() {
-    const k = this.renderer.broadcast && this.gogoLit ? GOGO_DIM : 1;
+    const lit = this.renderer.broadcast && this.gogoLit;
+    const dim = (bottom: boolean) => 1 - Math.min(1, this.dimOf(bottom) * (lit ? GOGO_BRIGHT : 1));
     const vm = this.videoMode;
-    if (this.vdim) this.vdim.style.opacity = String((1 - this.dimOf(vm === 'both' || vm === 'bottom')) * k);
-    if (this.bgDim) this.bgDim.style.opacity = String((1 - this.dimOf(false)) * k);
+    if (this.vdim) this.vdim.style.opacity = String(dim(vm === 'both' || vm === 'bottom'));
+    if (this.bgDim) this.bgDim.style.opacity = String(dim(false));
   }
 
   /** 動画用の画面: GOGO に入った・抜けたら、背景の明るさを変える */
