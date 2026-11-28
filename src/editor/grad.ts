@@ -1,4 +1,4 @@
-import { measures, measureScale, TPB, type ECourse, type EEvent } from '../chart/model';
+import { branchPath, measures, measureScale, TPB, type ECourse, type EEvent } from '../chart/model';
 
 /**
  * グラデ（#SCROLL を少しずつ変えて、音符の見た目を滑らかに加速・減速させる）。
@@ -26,6 +26,9 @@ import { measures, measureScale, TPB, type ECourse, type EEvent } from '../chart
  *             （開始値と終了値が同じでも、BPM が変わると等速にならない）
  *
  * 前と同じ値の #SCROLL は置かない（始点には必ず置く）
+ *
+ * 譜面分岐の区間にかかるときは、玄人・達人の音符にもかける（applyGradBranches）。
+ * 個数基準の進み具合は、普通の譜面の対象で決め、玄人・達人の音符はその間を時刻（tick）で割り振る
  * 小節線（#MEASURE で長さが変わっても同じ）はいつも対象に入れる。
  *
  * グラデの設定はエディタの中だけで覚えておき、.tja には書き込まない（書き出すのは普通の #SCROLL）。
@@ -107,17 +110,33 @@ export function timeFn(c: ECourse, baseBpm: number) {
   };
 }
 
-/** 各位置の進み具合（0 以上 1 未満）。秒数の幅が 0 以下のときは数で決める */
-function gradProgress(c: ECourse, g: Grad, ts: number[], baseBpm: number): number[] {
-  const n = ts.length;
+/**
+ * 各位置の進み具合（0 以上 1 未満）。秒数の幅が 0 以下のときは数で決める。
+ * main: 個数で決めるときの基準の譜面（玄人・達人で通した譜面 c の進み具合を、普通の譜面の対象の間で割り振る）
+ */
+function gradProgress(c: ECourse, g: Grad, ts: number[], baseBpm: number, main: ECourse = c): number[] {
   if (g.basis === 'time') {
     const time = timeFn(c, baseBpm);
     const t0 = time(g.start);
     const span = time(g.end) - t0;
     if (span > 0) return ts.map((tick) => Math.min(1, Math.max(0, (time(tick) - t0) / span)));
   }
-  return ts.map((_, k) => k / n);
+  if (main === c) return ts.map((_, k) => k / ts.length);
+  const base = gradTargets(main, g);
+  const n = base.length;
+  return ts.map((tick) => {
+    let i = -1;
+    for (let k = 0; k < n && base[k] <= tick; k++) i = k;
+    if (i < 0) return 0;
+    if (base[i] === tick) return i / n;
+    const a = base[i], b = i + 1 < n ? base[i + 1] : g.end;
+    return (i + (b > a ? (tick - a) / (b - a) : 0)) / n;
+  });
 }
+
+/** 範囲の中の、譜面分岐の区間の始まり・終わり（そこを過ぎたら、同じ値でも #SCROLL を置き直す） */
+const branchBounds = (main: ECourse, g: Grad) =>
+  (main.branches ?? []).flatMap((b) => [b.start, b.end]).filter((t) => t > g.start && t <= g.end);
 
 /** 値を置く位置（tick、重なりなし・昇順） */
 export function gradTargets(c: ECourse, g: Pick<Grad, 'start' | 'end' | 'speed' | 'barlines' | 'holes'>): number[] {
@@ -143,10 +162,10 @@ const round = (v: number, digits: number) => {
 const interp = (mode: Grad['mode'], a: number, b: number, t: number) =>
   mode === 'geometric' ? a * Math.pow(b / a, t) : a + (b - a) * t;
 
-/** このグラデで置く #SCROLL（終点の終了値を含む） */
-export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: number; value: number }[] {
+/** このグラデで置く #SCROLL（終点の終了値を含む）。main: c が玄人・達人で通した譜面のときの、もとの譜面 */
+export function gradScrolls(c: ECourse, g: Grad, baseBpm: number, main: ECourse = c): { tick: number; value: number }[] {
   const ts = gradTargets(c, g);
-  const p = gradProgress(c, g, ts, baseBpm);
+  const p = gradProgress(c, g, ts, baseBpm, main);
   const out: { tick: number; value: number }[] = [];
   if (isVisual(g.speed)) {
     // 見た目の速さ（BPM × SCROLL）を滑らかにする
@@ -169,7 +188,7 @@ export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: numbe
     for (const [a] of holes) out.push({ tick: a, value: before });
     out.sort((x, y) => x.tick - y.tick);
   }
-  return dropSame(c, g, out, new Set(holes.map(([a]) => a)));
+  return dropSame(c, g, out, new Set(holes.map(([a]) => a)), branchBounds(main, g));
 }
 
 /**
@@ -177,7 +196,7 @@ export function gradScrolls(c: ECourse, g: Grad, baseBpm: number): { tick: numbe
  * 始点と、別の段に出ている所の頭には必ず置く。別の段に出ている所を抜けた後と、
  * 単体で置いた #SCROLL（pin）で値が変わった後は、同じ値でも置き直す
  */
-function dropSame(c: ECourse, g: Grad, out: { tick: number; value: number }[], heads: Set<number>) {
+function dropSame(c: ECourse, g: Grad, out: { tick: number; value: number }[], heads: Set<number>, bounds: number[]) {
   const pins = new Map<number, number>();
   for (const e of c.events) if (e.kind === 'scroll' && isPin(e, g)) pins.set(e.tick, e.value);
   const pinTicks = [...pins.keys()].sort((a, b) => a - b);
@@ -187,7 +206,8 @@ function dropSame(c: ECourse, g: Grad, out: { tick: number; value: number }[], h
   let prev = -Infinity;
   for (const s of out) {
     while (pi < pinTicks.length && pinTicks[pi] < s.tick) cur = pins.get(pinTicks[pi++])!;
-    const left = (g.holes ?? []).some(([, b]) => b > prev && b <= s.tick);
+    // 別の段に出ている所・分岐の区間の始まりと終わりを過ぎた所
+    const left = (g.holes ?? []).some(([, b]) => b > prev && b <= s.tick) || bounds.some((b) => b > prev && b <= s.tick);
     prev = s.tick;
     if (pins.has(s.tick)) {
       // pin の位置にはグラデの値を置かない（applyGrad が外す）が、ほかの確かめ用に残す
@@ -210,30 +230,62 @@ export const isPin = (e: EEvent, g: Grad) => e.kind === 'scroll' && !!e.pin && e
  * 範囲 [start, end] の #SCROLL を、このグラデの値で置き直す。
  * 範囲の中に単体で置いた #SCROLL（pin）はそのまま残し、その位置にはグラデの値を置かない
  */
-export function applyGrad(c: ECourse, g: Grad, baseBpm: number) {
+export function applyGrad(c: ECourse, g: Grad, baseBpm: number, main: ECourse = c) {
   // 別の段に出ている所の #SCROLL はそのまま（その頭にグラデが置き直した #SCROLL は置き直す）
   const keepInHole = (e: EEvent) => inGradHole(g, e.tick) && !(g.holes ?? []).some(([a]) => a === e.tick);
   c.events = c.events.filter((e) => !(e.kind === 'scroll' && e.tick >= g.start && e.tick <= g.end) || isPin(e, g) || keepInHole(e));
   const pinned = new Set(c.events.filter((e) => isPin(e, g)).map((e) => e.tick));
-  for (const s of gradScrolls(c, g, baseBpm)) if (!pinned.has(s.tick)) c.events.push({ tick: s.tick, kind: 'scroll', value: s.value });
+  for (const s of gradScrolls(c, g, baseBpm, main)) if (!pinned.has(s.tick)) c.events.push({ tick: s.tick, kind: 'scroll', value: s.value });
+}
+
+/** グラデの範囲にかかる譜面分岐の区間と、そこで玄人・達人の #SCROLL を入れる所 */
+function branchSecs(c: ECourse, g: Grad) {
+  return (c.branches ?? []).filter((b) => b.start < b.end && b.start <= g.end && b.end > g.start);
+}
+const inSec = (b: { start: number; end: number }, g: Grad, t: number) => t >= b.start && t < b.end && t >= g.start && t <= g.end;
+
+/**
+ * 譜面分岐の区間の、玄人・達人の音符にもグラデをかける（applyGrad の後に呼ぶ）。
+ * それぞれの分岐で通した譜面にグラデを当て、区間の中の #SCROLL を、その分岐の命令に入れる
+ */
+export function applyGradBranches(c: ECourse, g: Grad, baseBpm: number) {
+  const secs = branchSecs(c, g);
+  if (!secs.length) return;
+  for (const k of [1, 2] as const) {
+    const p = branchPath(c, k);
+    applyGrad(p, g, baseBpm, c);
+    for (const b of secs) {
+      const part = k === 1 ? b.e : b.m;
+      const mine = (e: EEvent) => e.kind === 'scroll' && inSec(b, g, e.tick);
+      part.events = [...part.events.filter((e) => !mine(e)), ...p.events.filter(mine)];
+    }
+  }
 }
 
 /**
  * グラデの値と違う #SCROLL（値が違う・グラデが置かない位置にある）を、単体で置いたもの（pin）にする
  * （TJA のテキストから読み直したとき用）
  */
-export function markPins(c: ECourse, g: Grad, baseBpm: number, checkEnd = true) {
-  const ws = gradScrolls(c, g, baseBpm);
+export function markPins(c: ECourse, g: Grad, baseBpm: number, checkEnd = true, main: ECourse = c, only?: (tick: number) => boolean) {
+  const ws = gradScrolls(c, g, baseBpm, main);
   const want = new Map(ws.map((s) => [s.tick, s.value]));
   for (const e of c.events) {
     // 終点で次のグラデが始まるときは、終点の値は次のグラデのもの（そちらで確かめる）
-    if (e.kind !== 'scroll' || e.tick < g.start || e.tick > g.end || (e.tick === g.end && !checkEnd)) continue;
+    if (e.kind !== 'scroll' || e.tick < g.start || e.tick > g.end || (e.tick === g.end && !checkEnd) || (only && !only(e.tick))) continue;
     let w = want.get(e.tick);
     // グラデが置かない位置でも、そこでのグラデの値と同じなら単体で置いたものではない
     // （前は音符ごとに同じ値を置いていたので、前に保存した譜面に残っている）
     if (w === undefined && !inGradHole(g, e.tick)) for (const s of ws) if (s.tick < e.tick) w = s.value;
     if (w === undefined || Math.abs(e.value - w) >= 1e-9) e.pin = true;
   }
+}
+
+/** 玄人・達人の区間の中の #SCROLL のうち、グラデの値と違うものを、単体で置いたもの（pin）にする（TJA から読み直したとき用） */
+export function markPinsBranches(c: ECourse, g: Grad, baseBpm: number, checkEnd = true) {
+  const secs = branchSecs(c, g);
+  if (!secs.length) return;
+  // branchPath の命令は、もとの分岐の命令と同じもの（pin の印がそのまま付く）
+  for (const k of [1, 2] as const) markPins(branchPath(c, k), g, baseBpm, checkEnd, c, (t) => secs.some((b) => inSec(b, g, t)));
 }
 
 /**

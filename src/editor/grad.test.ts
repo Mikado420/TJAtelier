@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTJA } from '../chart/tja';
 import { writeTJA } from '../chart/tjaWrite';
-import { TPB } from '../chart/model';
+import { branchPath, TPB, type ECourse } from '../chart/model';
 import { Editor } from './editor';
 
 const M = TPB * 4;
@@ -202,5 +202,43 @@ describe('グラデ', () => {
     expect(ed.course.events.some((e) => e.kind === 'scroll' && e.pin)).toBe(false);
     ed.setGrad({ ...ed.course.grads![1], from: 5 }, ed.course.grads![1]);
     expect(ed.course.events.filter((e) => e.kind === 'scroll' && e.tick === M).map((e) => (e as { value: number }).value)).toEqual([5]);
+  });
+});
+
+describe('グラデと譜面分岐', () => {
+  const T = 'TITLE:t\nBPM:120\nCOURSE:Oni\nLEVEL:1\n#START\n1111,\n#BRANCHSTART p,10,20\n#N\n1111,\n#E\n11111111,\n#M\n1010101010101010,\n#BRANCHEND\n1111,\n1111,\n#END\n';
+  // その音符で効いている #SCROLL
+  const eff = (c: ECourse, tick: number) => { let v = NaN; for (const e of [...c.events].sort((a, b) => a.tick - b.tick)) if (e.kind === 'scroll' && e.tick <= tick) v = e.value; return v; };
+  const effs = (c: ECourse, a: number, b: number) => c.notes.filter((n) => n.tick >= a && n.tick < b).sort((x, y) => x.tick - y.tick).map((n) => eff(c, n.tick));
+  for (const basis of ['time', 'count'] as const) {
+    it(`玄人・達人の区間の音符にもかかる（${basis === 'time' ? '秒数' : '個数'}基準）。区間の後は 3 つとも同じ値`, () => {
+      const ed = new Editor(parseTJA(T));
+      ed.setGrad({ start: 0, end: M * 4, from: 1, to: 2, mode: 'linear', digits: 3, basis });
+      const c = ed.mainCourse;
+      for (const k of [1, 2] as const) {
+        const p = branchPath(c, k);
+        const sec = effs(p, M, M * 2);
+        // 区間の音符ごとに増えていく
+        for (let i = 1; i < sec.length; i++) expect(sec[i]).toBeGreaterThan(sec[i - 1]);
+        expect(sec[0]).toBeGreaterThanOrEqual(1.2);
+        // 区間の後は普通と同じ
+        expect(effs(p, M * 2, M * 4)).toEqual(effs(c, M * 2, M * 4));
+      }
+    });
+  }
+  it('TJA を書き戻しても、グラデと玄人・達人の #SCROLL が残る。玄人に単体で置いた #SCROLL も残る', () => {
+    const ed = new Editor(parseTJA(T));
+    ed.setGrad({ start: 0, end: M * 4, from: 1, to: 2, mode: 'linear', digits: 3, basis: 'time' });
+    ed.setBranch(1);
+    ed.addEvent({ tick: M + M / 8, kind: 'scroll', value: 9 });
+    const before = writeTJA(ed.chart);
+    expect(before).toContain('#SCROLL 9');
+    ed.replaceChart(parseTJA(before));
+    expect(ed.mainCourse.grads?.length).toBe(1);
+    // グラデを置き直しても、同じ .tja になる（単体の 9 も残る）
+    ed.setBranch(0);
+    const g = ed.mainCourse.grads![0];
+    ed.setGrad({ ...g }, g);
+    expect(writeTJA(ed.chart)).toBe(before);
   });
 });

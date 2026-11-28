@@ -4,7 +4,7 @@ import {
 } from '../chart/model';
 import type { NoteType } from '../chart/types';
 import type { AudioFile } from '../io/load';
-import { applyGrad, gradMatches, markPins, type Grad } from './grad';
+import { applyGrad, applyGradBranches, gradMatches, markPins, markPinsBranches, type Grad } from './grad';
 import { DelayLanes } from './delayLanes';
 import { applySim, flipNotes, tileClip } from './gimmick';
 
@@ -370,7 +370,10 @@ export class Editor {
       if (!c.grads?.length) continue;
       sortCourse(c);
       setGradHoles(this.chart, c);
-      for (const g of c.grads) applyGrad(c, g, this.chart.bpm);
+      for (const g of c.grads) {
+        applyGrad(c, g, this.chart.bpm);
+        applyGradBranches(c, g, this.chart.bpm);
+      }
     }
   }
 
@@ -395,7 +398,11 @@ export class Editor {
         const holed = old.grads.map((g) => withHoles(g, lanes));
         const keep = holed.filter((g) => gradMatches(c, g, chart.bpm, !holed.some((o) => o !== g && o.start === g.end)));
         if (keep.length) c.grads = keep.map((g) => ({ ...g }));
-        for (const g of c.grads ?? []) markPins(c, g, chart.bpm, !c.grads!.some((o) => o !== g && o.start === g.end));
+        for (const g of c.grads ?? []) {
+          const checkEnd = !c.grads!.some((o) => o !== g && o.start === g.end);
+          markPins(c, g, chart.bpm, checkEnd);
+          markPinsBranches(c, g, chart.bpm, checkEnd);
+        }
       }
       this.chart = chart;
       const i = chart.courses.findIndex((c) => c.name === name);
