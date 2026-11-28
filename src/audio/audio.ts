@@ -556,9 +556,9 @@ export class AudioEngine {
     const g = this.ctx.createGain();
     const at = this.ctx.currentTime + 0.02;
     const vol = c.gain * this.mix.music;
-    // 頭を少しずつ大きくする（いきなり大きな音にならないように）
+    // フェードインはしない（頭の 0.01 秒だけ、プチッと鳴らないように立ち上げる）
     g.gain.setValueAtTime(0, at);
-    g.gain.linearRampToValueAtTime(vol, at + 0.4);
+    g.gain.linearRampToValueAtTime(vol, at + 0.01);
     src.connect(g).connect(this.limiter);
     const off = Math.min(Math.max(0, from), Math.max(0, c.buf.duration - 0.1));
     src.start(at, off);
