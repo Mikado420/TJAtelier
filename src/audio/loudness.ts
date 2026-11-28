@@ -53,3 +53,57 @@ export function oggSampleRate(data: ArrayBuffer): number {
   }
   return 0;
 }
+
+/**
+ * 曲の聞こえる大きさ（大きい所）。人の耳の感じ方に合わせた重み（BS.1770 の K 特性: 低音を軽く、高音を少し重く数える）を掛け、
+ * 0.4 秒ごと（0.1 秒ずつずらす）に、左右それぞれの強さの平均を求め、大きい側から 1 割の所の大きさを返す（RMS と同じ単位）。
+ * 低音の多い曲を大きいと見すぎない（前の測り方は低音も高音も同じに数えていた）
+ */
+export function musicLoudness(chs: Float32Array[], sr: number): number {
+  const n = chs[0]?.length ?? 0;
+  const hop = Math.max(1, Math.round(sr * 0.1));
+  const nb = Math.floor(n / hop);
+  if (nb < 1 || !chs.length) return 0;
+  const sums = new Float64Array(nb);
+  const [s1, s2] = kWeight(sr);
+  for (const d of chs) {
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0, z1 = 0, z2 = 0;
+    for (let i = 0; i < nb * hop; i++) {
+      const x = d[i];
+      const y = s1[0] * x + s1[1] * x1 + s1[2] * x2 - s1[3] * y1 - s1[4] * y2;
+      x2 = x1; x1 = x;
+      const z = y - 2 * y1 + y2 - s2[3] * z1 - s2[4] * z2;
+      y2 = y1; y1 = y;
+      z2 = z1; z1 = z;
+      sums[(i / hop) | 0] += z * z;
+    }
+  }
+  // 0.4 秒 = 0.1 秒の 4 つ分
+  const W = 4;
+  const nw = nb - W + 1;
+  if (nw < 1) return Math.sqrt(sums.reduce((a, b) => a + b, 0) / (nb * hop * chs.length));
+  const vals = new Float64Array(nw);
+  let acc = 0;
+  for (let k = 0; k < nb; k++) {
+    acc += sums[k];
+    if (k >= W) acc -= sums[k - W];
+    if (k >= W - 1) vals[k - W + 1] = acc / (W * hop * chs.length);
+  }
+  vals.sort();
+  return Math.sqrt(vals[Math.floor(nw * 0.9)]);
+}
+
+/** K 特性の 2 つのフィルター（高い音を少し上げる・とても低い音を切る）の係数 [b0, b1, b2, a1, a2] */
+function kWeight(fs: number): [number[], number[]] {
+  let K = Math.tan((Math.PI * 1681.974450955533) / fs);
+  const Q1 = 0.7071752369554196;
+  const Vh = Math.pow(10, 3.999843853973347 / 20);
+  const Vb = Math.pow(Vh, 0.4996667741545416);
+  let a0 = 1 + K / Q1 + K * K;
+  const s1 = [(Vh + (Vb * K) / Q1 + K * K) / a0, (2 * (K * K - Vh)) / a0, (Vh - (Vb * K) / Q1 + K * K) / a0, (2 * (K * K - 1)) / a0, (1 - K / Q1 + K * K) / a0];
+  K = Math.tan((Math.PI * 38.13547087602444) / fs);
+  const Q2 = 0.5003270373238773;
+  a0 = 1 + K / Q2 + K * K;
+  const s2 = [1, -2, 1, (2 * (K * K - 1)) / a0, (1 - K / Q2 + K * K) / a0];
+  return [s1, s2];
+}

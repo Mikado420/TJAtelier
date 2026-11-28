@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boostWithLimiter, oggSampleRate } from './loudness';
+import { boostWithLimiter, musicLoudness, oggSampleRate } from './loudness';
 
 describe('書き出しの音量', () => {
   it('小さい音は、ちょうど 1.5 倍になる', () => {
@@ -31,3 +31,25 @@ describe('書き出しの音量', () => {
     expect(oggSampleRate(new Uint8Array(10).buffer)).toBe(0);
   });
 });
+
+describe('曲の聞こえる大きさ（musicLoudness）', () => {
+  const sine = (f: number, a: number, sr = 48000, sec = 3) => Float32Array.from({ length: sr * sec }, (_, i) => a * Math.sin((2 * Math.PI * f * i) / sr));
+  it('997Hz・振幅 1 の正弦波（左右とも）は 0 LUFS（BS.1770 の基準）', () => {
+    const v = musicLoudness([sine(997, 1), sine(997, 1)], 48000);
+    const lufs = -0.691 + 10 * Math.log10(2 * v * v);
+    expect(Math.abs(lufs)).toBeLessThan(0.05);
+  });
+  it('同じ強さなら、低い音（60Hz）は 1000Hz より小さく測る', () => {
+    const lo = musicLoudness([sine(60, 0.5)], 44100);
+    const hi = musicLoudness([sine(1000, 0.5)], 44100);
+    expect(20 * Math.log10(hi / lo)).toBeGreaterThan(0.8);
+  });
+  it('静かな前半と大きいサビ: 大きい所（大きい側から 1 割）の大きさを返す', () => {
+    const q = sine(1000, 0.05, 48000, 9), l = sine(1000, 0.5, 48000, 3);
+    const both = new Float32Array(q.length + l.length);
+    both.set(q);
+    both.set(l, q.length);
+    expect(musicLoudness([both], 48000) / musicLoudness([l], 48000)).toBeCloseTo(1, 2);
+  });
+});
+

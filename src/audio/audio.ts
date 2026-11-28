@@ -2,6 +2,8 @@
  * Web Audio まわり。ゲーム内の時刻は「曲の再生位置（秒）」で統一し、
  * AudioContext.currentTime から計算するので映像と音がずれにくい。
  */
+import { musicLoudness } from './loudness';
+
 /** 打音の種類（balloon = 風船が割れた音） */
 export type HitSound = 'don' | 'ka' | 'balloon';
 
@@ -58,9 +60,19 @@ export class AudioEngine {
   // ---------- 音量（自動で揃える） ----------
   // 音源・打音・メトロノームの「聞こえる大きさ」を測って、どれも同じ大きさ（TARGET）になるように音量を決め、
   // そこに設定の比率（初期値 1 : 1 : 1.2）を掛ける。
+  // 曲（試聴・書き出しも）は、耳の感じ方に合わせた測り方（musicLoudness）で MUSIC_TARGET にそろえる
 
   /** 揃える先の大きさ（短い区間の RMS） */
   private static readonly TARGET = 0.2;
+  /**
+   * 曲を揃える先の大きさ（musicLoudness の値。大きい所が -12.5 LUFS ほど）。
+   * 前の測り方で揃えたときの曲の平均と同じ大きさなので、打音との釣り合いは前と同じ
+   */
+  private static readonly MUSIC_TARGET = 0.1807;
+  /** 曲の聞こえる大きさ（musicLoudness） */
+  private static musicLevelOf(buf: AudioBuffer) {
+    return musicLoudness(Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i)), buf.sampleRate);
+  }
   private mix = { music: 1, hit: 1, metro: 1.2, ui: 1 };
   private musicLevel = 0;
   private hitLevel: Record<HitSound, number> = { don: 0, ka: 0, balloon: 0 };
@@ -189,7 +201,7 @@ export class AudioEngine {
 
   private applyMix() {
     const T = AudioEngine.TARGET;
-    const music = this.musicLevel > 0 ? Math.min(6, T / this.musicLevel) : 0.8;
+    const music = this.musicLevel > 0 ? Math.min(6, AudioEngine.MUSIC_TARGET / this.musicLevel) : 0.8;
     this.musicGain.gain.value = music * this.mix.music;
     this.sfxGain.gain.value = this.mix.hit;
     this.uiGain.gain.value = 0.6 * this.mix.ui;
@@ -233,14 +245,14 @@ export class AudioEngine {
 
   /**
    * 書き出す音源（.zip の .ogg）に掛ける倍率。
-   * 音源と打音（ドン）を同じ大きさに揃えたうえで、設定の比率（音源 : 打音）になるようにする。
-   * 書き出した先では打音はそのままの大きさで鳴るので、「打音の大きさ ÷ 音源の大きさ × 音源の比率 ÷ 打音の比率」倍にする
+   * 音源と打音（ドン）をアプリで鳴らすときと同じ釣り合いにしたうえで、設定の比率（音源 : 打音）になるようにする。
+   * 書き出した先では打音はそのままの大きさで鳴るので、「アプリでの音源の倍率 ÷ 打音の倍率 × 音源の比率 ÷ 打音の比率」倍にする
    */
   exportGain(buf: AudioBuffer, volMusic: number, volHit: number): number {
-    const lm = AudioEngine.level(buf, false);
+    const lm = AudioEngine.musicLevelOf(buf);
     const lh = AudioEngine.level(this.customHit.don ?? this.builtinHit('don'), true);
     if (!(lm > 0) || !(lh > 0) || !(volHit > 0)) return 1;
-    return (lh / lm) * (volMusic / volHit);
+    return ((AudioEngine.MUSIC_TARGET / lm) / (AudioEngine.TARGET / lh)) * (volMusic / volHit);
   }
 
   private measureHit(kind: HitSound) {
@@ -270,7 +282,7 @@ export class AudioEngine {
 
   private setMusic(m: AudioBuffer | null) {
     this.music = m;
-    this.musicLevel = m ? AudioEngine.level(m, false) : 0;
+    this.musicLevel = m ? AudioEngine.musicLevelOf(m) : 0;
     this.applyMix();
   }
 
@@ -537,8 +549,8 @@ export class AudioEngine {
     this.pvBusy = job;
     const buf = await job;
     if (this.pvWant !== key) throw new Error('skip');
-    const lv = AudioEngine.level(buf, false);
-    this.pvCache = { key, buf, gain: lv > 0 ? Math.min(6, AudioEngine.TARGET / lv) : 0.8 };
+    const lv = AudioEngine.musicLevelOf(buf);
+    this.pvCache = { key, buf, gain: lv > 0 ? Math.min(6, AudioEngine.MUSIC_TARGET / lv) : 0.8 };
     return buf;
   }
 
